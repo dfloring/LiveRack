@@ -1,0 +1,13 @@
+name: Fetch licence text (temporary)
+on:
+  push:
+    paths: ['.github/workflows/fetch-license.yml']
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsSL https://www.gnu.org/licenses/agpl-3.0.txt -o agpl-3.0.txt && wc -l agpl-3.0.txt && sha256sum agpl-3.0.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agpl
+          path: agpl-3.0.txt
