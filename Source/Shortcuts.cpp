@@ -37,7 +37,7 @@ namespace Shortcuts
 
         // Cmd+Q, W, H, M, Tab, Space, comma, and Cmd+C/V/X/Z/A for editing text
         for (auto c : { 'q', 'w', 'h', 'm', 'c', 'v', 'x', 'z', 'a', ',' })
-            if (juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) k.getKeyCode()) == c)
+            if (juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) k.getKeyCode()) == (juce::juce_wchar) c)
                 return true;
 
         return k.getKeyCode() == juce::KeyPress::tabKey || k.getKeyCode() == juce::KeyPress::spaceKey;
