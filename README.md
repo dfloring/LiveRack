@@ -146,3 +146,11 @@ Settings live in `~/Library/Application Support/LiveRack`: `audio-drivers.xml`, 
 
 - Run plugins in a separate process so one crashing plugin can't take the engine down
 - Split engine and UI over the network for a separate DSP server
+
+## Licence
+
+Copyright (C) 2026 Daniel Floring.
+
+LiveRack is free software under the **GNU Affero General Public License v3** (see [LICENSE](LICENSE)): you can use, study, change and share it. If you share a changed version, you share its source under the same licence. It comes with no warranty. LiveRack is built with [JUCE](https://juce.com), used under JUCE's AGPLv3 option, and hosts VST3 plugins through the VST 3 SDK (MIT).
+
+The Companion module in `companion-module-liverack-host/` is under the **MIT License** (see its LICENSE).
