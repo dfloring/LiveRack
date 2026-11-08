@@ -1,0 +1,955 @@
+#include "RackStripsView.h"
+#include "GainReduction.h"
+#include "PluginLibrary.h"
+#include "Theme.h"
+#include <map>
+
+namespace
+{
+    const juce::Colour stripBack   { 0xff2b3036 };
+    const juce::Colour slotBack    { 0xff3a4149 };
+    const juce::Colour meterBack   { 0xff1b1f23 };
+    const juce::Colour bypassOn    { 0xffe08a2c };
+    const juce::Colour safeOn      { 0xff3fa66b };
+    const juce::Colour buttonOff   { 0xff3a4149 };
+
+    juce::String arrow() { return juce::String (juce::CharPointer_UTF8 ("\xe2\x86\x92")); }
+
+    juce::String chText (int c) { return c < 0 ? juce::String ("-") : juce::String (c + 1); }
+
+    juce::String channelText (const int* ch, bool stereo)
+    {
+        if (! stereo)
+            return chText (ch[0]);
+        if (ch[0] >= 0 && ch[1] == ch[0] + 1)
+            return chText (ch[0]) + "-" + chText (ch[1]);
+        return chText (ch[0]) + "/" + chText (ch[1]);
+    }
+
+    // Colour swatches inside a popup menu
+    class SwatchGrid : public juce::PopupMenu::CustomComponent
+    {
+    public:
+        SwatchGrid (int current, std::function<void (int)> cb) : CustomComponent (false), selected (current), onPick (std::move (cb)) {}
+
+        void getIdealSize (int& w, int& h) override { w = 4 * 44 + 12; h = 2 * 44 + 12 + 34; }
+
+        juce::Rectangle<int> cell (int i) const { return { 6 + (i % 4) * 44, 6 + (i / 4) * 44, 40, 40 }; }
+        juce::Rectangle<int> autoCell() const   { return { 6, 6 + 2 * 44 + 2, 4 * 44 - 4, 30 }; }
+
+        void paint (juce::Graphics& g) override
+        {
+            for (int i = 0; i < RackStripsView::numColours; ++i)
+            {
+                auto r = cell (i).toFloat();
+                g.setColour (RackStripsView::colourForIndex (i));
+                g.fillRoundedRectangle (r.reduced (3.0f), 7.0f);
+                if (i == selected)
+                {
+                    g.setColour (juce::Colours::white);
+                    g.drawRoundedRectangle (r.reduced (1.0f), 8.0f, 2.0f);
+                }
+            }
+
+            auto a = autoCell().toFloat();
+            g.setColour (selected < 0 ? juce::Colour (0xff24364c) : juce::Colour (0xff2b3036));
+            g.fillRoundedRectangle (a, 6.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.85f));
+            g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+            g.drawText ("Automatic", a.toNearestInt(), juce::Justification::centred);
+        }
+
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            int pick = -2;
+            for (int i = 0; i < RackStripsView::numColours; ++i)
+                if (cell (i).contains (e.getPosition())) pick = i;
+            if (autoCell().contains (e.getPosition())) pick = -1;
+
+            if (pick != -2)
+            {
+                auto cb = onPick;
+                juce::PopupMenu::dismissAllActiveMenus();
+                if (cb) cb (pick);
+            }
+        }
+
+    private:
+        int selected;
+        std::function<void (int)> onPick;
+    };
+}
+
+juce::Colour RackStripsView::colourForIndex (int index)
+{
+    static const juce::uint32 palette[numColours] = { 0xff4a90d9, 0xffe0a63a, 0xff52b788, 0xffb07cd8,
+                                                      0xff3bb3c3, 0xffe06c6c, 0xffd4c34a, 0xffe58fb8 };
+    return juce::Colour (palette[(size_t) juce::jmax (0, index) % numColours]);
+}
+
+juce::String RackStripsView::colourName (int index)
+{
+    static const char* names[numColours] = { "Blue", "Amber", "Green", "Purple", "Teal", "Red", "Yellow", "Pink" };
+    return names[(size_t) juce::jmax (0, index) % numColours];
+}
+
+juce::Colour RackStripsView::colourFor (const RackEngine& engine, int rack)
+{
+    return colourForIndex (engine.getRackConfig (rack).effectiveColour (rack));
+}
+
+//==============================================================================
+class RackStripsView::Content : public juce::Component,
+                                public juce::DragAndDropTarget
+{
+public:
+    Content (RackStripsView& o, RackEngine& e) : owner (o), engine (e) {}
+
+    // Drag and drop of plugins
+    int dragFromRack = -1, dragFromSlot = -1;
+    bool dragStarted = false;
+    int dropRack = -1, dropIndex = -1;
+
+    static constexpr int stripWidth = 160, gap = 10, margin = 8, minRowHeight = 380, maxRows = 3;
+
+    bool stackRows = true;
+    int rows = 1, cols = 1;
+
+    // Decide the grid for the current number of racks and available height
+    void updateGrid (int availableWidth, int availableHeight)
+    {
+        const int cells = count() + 1; // +1 for the "Add Rack" strip
+        const int fitCols = juce::jmax (1, (availableWidth - 2 * margin + gap) / (stripWidth + gap));
+        rows = 1;
+
+        // Only stack when the racks don't already fit across, and only as
+        // many rows as the height allows
+        if (stackRows && cells > fitCols)
+        {
+            const int rowsByHeight = juce::jlimit (1, maxRows, (availableHeight - 2 * margin + gap) / (minRowHeight + gap));
+            rows = juce::jmin (rowsByHeight, (cells + fitCols - 1) / fitCols);
+        }
+
+        cols = (cells + rows - 1) / rows;
+    }
+    static constexpr int headerH = 34, badgeH = 28, ioH = 22, slotH = 28, slotGap = 4, footerH = 26, latencyH = 18, meterW = 5;
+
+    int selectedRack = -1, selectedSlot = -1;
+    std::vector<std::array<float, 2>> levels; // per rack: input, output
+
+    PluginLibrary* library = nullptr;
+
+    // Gain-reduction state per plugin (cleared whenever racks change)
+    struct SlotMeter
+    {
+        bool probed = false;
+        GainReduction::Probe probe;
+        bool estimateAllowed = false;
+        float inEnv = 0.0f, outEnv = 0.0f; // level into / out of the plugin
+        float gr = 0.0f;                   // shown value, dB (or GainReduction::muted)
+        bool show = false, estimated = false;
+    };
+    std::map<juce::AudioProcessor*, SlotMeter> slotMeters;
+
+    SlotMeter& meterFor (juce::AudioPluginInstance& plugin, int rack, int slot)
+    {
+        auto& m = slotMeters[&plugin];
+
+        if (! m.probed)
+        {
+            const auto desc = engine.getSlotDescription (rack, slot);
+            const auto key = PluginLibrary::familyKey (desc);
+            const int userIndex = library != nullptr ? library->getGainReductionParameterOverride (key) : -1;
+
+            m.probe = GainReduction::probe (plugin, userIndex);
+            m.estimateAllowed = library != nullptr && library->getShowEstimatedGR (key, library->categoryFor (desc));
+            m.probed = true;
+        }
+
+        return m;
+    }
+
+    struct Layout
+    {
+        juce::Rectangle<int> strip, header, chBadge, io, addRow, bypass, safe, latency, meterIn, meterOut;
+        juce::Rectangle<int> formatBadge, groupBadge, safeBadge, swatch;
+        std::vector<juce::Rectangle<int>> slots;
+        bool overflow = false;
+    };
+
+    int contentWidth() const { return margin * 2 + cols * (stripWidth + gap); }
+
+    // The racks shown (the current page), in order
+    std::vector<int> order;
+    static constexpr int addStrip = -2;
+
+    int count() const { return (int) order.size(); }
+
+    int posOf (int rack) const
+    {
+        for (int i = 0; i < (int) order.size(); ++i)
+            if (order[(size_t) i] == rack)
+                return i;
+        return -1;
+    }
+
+    juce::Rectangle<int> cellBounds (int pos) const
+    {
+        const int rowHeight = (getHeight() - 2 * margin - (rows - 1) * gap) / juce::jmax (1, rows);
+        const int row = pos / juce::jmax (1, cols), col = pos % juce::jmax (1, cols);
+        return { margin + col * (stripWidth + gap), margin + row * (rowHeight + gap), stripWidth, rowHeight };
+    }
+
+    juce::Rectangle<int> stripBounds (int rack) const
+    {
+        const int pos = posOf (rack);
+        return pos >= 0 ? cellBounds (pos) : juce::Rectangle<int>();
+    }
+
+    Layout layoutFor (int rack) const
+    {
+        Layout l;
+        l.strip = stripBounds (rack);
+
+        auto area = l.strip.reduced (7);
+        l.header = area.removeFromTop (headerH);
+        l.chBadge = l.header.reduced (6, 7).removeFromRight (46);
+        area.removeFromTop (6);
+        auto badges = area.removeFromTop (badgeH);
+        l.formatBadge = badges.removeFromLeft (42); badges.removeFromLeft (4);
+        l.groupBadge  = badges.removeFromLeft (28); badges.removeFromLeft (4);
+        l.safeBadge   = badges.removeFromLeft (40); badges.removeFromLeft (4);
+        l.swatch      = badges.removeFromLeft (juce::jmin (28, badges.getWidth()));
+        l.io = area.removeFromTop (ioH);
+
+        auto footer = area.removeFromBottom (footerH);
+        l.bypass = footer.removeFromLeft (footer.getWidth() / 2 - 2);
+        footer.removeFromLeft (4);
+        l.safe = footer;
+
+        area.removeFromBottom (4);
+        l.latency = area.removeFromBottom (latencyH);
+        area.removeFromBottom (2);
+
+        l.meterOut = area.removeFromRight (meterW);
+        area.removeFromRight (2);
+        l.meterIn = area.removeFromRight (meterW);
+        area.removeFromRight (6);
+
+        const int n = engine.getNumSlots (rack);
+
+        for (int s = 0; s < n; ++s)
+        {
+            if (area.getHeight() < slotH * 2 + slotGap) // keep room for the add row
+            {
+                l.overflow = true;
+                break;
+            }
+
+            l.slots.push_back (area.removeFromTop (slotH));
+            area.removeFromTop (slotGap);
+        }
+
+        if (area.getHeight() >= slotH)
+            l.addRow = area.removeFromTop (slotH);
+
+        return l;
+    }
+
+    //==========================================================================
+    void paint (juce::Graphics& g) override
+    {
+        for (int r : order)
+            paintStrip (g, r);
+
+        // "Add Rack" placeholder strip
+        auto add = cellBounds (count()).toFloat().reduced (1.0f);
+        juce::Path outline, dashed;
+        outline.addRoundedRectangle (add, 8.0f);
+        const float dashes[] = { 6.0f, 5.0f };
+        juce::PathStrokeType (1.2f).createDashedStroke (dashed, outline, dashes, 2);
+        g.setColour (juce::Colours::white.withAlpha (0.22f));
+        g.fillPath (dashed);
+        g.setColour (juce::Colours::white.withAlpha (0.55f));
+        g.setFont (juce::FontOptions (15.0f));
+        g.drawText ("+  Add Rack", add.toNearestInt(), juce::Justification::centred);
+
+        paintDropIndicator (g);
+    }
+
+    void paintStrip (juce::Graphics& g, int r)
+    {
+        const auto l = layoutFor (r);
+        const auto cfg = engine.getRackConfig (r);
+        const bool bypassed = engine.isRackBypassed (r);
+        const bool isSelected = r == selectedRack;
+        const auto colour = colourForIndex (cfg.effectiveColour (r));
+
+        // Strip body and selection outline
+        g.setColour (stripBack);
+        g.fillRoundedRectangle (l.strip.toFloat(), 8.0f);
+
+        if (isSelected)
+        {
+            g.setColour (colour);
+            g.drawRoundedRectangle (l.strip.toFloat().reduced (0.75f), 8.0f, 1.5f);
+        }
+
+        // Header: rack colour, number, name, console channel
+        g.setColour (colour.withAlpha (bypassed ? 0.35f : 1.0f));
+        g.fillRoundedRectangle (l.header.toFloat(), 6.0f);
+
+        const auto ink = juce::Colour (0xff101214);
+        auto text = l.header.reduced (8, 0);
+        text.removeFromRight (l.chBadge.getWidth() + 4);
+        g.setColour (ink.withAlpha (0.75f));
+        g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        g.drawText (juce::String (r + 1), text.removeFromLeft (18), juce::Justification::centredLeft);
+        g.setColour (ink);
+        g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        g.drawFittedText (cfg.name, text, juce::Justification::centredLeft, 1, 0.75f);
+
+        g.setColour (juce::Colours::black.withAlpha (0.25f));
+        g.fillRoundedRectangle (l.chBadge.toFloat(), 5.0f);
+        g.setColour (ink);
+        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        g.drawText (cfg.consoleChannel > 0 ? "CH " + juce::String (cfg.consoleChannel) : juce::String ("CH -"),
+                    l.chBadge, juce::Justification::centred);
+
+        // Badges: format, latency group, recall safe, colour
+        paintBadge (g, l.formatBadge, cfg.formatName(), cfg.isMonoToStereo(), Theme::accent.withAlpha (0.8f), false);
+        if (cfg.latencyGroup > 0)
+            paintBadge (g, l.groupBadge, RackConfig::groupName (cfg.latencyGroup), true, Theme::groupColour (cfg.latencyGroup), false);
+        else
+            paintBadge (g, l.groupBadge, "-", false, {}, true);
+        paintBadge (g, l.safeBadge, "SAFE", cfg.recallSafe, Theme::amber, false);
+        g.setColour (colour);
+        g.fillRoundedRectangle (l.swatch.toFloat().reduced (2.0f), 5.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.25f));
+        g.drawRoundedRectangle (l.swatch.toFloat().reduced (1.0f), 6.0f, 1.0f);
+
+        // I/O line (click to open Routing)
+        g.setColour (juce::Colours::white.withAlpha (0.62f));
+        g.setFont (juce::FontOptions (12.0f));
+        juce::String io;
+        if (engine.getNumDrivers() > 1)
+            io << "D" << (cfg.driver + 1) << "  ";
+        io << channelText (cfg.input, cfg.numInputs() == 2) << " " << arrow() << " " << channelText (cfg.output, cfg.numOutputs() == 2);
+        g.drawText (io, l.io, juce::Justification::centred, true);
+
+        // Plugin slots
+        for (int s = 0; s < (int) l.slots.size(); ++s)
+            paintSlot (g, r, s, l.slots[(size_t) s], colour, bypassed);
+
+        if (! l.addRow.isEmpty())
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.12f));
+            g.drawRoundedRectangle (l.addRow.toFloat().reduced (0.5f), 5.0f, 1.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.45f));
+            g.setFont (juce::FontOptions (13.0f));
+            g.drawText (l.overflow ? "more..." : "+  Add plugin", l.addRow, juce::Justification::centred);
+        }
+
+        // Meters
+        const auto lv = juce::isPositiveAndBelow (r, (int) levels.size()) ? levels[(size_t) r]
+                                                                             : std::array<float, 2> { 0.0f, 0.0f };
+        paintMeter (g, l.meterIn, lv[0]);
+        paintMeter (g, l.meterOut, lv[1]);
+
+        // Latency: the rack's total, and its group's
+        const double ms = engine.getRackTotalLatencyMs (r);
+        juce::String latText = ms > 0.005 ? "+" + juce::String (ms, 2) + " ms" : juce::String ("no added latency");
+        if (cfg.latencyGroup > 0)
+            latText = "group " + RackConfig::groupName (cfg.latencyGroup) + "  " + latText;
+        g.setColour (cfg.latencyGroup > 0 ? Theme::groupColour (cfg.latencyGroup).withAlpha (0.9f) : juce::Colours::white.withAlpha (0.45f));
+        g.setFont (juce::FontOptions (11.5f));
+        g.drawText (latText, l.latency, juce::Justification::centred);
+
+        // Buttons
+        paintButton (g, l.bypass, "BYPASS", bypassed, bypassOn);
+        paintButton (g, l.safe, "SAFE", cfg.recallSafe, safeOn);
+    }
+
+    void paintSlot (juce::Graphics& g, int r, int s, juce::Rectangle<int> area, juce::Colour colour, bool rackBypassed)
+    {
+        auto* plugin = engine.getPlugin (r, s);
+        const bool slotBypassed = engine.isSlotBypassed (r, s);
+        const bool isSelected = r == selectedRack && s == selectedSlot;
+        const float dim = (rackBypassed || slotBypassed) ? 0.45f : 1.0f;
+
+        g.setColour (slotBack.withAlpha (dim));
+        g.fillRoundedRectangle (area.toFloat(), 5.0f);
+
+        if (isSelected)
+        {
+            g.setColour (colour);
+            g.drawRoundedRectangle (area.toFloat().reduced (0.75f), 5.0f, 1.5f);
+        }
+
+        auto text = area.reduced (8, 0);
+
+        // Mono-to-stereo racks: mark where the chain turns stereo
+        if (engine.getStereoPoint (r) == s)
+        {
+            auto tag = area.reduced (3, 6).removeFromLeft (4).toFloat();
+            g.setColour (Theme::accent);
+            g.fillRoundedRectangle (tag, 2.0f);
+            text.removeFromLeft (2);
+        }
+
+        if (slotBypassed)
+        {
+            g.setColour (bypassOn);
+            g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+            g.drawText ("BYP", text.removeFromRight (26), juce::Justification::centredRight);
+        }
+        else if (auto it = slotMeters.find (plugin); it != slotMeters.end() && it->second.show)
+        {
+            // Gain reduction: a bar growing from the right along the slot's
+            // bottom edge (full width = 20 dB) and the value in dB.
+            // Estimates are paler and marked with "~".
+            const auto& m = it->second;
+            const bool isMuted = std::isinf (m.gr);
+            const bool active = isMuted || m.gr > 0.05f;
+            const auto grColour = m.estimated ? juce::Colour (0xffc8a878) : juce::Colour (0xffe8a23a);
+
+            const auto bar = area.reduced (4, 0).removeFromBottom (4).withTrimmedBottom (1);
+            g.setColour (meterBack);
+            g.fillRect (bar);
+
+            if (active)
+            {
+                const float fraction = isMuted ? 1.0f : juce::jlimit (0.0f, 1.0f, m.gr / 20.0f);
+                const int w = juce::roundToInt (bar.getWidth() * fraction);
+                g.setColour (grColour);
+                g.fillRect (bar.withLeft (bar.getRight() - juce::jmax (1, w)));
+            }
+
+            juce::String label = m.estimated ? "~GR" : "GR";
+            if (isMuted)     label = "MUTE";
+            else if (active) label = (m.estimated ? "~-" : "-") + juce::String (m.gr, 1);
+
+            g.setColour (grColour.withAlpha (active ? 1.0f : 0.45f));
+            g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+            g.drawText (label, text.removeFromRight (isMuted || m.estimated ? 38 : 32).withTrimmedBottom (3),
+                        juce::Justification::centredRight);
+        }
+
+        g.setColour (juce::Colours::white.withAlpha (0.92f * dim));
+        g.setFont (juce::FontOptions (13.0f));
+        g.drawText (plugin != nullptr ? plugin->getName() : "?", text, juce::Justification::centredLeft, true);
+    }
+
+    static void paintMeter (juce::Graphics& g, juce::Rectangle<int> area, float level)
+    {
+        g.setColour (meterBack);
+        g.fillRect (area);
+
+        const float db = juce::Decibels::gainToDecibels (level, -60.0f);
+        const float norm = juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f);
+
+        if (norm <= 0.0f)
+            return;
+
+        const auto a = area.toFloat();
+        juce::ColourGradient grad (juce::Colour (0xff3fbf5f), a.getX(), a.getBottom(),
+                                   juce::Colour (0xffe04a3a), a.getX(), a.getY(), false);
+        grad.addColour (0.8, juce::Colour (0xffe0c03a));
+        g.setGradientFill (grad);
+        g.fillRect (a.withTop (a.getBottom() - a.getHeight() * norm));
+    }
+
+    static void paintBadge (juce::Graphics& g, juce::Rectangle<int> area, const juce::String& label,
+                            bool on, juce::Colour onColour, bool dashed)
+    {
+        const auto r = area.toFloat().reduced (0.5f);
+        if (dashed)
+        {
+            juce::Path outline, d;
+            outline.addRoundedRectangle (r, 5.0f);
+            const float dashes[] = { 3.0f, 3.0f };
+            juce::PathStrokeType (1.0f).createDashedStroke (d, outline, dashes, 2);
+            g.setColour (juce::Colours::white.withAlpha (0.3f));
+            g.fillPath (d);
+        }
+        else
+        {
+            g.setColour (on ? onColour : juce::Colour (0xff22262b));
+            g.fillRoundedRectangle (r, 5.0f);
+            if (! on)
+            {
+                g.setColour (juce::Colour (0xff3a4048));
+                g.drawRoundedRectangle (r, 5.0f, 1.0f);
+            }
+        }
+
+        g.setColour (on ? juce::Colour (0xff101214) : juce::Colours::white.withAlpha (dashed ? 0.5f : 0.75f));
+        g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+        g.drawText (label, area, juce::Justification::centred);
+    }
+
+    static void paintButton (juce::Graphics& g, juce::Rectangle<int> area, const juce::String& label, bool on, juce::Colour onColour)
+    {
+        g.setColour (on ? onColour : buttonOff);
+        g.fillRoundedRectangle (area.toFloat(), 5.0f);
+        g.setColour (on ? juce::Colours::black.withAlpha (0.85f) : juce::Colours::white.withAlpha (0.6f));
+        g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+        g.drawText (label, area, juce::Justification::centred);
+    }
+
+    //==========================================================================
+    int rackAt (juce::Point<int> pos) const
+    {
+        for (int i = 0; i < count(); ++i)
+            if (cellBounds (i).contains (pos))
+                return order[(size_t) i];
+
+        return cellBounds (count()).contains (pos) ? addStrip : -1;
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        const auto pos = e.getPosition();
+        const int r = rackAt (pos);
+
+        if (r == -1)
+            return;
+
+        if (r == addStrip)
+        {
+            if (owner.onAddRack != nullptr) owner.onAddRack();
+            return;
+        }
+
+        const auto l = layoutFor (r);
+        const bool popup = e.mods.isPopupMenu();
+
+        for (int s = 0; s < (int) l.slots.size(); ++s)
+        {
+            if (l.slots[(size_t) s].contains (pos))
+            {
+                if (! popup)
+                {
+                    dragFromRack = r;
+                    dragFromSlot = s;
+                    dragStarted = false;
+                }
+
+                if (owner.onSelect != nullptr)   owner.onSelect (r, s);
+                if (popup && owner.onSlotMenu != nullptr) owner.onSlotMenu (r, s);
+                return;
+            }
+        }
+
+        if (l.addRow.contains (pos) && ! popup)
+        {
+            if (owner.onSelect != nullptr)    owner.onSelect (r, -1);
+            if (owner.onAddPlugin != nullptr) owner.onAddPlugin (r);
+            return;
+        }
+
+        if (! popup)
+        {
+            if (l.formatBadge.contains (pos))
+            {
+                // MONO > M>S > ST > MONO
+                auto cfg = engine.getRackConfig (r);
+                if (cfg.stereo)                 { cfg.stereo = false; cfg.monoToStereo = false; }
+                else if (cfg.monoToStereo)      { cfg.stereo = true;  cfg.monoToStereo = false; }
+                else                            { cfg.monoToStereo = true; }
+                if (cfg.numOutputs() == 2)
+                {
+                    if (cfg.input[1] < 0 || cfg.input[1] == cfg.input[0])   cfg.input[1] = cfg.input[0] + 1;
+                    if (cfg.output[1] < 0 || cfg.output[1] == cfg.output[0]) cfg.output[1] = cfg.output[0] + 1;
+                }
+                if (owner.onFormatChange != nullptr) owner.onFormatChange (r, cfg);
+                return;
+            }
+            if (l.groupBadge.contains (pos))  { showGroupMenu (r); return; }
+            if (l.safeBadge.contains (pos))   { engine.setRackRecallSafe (r, ! engine.getRackConfig (r).recallSafe); return; }
+            if (l.swatch.contains (pos))      { showColourMenu (r, l.swatch); return; }
+            if (l.chBadge.contains (pos))     { if (owner.onEditConsoleChannel != nullptr) owner.onEditConsoleChannel (r); return; }
+            if (l.io.contains (pos))
+            {
+                if (owner.onSelect != nullptr)      owner.onSelect (r, -1);
+                if (owner.onOpenRouting != nullptr) owner.onOpenRouting (r);
+                return;
+            }
+        }
+
+        if (l.bypass.contains (pos)) { engine.setRackBypassed (r, ! engine.isRackBypassed (r)); return; }
+        if (l.safe.contains (pos))   { engine.setRackRecallSafe (r, ! engine.getRackConfig (r).recallSafe); return; }
+
+        if (owner.onSelect != nullptr) owner.onSelect (r, -1);
+        if (popup && owner.onRackMenu != nullptr) owner.onRackMenu (r);
+    }
+
+    void showGroupMenu (int r)
+    {
+        const int current = engine.getRackConfig (r).latencyGroup;
+        juce::PopupMenu m;
+        m.addSectionHeader ("Latency group");
+        m.addItem (100, "None (lowest latency)", true, current == 0);
+        for (int g = 1; g <= 8; ++g)
+        {
+            juce::String text = "Group " + RackConfig::groupName (g);
+            const double ms = engine.getGroupLatencyMs (g);
+            if (ms > 0.0)
+                text << "   (" << juce::String (ms, 2) << " ms)";
+            m.addColouredItem (100 + g, text, Theme::groupColour (g), true, current == g);
+        }
+
+        juce::Component::SafePointer<Content> safe (this);
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (layoutFor (r).groupBadge)), [safe, r] (int result)
+        {
+            if (safe != nullptr && result >= 100)
+                safe->engine.setRackLatencyGroup (r, result - 100);
+        });
+    }
+
+    void showColourMenu (int r, juce::Rectangle<int> area)
+    {
+        juce::Component::SafePointer<Content> safe (this);
+        juce::PopupMenu m;
+        m.addCustomItem (1, std::make_unique<SwatchGrid> (engine.getRackConfig (r).colourIndex, [safe, r] (int colour)
+        {
+            if (safe != nullptr)
+                safe->engine.setRackColour (r, colour);
+        }), nullptr, "Colour");
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (area)));
+    }
+
+    // Double-click the name to rename in place
+    void startRename (int r)
+    {
+        renameRack = r;
+        renameEditor = std::make_unique<juce::TextEditor>();
+        auto& ed = *renameEditor;
+        ed.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        ed.setText (engine.getRackConfig (r).name, false);
+        ed.selectAll();
+        ed.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff101214));
+        ed.setColour (juce::TextEditor::textColourId, juce::Colours::white);
+        ed.setColour (juce::TextEditor::outlineColourId, juce::Colours::white);
+        ed.onReturnKey = [this] { finishRename (true); };
+        ed.onEscapeKey = [this] { finishRename (false); };
+        ed.onFocusLost = [this] { finishRename (true); };
+        addAndMakeVisible (ed);
+        auto h = layoutFor (r).header;
+        ed.setBounds (h.withTrimmedRight (50).reduced (2));
+        ed.grabKeyboardFocus();
+    }
+
+    void finishRename (bool keep)
+    {
+        if (renameEditor == nullptr)
+            return;
+
+        const auto text = renameEditor->getText().trim();
+        const int r = renameRack;
+        juce::Component::SafePointer<Content> safe (this);
+        juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->renameEditor.reset(); });
+        renameEditor->onFocusLost = nullptr;
+        renameEditor->setVisible (false);
+
+        if (keep && text.isNotEmpty())
+            engine.setRackName (r, text);
+    }
+
+    std::unique_ptr<juce::TextEditor> renameEditor;
+    int renameRack = -1;
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (dragFromSlot < 0 || dragStarted || e.getDistanceFromDragStart() < 6)
+            return;
+
+        const auto l = layoutFor (dragFromRack);
+        if (! juce::isPositiveAndBelow (dragFromSlot, (int) l.slots.size()))
+            return;
+
+        dragStarted = true;
+        const auto image = createComponentSnapshot (l.slots[(size_t) dragFromSlot]);
+        owner.startDragging ("slot:" + juce::String (dragFromRack) + ":" + juce::String (dragFromSlot),
+                             this, juce::ScaledImage (image), true);
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        dragFromRack = dragFromSlot = -1;
+        dragStarted = false;
+    }
+
+    // Where a drop at this position would insert: rack and index
+    std::pair<int, int> dropTargetAt (juce::Point<int> pos) const
+    {
+        const int r = rackAt (pos);
+        if (! juce::isPositiveAndBelow (r, engine.getNumRacks()))
+            return { -1, -1 };
+
+        const auto l = layoutFor (r);
+        int index = 0;
+        for (auto& slot : l.slots)
+            if (pos.y > slot.getCentreY())
+                ++index;
+
+        return { r, index };
+    }
+
+    bool isInterestedInDragSource (const SourceDetails& d) override
+    {
+        const auto t = d.description.toString();
+        return t.startsWith ("slot:") || t.startsWith ("plugin:");
+    }
+
+    void itemDragMove (const SourceDetails& d) override
+    {
+        const auto [r, i] = dropTargetAt (d.localPosition);
+        if (r != dropRack || i != dropIndex)
+        {
+            dropRack = r;
+            dropIndex = i;
+            repaint();
+        }
+    }
+
+    void itemDragExit (const SourceDetails&) override
+    {
+        dropRack = dropIndex = -1;
+        repaint();
+    }
+
+    void itemDropped (const SourceDetails& d) override
+    {
+        const auto [r, i] = dropTargetAt (d.localPosition);
+        dropRack = dropIndex = -1;
+        repaint();
+
+        const auto text = d.description.toString();
+        if (text.startsWith ("plugin:"))
+        {
+            if (r >= 0 && owner.onPluginDropped != nullptr)
+                owner.onPluginDropped (text.fromFirstOccurrenceOf ("plugin:", false, false), r, i);
+            return;
+        }
+
+        juce::StringArray parts;
+        parts.addTokens (text, ":", "");
+
+        if (r < 0 || parts.size() != 3 || owner.onSlotDropped == nullptr)
+            return;
+
+        owner.onSlotDropped (parts[1].getIntValue(), parts[2].getIntValue(), r, i,
+                             juce::ModifierKeys::currentModifiers.isAltDown());
+    }
+
+    void paintDropIndicator (juce::Graphics& g)
+    {
+        if (dropRack < 0)
+            return;
+
+        const auto l = layoutFor (dropRack);
+        int y = l.addRow.isEmpty() ? l.strip.getCentreY() : l.addRow.getY() - 2;
+
+        if (dropIndex < (int) l.slots.size())
+            y = l.slots[(size_t) dropIndex].getY() - 2;
+        else if (! l.slots.empty())
+            y = l.slots.back().getBottom() + 1;
+
+        const auto x = l.slots.empty() ? l.addRow.getX() : l.slots.front().getX();
+        const auto w = l.slots.empty() ? l.addRow.getWidth() : l.slots.front().getWidth();
+
+        g.setColour (juce::Colours::white);
+        g.fillRoundedRectangle ((float) x, (float) y - 1.0f, (float) w, 3.0f, 1.5f);
+    }
+
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        const int r = rackAt (e.getPosition());
+
+        if (juce::isPositiveAndBelow (r, engine.getNumRacks()))
+        {
+            const auto l = layoutFor (r);
+            if (l.header.contains (e.getPosition()) && ! l.chBadge.contains (e.getPosition()))
+                startRename (r);
+        }
+    }
+
+    RackStripsView& owner;
+    RackEngine& engine;
+};
+
+//==============================================================================
+RackStripsView::RackStripsView (RackEngine& e)
+    : content (std::make_unique<Content> (*this, e))
+{
+    viewport.setViewedComponent (content.get(), false);
+    viewport.setScrollBarsShown (false, true);
+    viewport.setScrollBarThickness (8);
+    viewport.getHorizontalScrollBar().setColour (juce::ScrollBar::thumbColourId, juce::Colours::white.withAlpha (0.25f));
+    addAndMakeVisible (viewport);
+}
+
+RackStripsView::~RackStripsView() = default;
+
+void RackStripsView::resized()
+{
+    viewport.setBounds (getLocalBounds());
+    refresh();
+}
+
+void RackStripsView::setLibrary (PluginLibrary* lib)
+{
+    content->library = lib;
+    forgetMeters();
+}
+
+void RackStripsView::forgetMeters()
+{
+    content->slotMeters.clear();
+}
+
+void RackStripsView::setStackRows (bool shouldStack)
+{
+    content->stackRows = shouldStack;
+    refresh();
+}
+
+bool RackStripsView::getStackRows() const { return content->stackRows; }
+
+void RackStripsView::refresh()
+{
+    // Plugins may have been added or removed: look the GR meters up again
+    content->slotMeters.clear();
+    content->order = content->engine.getVisibleRacks();
+
+    content->updateGrid (getWidth(), getHeight() - viewport.getScrollBarThickness());
+
+    const int w = content->contentWidth();
+    const bool scrolls = w > getWidth();
+    content->setSize (juce::jmax (w, getWidth()), getHeight() - (scrolls ? viewport.getScrollBarThickness() : 0));
+    content->repaint();
+}
+
+void RackStripsView::setSelection (int rack, int slot)
+{
+    content->selectedRack = rack;
+    content->selectedSlot = slot;
+    content->repaint();
+}
+
+void RackStripsView::updateMeters()
+{
+    auto& engine = content->engine;
+    const int n = engine.getNumRacks();
+    content->levels.resize ((size_t) n, { 0.0f, 0.0f });
+
+    for (int r = 0; r < n; ++r)
+    {
+        float rackInput = 0.0f;
+
+        for (int io = 0; io < 2; ++io)
+        {
+            const float peak = juce::jmax (engine.consumePeak (r, io == 1, 0), engine.consumePeak (r, io == 1, 1));
+            auto& level = content->levels[(size_t) r][(size_t) io];
+            level = juce::jmax (peak, level * 0.82f); // fast attack, smooth fall
+
+            if (io == 0)
+                rackInput = peak;
+        }
+
+        float intoSlot = rackInput; // the level going into each plugin
+
+        for (int s = 0; s < engine.getNumSlots (r); ++s)
+        {
+            auto* plugin = engine.getPlugin (r, s);
+            const float outOfSlot = engine.consumeSlotOutputPeak (r, s);
+
+            if (plugin == nullptr)
+                continue;
+
+            auto& m = content->meterFor (*plugin, r, s);
+            m.inEnv  = juce::jmax (intoSlot, m.inEnv * 0.85f);
+            m.outEnv = juce::jmax (outOfSlot, m.outEnv * 0.85f);
+            intoSlot = outOfSlot;
+
+            float gr = 0.0f;
+
+            if (m.probe.source != GainReduction::Source::none && GainReduction::read (*plugin, m.probe, gr))
+            {
+                m.show = true;
+                m.estimated = false;
+            }
+            else if (m.estimateAllowed && ! engine.isSlotBypassed (r, s))
+            {
+                // No GR reported: estimate from the level drop across the plugin.
+                // Makeup gain hides some reduction, hence the "~".
+                m.show = true;
+                m.estimated = true;
+                const float inDb = juce::Decibels::gainToDecibels (m.inEnv, -100.0f);
+                const float outDb = juce::Decibels::gainToDecibels (m.outEnv, -100.0f);
+                if (inDb <= -50.0f)       gr = 0.0f;                       // too quiet to judge
+                else if (outDb <= -90.0f) gr = GainReduction::muted;       // e.g. a closed gate
+                else                      gr = juce::jlimit (0.0f, 60.0f, inDb - outDb);
+            }
+            else
+            {
+                m.show = false;
+                continue;
+            }
+
+            if (std::isinf (gr) || std::isinf (m.gr))
+                m.gr = gr;                                                // straight to / from MUTE
+            else
+                m.gr = gr > m.gr ? gr : m.gr * 0.7f + gr * 0.3f;         // fast attack, smooth release
+        }
+    }
+
+    content->repaint();
+}
+
+#if LIVERACK_PREVIEW_HOOKS
+void RackStripsView::previewMenu (int which, int rack)
+{
+    if (which == 0) content->showGroupMenu (rack);
+    if (which == 1) content->showColourMenu (rack, content->layoutFor (rack).swatch);
+    if (which == 2) content->startRename (rack);
+}
+#endif
+
+float RackStripsView::getMaxGainReduction (int rack) const
+{
+    float gr = 0.0f;
+    auto& engine = content->engine;
+    for (int s = 0; s < engine.getNumSlots (rack); ++s)
+        if (auto it = content->slotMeters.find (engine.getPlugin (rack, s)); it != content->slotMeters.end() && it->second.show)
+            gr = juce::jmax (gr, std::isinf (it->second.gr) ? 60.0f : it->second.gr);
+    return gr;
+}
+
+void RackStripsView::scrollToRack (int rack)
+{
+    const auto b = content->stripBounds (rack);
+    const auto view = viewport.getViewArea();
+
+    if (b.getX() < view.getX())
+        viewport.setViewPosition (juce::jmax (0, b.getX() - Content::margin), 0);
+    else if (b.getRight() > view.getRight())
+        viewport.setViewPosition (b.getRight() + Content::margin - view.getWidth(), 0);
+}
+
+juce::Rectangle<int> RackStripsView::getAddRowScreenBounds (int rack) const
+{
+    const auto l = content->layoutFor (rack);
+    return content->localAreaToGlobal (l.addRow.isEmpty() ? l.strip : l.addRow);
+}
+
+juce::Rectangle<int> RackStripsView::getSlotScreenBounds (int rack, int slot) const
+{
+    const auto l = content->layoutFor (rack);
+
+    if (! juce::isPositiveAndBelow (slot, (int) l.slots.size()))
+        return {};
+
+    return content->localAreaToGlobal (l.slots[(size_t) slot]);
+}

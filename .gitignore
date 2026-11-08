@@ -1,0 +1,10 @@
+# Build output
+build/
+build-*/
+*.log
+.DS_Store
+
+# Companion module
+companion-module-liverack-host/node_modules/
+companion-module-liverack-host/*.tgz
+companion-module-liverack-host/pkg/

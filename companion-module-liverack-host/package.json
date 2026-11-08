@@ -1,0 +1,21 @@
+{
+  "name": "companion-module-liverack-host",
+  "version": "0.1.0",
+  "description": "Bitfocus Companion module for LiveRack, a live audio plugin host",
+  "type": "module",
+  "main": "src/main.js",
+  "license": "MIT",
+  "scripts": {
+    "check": "companion-module-check",
+    "package": "companion-module-build"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@companion-module/base": "^2.1.0"
+  },
+  "devDependencies": {
+    "@companion-module/tools": "^3.0.0"
+  }
+}

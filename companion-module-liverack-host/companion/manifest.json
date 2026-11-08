@@ -1,0 +1,28 @@
+{
+  "$schema": "../node_modules/@companion-module/base/assets/manifest.schema.json",
+  "type": "connection",
+  "id": "liverack-host",
+  "name": "liverack-host",
+  "shortname": "liverack",
+  "description": "Control LiveRack (live audio plugin host): rack bypass, selection, User Keys, Hot Plugins, scenes, pages and tempo, with live feedback.",
+  "manufacturer": "LiveRack",
+  "products": ["LiveRack"],
+  "keywords": ["audio", "plugins", "live", "rack", "superrack"],
+  "version": "0.0.0",
+  "license": "MIT",
+  "repository": "git+https://github.com/dfloring/LiveRack.git",
+  "bugs": "https://github.com/dfloring/LiveRack/issues",
+  "maintainers": [
+    {
+      "name": "Daniel Floring",
+      "email": "danielfloring@gmail.com"
+    }
+  ],
+  "legacyIds": [],
+  "runtime": {
+    "type": "node22",
+    "api": "nodejs-ipc",
+    "apiVersion": "0.0.0",
+    "entrypoint": "../src/main.js"
+  }
+}

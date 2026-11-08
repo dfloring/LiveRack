@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360">
+<defs><linearGradient id="fade" x1="0" x2="1"><stop offset="0" stop-color="#121417"/><stop offset="0.55" stop-color="#121417" stop-opacity="0.85"/><stop offset="1" stop-color="#121417" stop-opacity="0.2"/></linearGradient></defs>
+<rect width="1280" height="360" fill="#121417"/>
+<rect x="720" y="40" width="520" height="40" rx="8" fill="#171a1e"/><rect x="720" y="96" width="520" height="40" rx="8" fill="#171a1e"/><rect x="720" y="152" width="520" height="40" rx="8" fill="#171a1e"/><rect x="720" y="208" width="520" height="40" rx="8" fill="#171a1e"/><rect x="720" y="264" width="520" height="40" rx="8" fill="#171a1e"/><rect x="720" y="320" width="520" height="40" rx="8" fill="#171a1e"/>
+<rect width="1280" height="360" fill="url(#fade)"/>
+<svg x="70" y="65" width="230" height="230" viewBox="-24 -24 288 288"><rect width="240" height="240" rx="52" fill="#1d2126"/>
+<rect x="30" y="52" width="14" height="136" rx="4" fill="#3a4149"/><rect x="196" y="52" width="14" height="136" rx="4" fill="#3a4149"/>
+<circle cx="37" cy="74" r="4" fill="#1d2126"/><circle cx="37" cy="166" r="4" fill="#1d2126"/><circle cx="203" cy="74" r="4" fill="#1d2126"/><circle cx="203" cy="166" r="4" fill="#1d2126"/>
+<rect x="56" y="60" width="128" height="32" rx="8" fill="#2f353c"/>
+<rect x="66" y="71" width="16" height="10" rx="2" fill="#3fbf5f"/><rect x="88" y="71" width="16" height="10" rx="2" fill="#3fbf5f"/><rect x="110" y="71" width="16" height="10" rx="2" fill="#3fbf5f"/><rect x="132" y="71" width="16" height="10" rx="2" fill="#e8a23a"/><rect x="154" y="71" width="16" height="10" rx="2" fill="#3a4149"/>
+<rect x="56" y="104" width="128" height="32" rx="8" fill="#4a90d9"/>
+<rect x="56" y="148" width="128" height="32" rx="8" fill="#2f353c"/><rect x="120" y="172" width="56" height="4" rx="2" fill="#e8a23a"/></svg>
+<text x="330" y="175" font-family="Inter" font-weight="800" font-size="104" fill="#e6e8eb" letter-spacing="-1">LiveRack</text>
+<text x="334" y="232.0" font-family="Inter" font-weight="500" font-size="30" fill="#9aa3ad">Live audio plugin host for Mac</text>
+<rect x="332" y="250" width="121" height="40" rx="20.0" fill="#1d2126" stroke="#2f353c"/><text x="392.5" y="276.0" text-anchor="middle" font-family="Inter" font-weight="600" font-size="17" fill="#c9d0d7">VST3 + AU</text><rect x="465" y="250" width="197" height="40" rx="20.0" fill="#1d2126" stroke="#2f353c"/><text x="563.5" y="276.0" text-anchor="middle" font-family="Inter" font-weight="600" font-size="17" fill="#c9d0d7">Dante + SoundGrid</text><rect x="674" y="250" width="207" height="40" rx="20.0" fill="#1d2126" stroke="#2f353c"/><text x="777.5" y="276.0" text-anchor="middle" font-family="Inter" font-weight="600" font-size="17" fill="#c9d0d7">Yamaha CL/QL + X32</text><rect x="893" y="250" width="121" height="40" rx="20.0" fill="#1d2126" stroke="#2f353c"/><text x="953.5" y="276.0" text-anchor="middle" font-family="Inter" font-weight="600" font-size="17" fill="#c9d0d7">Companion</text>
+</svg>

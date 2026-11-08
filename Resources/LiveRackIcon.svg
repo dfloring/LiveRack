@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="-24 -24 288 288"><rect width="240" height="240" rx="52" fill="#1d2126"/>
+<rect x="30" y="52" width="14" height="136" rx="4" fill="#3a4149"/><rect x="196" y="52" width="14" height="136" rx="4" fill="#3a4149"/>
+<circle cx="37" cy="74" r="4" fill="#1d2126"/><circle cx="37" cy="166" r="4" fill="#1d2126"/><circle cx="203" cy="74" r="4" fill="#1d2126"/><circle cx="203" cy="166" r="4" fill="#1d2126"/>
+<rect x="56" y="60" width="128" height="32" rx="8" fill="#2f353c"/>
+<rect x="66" y="71" width="16" height="10" rx="2" fill="#3fbf5f"/><rect x="88" y="71" width="16" height="10" rx="2" fill="#3fbf5f"/><rect x="110" y="71" width="16" height="10" rx="2" fill="#3fbf5f"/><rect x="132" y="71" width="16" height="10" rx="2" fill="#e8a23a"/><rect x="154" y="71" width="16" height="10" rx="2" fill="#3a4149"/>
+<rect x="56" y="104" width="128" height="32" rx="8" fill="#4a90d9"/>
+<rect x="56" y="148" width="128" height="32" rx="8" fill="#2f353c"/><rect x="120" y="172" width="56" height="4" rx="2" fill="#e8a23a"/></svg>
