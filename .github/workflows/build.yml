@@ -1,0 +1,89 @@
+name: Build
+
+# Builds the Mac app and the Companion module on every push and pull request.
+# Pushing a tag like v0.10.0 also makes a GitHub Release with both attached.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mac-app:
+    name: Mac app (Apple silicon)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache JUCE download
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: juce-8.0.4-${{ runner.os }}
+
+      - name: Configure
+        run: cmake -B build -G Xcode
+
+      - name: Build
+        run: cmake --build build --config Release -- -quiet
+
+      - name: Package
+        run: |
+          APP=$(find build -name LiveRack.app -maxdepth 5 -type d | head -1)
+          echo "Built: $APP"
+          codesign --force --deep --sign - "$APP"   # ad-hoc signature so Apple silicon will run it
+          VERSION=$(grep -m1 'project(LiveRack VERSION' CMakeLists.txt | sed -E 's/.*VERSION ([0-9.]+).*/\1/')
+          ditto -c -k --keepParent "$APP" "LiveRack-$VERSION-mac-arm64.zip"
+          ls -la *.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LiveRack-mac
+          path: LiveRack-*-mac-arm64.zip
+
+  companion-module:
+    name: Companion module
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: companion-module-liverack-host
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: npm install
+
+      - name: Check
+        run: npx companion-module-check || true
+
+      - name: Package
+        run: npm run package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: companion-module
+          path: companion-module-liverack-host/*.tgz
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [mac-app, companion-module]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
