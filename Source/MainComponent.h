@@ -42,6 +42,7 @@ public:
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
+    using juce::Component::keyPressed;
     bool keyPressed (const juce::KeyPress&, juce::Component*) override;
     void sendFeedback();
 

@@ -33,6 +33,7 @@ private:
     void refilter();
     void choose (const Entry&);
     void showContextMenu (const Entry&);
+    using juce::Component::keyPressed;
     bool keyPressed (const juce::KeyPress&, juce::Component*) override;
 
     PluginLibrary& library;

@@ -92,10 +92,10 @@ void Action::showChooser (const RackEngine& engine, const Action& current, int s
         menu.addItem ((int) items.size(), text, true, a == current);
     };
 
-    auto make = [] (Type t, int rack = -1, int slotId = 0, int number = 0)
+    auto make = [] (Type t, int rackIndex = -1, int id = 0, int n = 0)
     {
         Action a;
-        a.type = t; a.rack = rack; a.slotId = slotId; a.number = number;
+        a.type = t; a.rack = rackIndex; a.slotId = id; a.number = n;
         return a;
     };
 
