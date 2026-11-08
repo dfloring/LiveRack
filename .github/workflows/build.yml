@@ -120,16 +120,44 @@ jobs:
 
   release:
     name: Release
-    if: startsWith(github.ref, 'refs/tags/v')
+    # A new version number on main (CMakeLists.txt) makes a GitHub Release once
+    # everything has built; pushing a v* tag does the same
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: [mac-app, windows-app, companion-module]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(grep -m1 'project(LiveRack VERSION' CMakeLists.txt | sed -E 's/.*VERSION ([0-9.]+).*/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/download-artifact@v4
+        if: steps.v.outputs.exists == 'false'
         with:
           path: dist
           merge-multiple: true
 
       - uses: softprops/action-gh-release@v2
+        if: steps.v.outputs.exists == 'false'
         with:
+          tag_name: v${{ steps.v.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: LiveRack ${{ steps.v.outputs.version }}
           files: dist/*
           generate_release_notes: true
+          body: |
+            **Downloads**
+            - **Mac (Apple silicon):** `LiveRack-${{ steps.v.outputs.version }}-mac-arm64.zip`. First launch: right-click LiveRack.app > Open (it isn't notarised).
+            - **Windows (x64, ASIO):** `LiveRack-${{ steps.v.outputs.version }}-windows-x64.zip`. Windows may warn that it's from an unknown publisher: More info > Run anyway.
+            - **Companion 5 module:** the `.tgz`. In Companion: Modules > Import module package.
