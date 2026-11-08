@@ -2,12 +2,20 @@ name: Fetch licence text (temporary)
 on:
   push:
     paths: ['.github/workflows/fetch-license.yml']
+permissions:
+  contents: write
 jobs:
   fetch:
     runs-on: ubuntu-latest
     steps:
-      - run: curl -fsSL https://www.gnu.org/licenses/agpl-3.0.txt -o agpl-3.0.txt && wc -l agpl-3.0.txt && sha256sum agpl-3.0.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: agpl
-          path: agpl-3.0.txt
+      - uses: actions/checkout@v4
+      - name: Add the official AGPLv3 text as LICENSE
+        run: |
+          curl -fsSL https://www.gnu.org/licenses/agpl-3.0.txt -o LICENSE
+          wc -l LICENSE
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -q .github/workflows/fetch-license.yml
+          git add LICENSE
+          git commit -m "Add the GNU AGPLv3 licence text (from gnu.org)"
+          git push
