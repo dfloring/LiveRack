@@ -45,6 +45,52 @@ jobs:
           name: LiveRack-mac
           path: LiveRack-*-mac-arm64.zip
 
+  windows-app:
+    name: Windows app (x64, ASIO)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get the ASIO SDK (Steinberg, GPLv3 option)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force asio | Out-Null
+          try {
+            Invoke-WebRequest -Uri https://www.steinberg.net/asiosdk -OutFile asiosdk.zip -MaximumRedirection 10
+            Expand-Archive asiosdk.zip -DestinationPath asio -Force
+          } catch {
+            Write-Host "Steinberg download failed ($_), using a mirror"
+            git clone --depth 1 https://github.com/jcelerier/asio-2 asio/asio-2
+          }
+          $header = Get-ChildItem -Recurse -Filter iasiodrv.h asio | Select-Object -First 1
+          if (-not $header) { throw "ASIO SDK not found" }
+          $sdk = $header.Directory.Parent.FullName
+          Write-Host "ASIO SDK: $sdk"
+          "ASIO_SDK_DIR=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Configure
+        run: cmake -B build -A x64 -DASIO_SDK_DIR="${{ env.ASIO_SDK_DIR }}"
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Recurse -Filter LiveRack.exe build | Where-Object { $_.FullName -match 'Release' } | Select-Object -First 1
+          Write-Host "Built: $($exe.FullName)"
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'project\(LiveRack VERSION ([0-9.]+)\)').Matches[0].Groups[1].Value
+          New-Item -ItemType Directory -Force pkg | Out-Null
+          Copy-Item $exe.FullName pkg/
+          Copy-Item LICENSE pkg/LICENSE.txt
+          Compress-Archive -Path pkg/* -DestinationPath "LiveRack-$version-windows-x64.zip"
+          Get-ChildItem *.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LiveRack-windows
+          path: LiveRack-*-windows-x64.zip
+
   companion-module:
     name: Companion module
     runs-on: ubuntu-latest
@@ -75,7 +121,7 @@ jobs:
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [mac-app, companion-module]
+    needs: [mac-app, windows-app, companion-module]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

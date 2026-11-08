@@ -48,6 +48,19 @@ target_sources(LiveRack PRIVATE
     Source/DevicesPanel.cpp
     Source/Shortcuts.cpp)
 
+# Windows: ASIO drivers (Dante Virtual Soundcard, SoundGrid, interfaces) need
+# Steinberg's ASIO SDK (GPLv3 option). Pass -DASIO_SDK_DIR=<folder with common/iasiodrv.h>
+if(WIN32)
+    set(ASIO_SDK_DIR "" CACHE PATH "ASIO SDK folder (contains common/iasiodrv.h)")
+    if(ASIO_SDK_DIR)
+        target_include_directories(LiveRack PRIVATE "${ASIO_SDK_DIR}/common")
+        target_compile_definitions(LiveRack PRIVATE JUCE_ASIO=1)
+        message(STATUS "LiveRack: ASIO enabled from ${ASIO_SDK_DIR}")
+    else()
+        message(WARNING "LiveRack: no ASIO_SDK_DIR given, building without ASIO (WASAPI only)")
+    endif()
+endif()
+
 target_compile_definitions(LiveRack PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
