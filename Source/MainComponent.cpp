@@ -6,6 +6,7 @@
 #include "RoutingMatrix.h"
 #include "ScopeEditor.h"
 #include "DevicesPanel.h"
+#include "GainReduction.h"
 #include <algorithm>
 
 // Dims the window and shows the plugin picker in the middle;
@@ -333,6 +334,8 @@ MainComponent::MainComponent()
     };
 
     osc.onMessage = [this] (const juce::String& a, const juce::Array<juce::var>& args) { handleOsc (a, args); };
+    webRemote.buildState = [this] (const juce::String& q) { return buildWebState (q); };
+    webRemote.onCommand  = [this] (const juce::var& c) { handleWebCommand (c); };
 
     // Consoles: console-link.xml, console-link-2.xml, ...
     const int numConsoles = juce::jmax (1, AppSettings::get ("consoles").getIntValue());
@@ -387,6 +390,9 @@ MainComponent::~MainComponent()
     engine.getKnownPlugins().removeChangeListener (this);
     engine.removeChangeListener (this);
     osc.onMessage = nullptr;
+    webRemote.setEnabled (false, webRemote.getPort());
+    webRemote.buildState = nullptr;
+    webRemote.onCommand = nullptr;
 
     for (auto& c : consoles)
     {
@@ -1453,7 +1459,7 @@ void MainComponent::showDevices()
 
     juce::Component::SafePointer<MainComponent> safe (this);
 
-    DevicesPanel::Host host { engine, consoles, *midi, osc,
+    DevicesPanel::Host host { engine, consoles, *midi, osc, webRemote,
         [safe] (int d) { if (safe != nullptr) safe->showDriverSettings (d); },
         [safe] (int c) { if (safe != nullptr) safe->showConsoleSettings (c); },
         [safe] { if (safe != nullptr) safe->addConsole(); },
@@ -2115,4 +2121,157 @@ void MainComponent::showShortcuts()
             safe->shortcutsWindow.reset();
         });
     });
+}
+
+//==============================================================================
+// iPad / web remote
+juce::String MainComponent::buildWebState (const juce::String& query)
+{
+    auto obj = [] { return juce::var (new juce::DynamicObject()); };
+    auto root = obj();
+    auto* r = root.getDynamicObject();
+
+    r->setProperty ("scene", currentScene);
+    r->setProperty ("bpm", engine.getBpm());
+    r->setProperty ("page", engine.getCurrentPage());
+    r->setProperty ("selected", selectedRack);
+    r->setProperty ("selectedSlot", selectedSlot);
+
+    juce::Array<juce::var> pages;
+    for (auto& p : engine.getPages())
+        pages.add (p.name);
+    r->setProperty ("pages", pages);
+
+    const auto visible = engine.getVisibleRacks();
+    juce::Array<juce::var> racks;
+
+    for (int i = 0; i < engine.getNumRacks(); ++i)
+    {
+        const auto cfg = engine.getRackConfig (i);
+        auto rack = obj();
+        auto* ro = rack.getDynamicObject();
+        ro->setProperty ("name", cfg.name);
+        ro->setProperty ("colour", "#" + RackStripsView::colourFor (engine, i).toDisplayString (false));
+        ro->setProperty ("bypass", engine.isRackBypassed (i));
+        ro->setProperty ("safe", cfg.recallSafe);
+        ro->setProperty ("format", cfg.formatName());
+        ro->setProperty ("group", RackConfig::groupName (cfg.latencyGroup));
+        ro->setProperty ("gr", strips.getMaxGainReduction (i));
+        ro->setProperty ("level", strips.getOutputLevel (i));
+        ro->setProperty ("visible", std::find (visible.begin(), visible.end(), i) != visible.end());
+
+        const int point = engine.getStereoPoint (i);
+        juce::Array<juce::var> slots;
+        for (int s = 0; s < engine.getNumSlots (i); ++s)
+        {
+            auto slot = obj();
+            auto* so = slot.getDynamicObject();
+            auto* p = engine.getPlugin (i, s);
+            so->setProperty ("name", p != nullptr ? p->getName() : juce::String ("?"));
+            so->setProperty ("bypass", engine.isSlotBypassed (i, s));
+            so->setProperty ("sp", s == point);
+            slots.add (slot);
+        }
+        ro->setProperty ("slots", slots);
+        racks.add (rack);
+    }
+    r->setProperty ("racks", racks);
+
+    juce::Array<juce::var> keys;
+    for (int k = 0; k < UserKeysBar::numKeys; ++k)
+    {
+        auto key = obj();
+        const auto& a = keysBar.getKey (k);
+        key.getDynamicObject()->setProperty ("label", a.type == Action::none ? juce::String() : a.describe (engine));
+        key.getDynamicObject()->setProperty ("lit", a.type != Action::none && isActionActive (a));
+        keys.add (key);
+    }
+    r->setProperty ("keys", keys);
+
+    // The plugin the remote has open: every parameter
+    const auto viewText = query.fromFirstOccurrenceOf ("view=", false, false).upToFirstOccurrenceOf ("&", false, false);
+    const int vr = viewText.upToFirstOccurrenceOf (":", false, false).getIntValue();
+    const int vs = viewText.fromFirstOccurrenceOf (":", false, false).getIntValue();
+
+    if (viewText.isNotEmpty())
+        if (auto* plugin = engine.getPlugin (vr, vs))
+        {
+            auto view = obj();
+            auto* vo = view.getDynamicObject();
+            vo->setProperty ("rack", vr);
+            vo->setProperty ("slot", vs);
+            vo->setProperty ("rackName", engine.getRackConfig (vr).name);
+            vo->setProperty ("name", plugin->getName());
+            vo->setProperty ("bypass", engine.isSlotBypassed (vr, vs));
+
+            juce::Array<juce::var> params;
+            const auto& list = plugin->getParameters();
+            const int meterIndex = GainReduction::findMeterParameter (*plugin);
+            for (int i = 0; i < juce::jmin (list.size(), 1000); ++i)
+            {
+                auto* param = list[i];
+                const auto name = param->getName (60);
+                if (name.isEmpty() || param == plugin->getBypassParameter())
+                    continue; // bypass has its own button
+
+                using Cat = juce::AudioProcessorParameter::Category;
+                const auto cat = param->getCategory();
+                const bool meter = cat == Cat::inputMeter || cat == Cat::outputMeter || cat == Cat::analysisMeter
+                                || cat == Cat::compressorLimiterGainReductionMeter || cat == Cat::expanderGateGainReductionMeter
+                                || cat == Cat::otherMeter || i == meterIndex;
+                auto pv = obj();
+                auto* po = pv.getDynamicObject();
+                po->setProperty ("i", i);
+                po->setProperty ("name", name);
+                po->setProperty ("value", param->getValue());
+                po->setProperty ("text", param->getCurrentValueAsText());
+                po->setProperty ("label", param->getLabel());
+                po->setProperty ("ro", meter); // meters are shown, not dragged
+                params.add (pv);
+            }
+            vo->setProperty ("params", params);
+            r->setProperty ("view", view);
+        }
+
+    return juce::JSON::toString (root, true);
+}
+
+void MainComponent::handleWebCommand (const juce::var& c)
+{
+    const auto cmd = c["cmd"].toString();
+    const int rack = c.hasProperty ("rack") ? (int) c["rack"] : -1;
+    const int slot = c.hasProperty ("slot") ? (int) c["slot"] : -1;
+    const int value = c.hasProperty ("value") && ! c["value"].isDouble() ? (int) c["value"] : -1;
+
+    auto make = [] (Action::Type t, int r = -1, int id = 0, int n = 0)
+    {
+        Action a; a.type = t; a.rack = r; a.slotId = id; a.number = n; return a;
+    };
+
+    if (cmd == "rackBypass")
+        performAction (make (Action::rackBypass, rack), value);
+    else if (cmd == "select" && juce::isPositiveAndBelow (rack, engine.getNumRacks()))
+        select (rack, slot);
+    else if (cmd == "slotBypass" && engine.getPlugin (rack, slot) != nullptr)
+        engine.setSlotBypassed (rack, slot, value < 0 ? ! engine.isSlotBypassed (rack, slot) : value > 0);
+    else if (cmd == "param")
+    {
+        if (auto* plugin = engine.getPlugin (rack, slot))
+            if (auto* param = plugin->getParameters()[(int) c["index"]])
+            {
+                param->beginChangeGesture();
+                param->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, (float) (double) c["value"]));
+                param->endChangeGesture();
+            }
+    }
+    else if (cmd == "key")
+        keysBar.press ((int) c["index"]);
+    else if (cmd == "page")
+        engine.setCurrentPage ((int) c["page"]);
+    else if (cmd == "tap")
+        engine.tapTempo();
+    else if (cmd == "sceneStep")
+        stepScene ((int) c["dir"]);
+    else if (cmd == "scene")
+        recallScene ((int) c["number"]);
 }

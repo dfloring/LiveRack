@@ -439,7 +439,7 @@ public:
 class DevicesPanel::ControllerCard : public juce::Component
 {
 public:
-    enum Kind { midiDevice, osc, mappings, addMidi, shortcuts };
+    enum Kind { midiDevice, osc, mappings, addMidi, shortcuts, web };
 
     ControllerCard (Host& h, Kind k, juce::String id = {}) : host (h), kind (k), identifier (std::move (id)) {}
 
@@ -477,6 +477,16 @@ public:
             title = "MIDI mappings";
             sub = host.midi.isLearning() ? "Learning... move a control" : juce::String (n) + (n == 1 ? " mapping: click to review" : " mappings: click to review");
             light = host.midi.isLearning() ? Theme::amber : Theme::accent.withAlpha (0.5f);
+        }
+        else if (kind == web)
+        {
+            title = "iPad / web remote";
+            sub = host.web.isEnabled() && host.web.isListening() ? "Open " + host.web.getUrl() + " in Safari  |  "
+                                                                     + juce::String (host.web.getNumClients()) + " connected"
+                                                                   : host.web.getStatusText();
+            light = ! host.web.isEnabled() ? Theme::textDim.withAlpha (0.3f)
+                  : ! host.web.isListening() ? Theme::red
+                  : recent (host.web.getLastActivityMs(), 400) ? Theme::green : Theme::green.withAlpha (0.35f);
         }
         else if (kind == shortcuts)
         {
@@ -542,6 +552,28 @@ public:
         {
             if (host.openShortcuts != nullptr)
                 host.openShortcuts();
+        }
+        else if (kind == web)
+        {
+            auto* w = new juce::AlertWindow ("iPad / web remote",
+                "Open the address below in Safari on an iPad (or any browser on the same network). "
+                "In Safari, Share > Add to Home Screen makes it an app-like icon.\n\n" + host.web.getUrl(),
+                juce::MessageBoxIconType::NoIcon);
+            w->addTextEditor ("port", juce::String (host.web.getPort()), "Port");
+            w->addComboBox ("on", { "On", "Off" }, "Web remote");
+            w->getComboBoxComponent ("on")->setSelectedItemIndex (host.web.isEnabled() ? 0 : 1);
+            w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+            w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+            auto& wr = host.web;
+            w->enterModalState (true, juce::ModalCallbackFunction::create ([&wr, w] (int r)
+            {
+                if (r == 1)
+                {
+                    wr.setEnabled (w->getComboBoxComponent ("on")->getSelectedItemIndex() == 0,
+                                   w->getTextEditorContents ("port").getIntValue());
+                    wr.saveSettings();
+                }
+            }), true);
         }
         else if (kind == osc)
         {
@@ -632,6 +664,7 @@ public:
         addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::addMidi)));
         addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::mappings)));
         addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::shortcuts)));
+        addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::web)));
         addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::osc)));
 
         addDriver.setEnabled (host.engine.getNumDrivers() < RackEngine::maxDrivers);
@@ -755,7 +788,7 @@ void DevicesPanel::timerCallback()
     // Devices plugged in or removed
     if ((int) content->drivers.size() != host.engine.getNumDrivers()
         || (int) content->consoles.size() != (int) host.consoles.size()
-        || (int) content->controllers.size() != (int) host.midi.getDevices().size() + 4)
+        || (int) content->controllers.size() != (int) host.midi.getDevices().size() + 5)
         refresh();
 
     content->update();

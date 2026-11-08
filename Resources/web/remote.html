@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LiveRack">
+<link rel="apple-touch-icon" href="/icon.png">
+<title>LiveRack Remote</title>
+<style>
+  :root {
+    --bg: #121417; --panel: #1d2126; --raised: #262a30; --border: #2f353c;
+    --text: #e6e8eb; --dim: #9aa3ad; --accent: #4a90d9; --accent-deep: #24364c;
+    --amber: #e0a030; --green: #3fb950; --red: #d95454;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "SF Pro Text", Inter, system-ui, sans-serif; overscroll-behavior: none; }
+  body { display: flex; flex-direction: column; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); user-select: none; -webkit-user-select: none; }
+  button { font: inherit; color: inherit; border: 1px solid var(--border); background: var(--raised); border-radius: 10px; min-height: 44px; padding: 0 14px; font-weight: 600; }
+  button:active { filter: brightness(1.2); }
+  button.on { background: var(--accent-deep); border-color: var(--accent); }
+
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #1a1d21; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .logo { font-weight: 800; font-size: 19px; margin-right: 6px; display: flex; align-items: center; gap: 8px; }
+  .logo img { width: 28px; height: 28px; border-radius: 7px; }
+  .chip { display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; height: 36px; border-radius: 18px; background: var(--raised); font-weight: 600; font-size: 14px; }
+  .light { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); }
+  .light.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .light.bad { background: var(--red); }
+  .spacer { flex: 1; }
+  .bpm { display: flex; align-items: stretch; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .bpm div { padding: 2px 12px; background: var(--raised); display: flex; flex-direction: column; justify-content: center; }
+  .bpm small { color: var(--dim); font-size: 10px; font-weight: 700; letter-spacing: .6px; }
+  .bpm b { font-size: 20px; font-variant-numeric: tabular-nums; }
+  .bpm button { border: 0; border-radius: 0; background: var(--accent-deep); font-weight: 800; letter-spacing: .6px; min-width: 64px; }
+
+  .pages { display: flex; gap: 6px; padding: 8px 14px 0; overflow-x: auto; }
+  .pages button { white-space: nowrap; }
+
+  main { flex: 1; overflow-x: auto; overflow-y: hidden; display: flex; gap: 10px; padding: 10px 14px; align-items: stretch; }
+  .strip { width: 168px; flex: 0 0 168px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
+  .strip.sel { box-shadow: 0 0 0 2px var(--sel, var(--accent)); }
+  .strip.byp { opacity: .65; }
+  .head { padding: 10px; color: #101214; font-weight: 800; font-size: 15px; display: flex; gap: 6px; align-items: center; }
+  .head .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .head .tag { font-size: 11px; padding: 2px 6px; border-radius: 5px; background: rgba(0,0,0,.25); }
+  .slots { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .slot { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 10px; border-radius: 8px; background: var(--raised); border: 1px solid var(--border); font-size: 14px; font-weight: 600; }
+  .slot .n { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .slot.byp { opacity: .5; }
+  .slot.open { border-color: var(--accent); background: var(--accent-deep); }
+  .slot .sp { width: 4px; align-self: stretch; margin: 8px 0; border-radius: 2px; background: var(--accent); }
+  .slot .b { font-size: 11px; color: var(--amber); font-weight: 800; }
+  .meter { height: 6px; margin: 0 8px; border-radius: 3px; background: #101214; overflow: hidden; }
+  .meter i { display: block; height: 100%; background: linear-gradient(90deg, var(--green) 70%, #d9c94a 88%, var(--red)); }
+  .foot { display: flex; gap: 6px; padding: 8px; align-items: center; }
+  .foot button { flex: 1; font-size: 13px; letter-spacing: .5px; }
+  .foot button.byp { background: var(--amber); color: #101214; border-color: var(--amber); }
+  .gr { font-size: 12px; color: var(--amber); font-weight: 700; min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  footer { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); background: #16191c; }
+  footer button { min-height: 56px; font-size: 13px; padding: 4px 6px; line-height: 1.15; overflow: hidden; }
+  footer button.lit { background: var(--amber); border-color: var(--amber); color: #101214; }
+
+  /* Plugin parameters */
+  .sheet { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: flex-end; justify-content: center; z-index: 10; }
+  .sheet.show { display: flex; }
+  .panel { width: min(900px, 100%); height: 82%; background: var(--panel); border: 1px solid var(--border); border-radius: 18px 18px 0 0; display: flex; flex-direction: column; padding-bottom: env(safe-area-inset-bottom); }
+  .ptitle { display: flex; gap: 10px; align-items: center; padding: 14px; border-bottom: 1px solid var(--border); }
+  .ptitle .t { flex: 1; font-weight: 800; font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ptitle .t span { color: var(--dim); font-weight: 600; }
+  .ptitle input { height: 44px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); padding: 0 12px; font: inherit; width: 180px; }
+  .params { flex: 1; overflow-y: auto; padding: 8px 14px 20px; }
+  .param { display: grid; grid-template-columns: 34% 1fr 110px; gap: 12px; align-items: center; min-height: 52px; border-bottom: 1px solid #22262b; }
+  .param .pn { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .param .pv { font-size: 14px; color: var(--dim); text-align: right; font-variant-numeric: tabular-nums; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 44px; background: transparent; }
+  input[type=range]::-webkit-slider-runnable-track { height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--accent) var(--p, 50%), #343a42 var(--p, 50%)); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 30px; height: 30px; border-radius: 50%; background: #e6e8eb; margin-top: -11px; border: 0; }
+  .ro { height: 10px; border-radius: 5px; background: #101214; overflow: hidden; }
+  .ro i { display: block; height: 100%; background: var(--amber); }
+  .empty { color: var(--dim); padding: 30px; text-align: center; }
+  .offline { position: fixed; top: 0; left: 0; right: 0; background: var(--red); color: white; text-align: center; padding: 6px; font-weight: 700; display: none; z-index: 20; }
+</style>
+</head>
+<body>
+<div class="offline" id="offline">Not connected to LiveRack</div>
+<header>
+  <div class="logo"><img src="/icon.png" alt="">LiveRack</div>
+  <div class="chip"><span class="light" id="light"></span><span id="scene">Scene -</span></div>
+  <button id="prev">&lsaquo; Scene</button><button id="next">Scene &rsaquo;</button>
+  <div class="spacer"></div>
+  <div class="bpm"><div><small>BPM</small><b id="bpm">120</b></div><button id="tap">TAP</button></div>
+</header>
+<div class="pages" id="pages"></div>
+<main id="strips"></main>
+<footer id="keys"></footer>
+
+<div class="sheet" id="sheet">
+  <div class="panel">
+    <div class="ptitle">
+      <div class="t" id="ptitle"></div>
+      <input id="filter" placeholder="Filter" autocomplete="off" autocorrect="off">
+      <button id="pbyp">Bypass</button>
+      <button id="close">Done</button>
+    </div>
+    <div class="params" id="params"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let state = null, view = null;            // view = [rack, slot] of the open plugin
+let paramKey = '', touching = {};         // param index -> time of last touch
+let lastOk = 0;
+
+function post(cmd) {
+  fetch('/cmd', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cmd) }).catch(() => {});
+}
+
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+function render() {
+  const s = state;
+  $('scene').textContent = s.scene >= 0 ? 'Scene ' + s.scene : 'No scene';
+  $('bpm').textContent = Number.isInteger(s.bpm) ? s.bpm : s.bpm.toFixed(1);
+
+  // Pages
+  let ph = `<button data-page="-1" class="${s.page < 0 ? 'on' : ''}">All</button>`;
+  s.pages.forEach((p, i) => ph += `<button data-page="${i}" class="${s.page === i ? 'on' : ''}">${esc(p)}</button>`);
+  $('pages').innerHTML = s.pages.length ? ph : '';
+
+  // Strips
+  let h = '';
+  s.racks.forEach((r, ri) => {
+    if (!r.visible) return;
+    const sel = ri === s.selected;
+    h += `<div class="strip ${sel ? 'sel' : ''} ${r.bypass ? 'byp' : ''}" style="--sel:${r.colour}">
+      <div class="head" style="background:${r.colour}" data-select="${ri}"><span class="name">${esc(r.name)}</span><span class="tag">${esc(r.format)}</span>${r.group !== '-' ? `<span class="tag">${esc(r.group)}</span>` : ''}</div>
+      <div class="slots">`;
+    r.slots.forEach((sl, si) => {
+      const open = view && view[0] === ri && view[1] === si;
+      h += `<div class="slot ${sl.bypass ? 'byp' : ''} ${open ? 'open' : ''}" data-open="${ri}:${si}">${sl.sp ? '<span class="sp"></span>' : ''}<span class="n">${esc(sl.name)}</span>${sl.bypass ? '<span class="b">BYP</span>' : ''}</div>`;
+    });
+    if (!r.slots.length) h += `<div class="empty" style="padding:12px">No plugins</div>`;
+    h += `</div>
+      <div class="meter"><i style="width:${Math.round(r.level * 100)}%"></i></div>
+      <div class="foot"><button class="${r.bypass ? 'byp' : ''}" data-bypass="${ri}">${r.bypass ? 'BYPASSED' : 'BYPASS'}</button><span class="gr">${r.gr >= 59 ? 'MUTE' : r.gr > 0.4 ? '-' + r.gr.toFixed(1) : ''}</span></div>
+    </div>`;
+  });
+  const strips = $('strips'), scroll = strips.scrollLeft;
+  strips.innerHTML = h || '<div class="empty">No racks on this page</div>';
+  strips.scrollLeft = scroll;
+
+  // User Keys
+  $('keys').innerHTML = s.keys.map((k, i) => `<button class="${k.lit ? 'lit' : ''}" data-key="${i}">${esc(k.label || 'Key ' + (i + 1))}</button>`).join('');
+
+  renderParams();
+}
+
+function renderParams() {
+  const v = state && state.view;
+  if (!view || !v) { $('sheet').classList.remove('show'); return; }
+  $('sheet').classList.add('show');
+  $('ptitle').innerHTML = `<span>${esc(v.rackName)} &rsaquo;</span> ${esc(v.name)}`;
+  $('pbyp').classList.toggle('on', !!v.bypass);
+  $('pbyp').textContent = v.bypass ? 'Bypassed' : 'Bypass';
+
+  const f = $('filter').value.trim().toLowerCase();
+  const list = v.params.filter(p => !f || p.name.toLowerCase().includes(f));
+  const key = v.rack + ':' + v.slot + ':' + f + ':' + list.length;
+
+  if (key !== paramKey) {
+    // Build the rows once per plugin / filter
+    paramKey = key;
+    $('params').innerHTML = list.length ? list.map(p => `<div class="param" data-i="${p.i}">
+        <div class="pn">${esc(p.name)}</div>
+        ${p.ro ? `<div class="ro"><i style="width:${p.value * 100}%"></i></div>`
+               : `<input type="range" min="0" max="1000" value="${Math.round(p.value * 1000)}" data-param="${p.i}" style="--p:${p.value * 100}%">`}
+        <div class="pv">${esc(p.text)} ${esc(p.label)}</div></div>`).join('')
+      : '<div class="empty">This plugin reports no parameters</div>';
+    return;
+  }
+
+  // Update values in place (not the ones being dragged)
+  const now = Date.now();
+  for (const p of list) {
+    const row = $('params').querySelector(`.param[data-i="${p.i}"]`);
+    if (!row) continue;
+    row.querySelector('.pv').textContent = `${p.text} ${p.label}`;
+    if (p.ro) { const bar = row.querySelector('.ro i'); if (bar) bar.style.width = p.value * 100 + '%'; continue; }
+    if (!(now - (touching[p.i] || 0) < 1500)) {
+      const r = row.querySelector('input');
+      r.value = Math.round(p.value * 1000);
+      r.style.setProperty('--p', p.value * 100 + '%');
+    }
+  }
+}
+
+async function poll() {
+  try {
+    const q = view ? `?view=${view[0]}:${view[1]}` : '';
+    const res = await fetch('/state' + q, { cache: 'no-store' });
+    state = await res.json();
+    if (state.racks) {
+      lastOk = Date.now();
+      // The plugin may have moved or gone
+      if (view && !state.view) view = null;
+      render();
+    }
+  } catch (e) {}
+  const ok = Date.now() - lastOk < 2500;
+  $('offline').style.display = ok ? 'none' : 'block';
+  $('light').className = 'light ' + (ok ? 'ok' : 'bad');
+  setTimeout(poll, 150);
+}
+
+// Taps
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-bypass],[data-select],[data-open],[data-key],[data-page]');
+  if (!t) return;
+  if (t.dataset.bypass !== undefined) post({ cmd: 'rackBypass', rack: +t.dataset.bypass, value: -1 });
+  if (t.dataset.select !== undefined) post({ cmd: 'select', rack: +t.dataset.select, slot: -1 });
+  if (t.dataset.key !== undefined) post({ cmd: 'key', index: +t.dataset.key });
+  if (t.dataset.page !== undefined) post({ cmd: 'page', page: +t.dataset.page });
+  if (t.dataset.open !== undefined) {
+    const [r, s] = t.dataset.open.split(':').map(Number);
+    view = [r, s];
+    paramKey = '';
+    $('filter').value = '';
+    post({ cmd: 'select', rack: r, slot: s });
+  }
+});
+
+$('tap').addEventListener('click', () => post({ cmd: 'tap' }));
+$('prev').addEventListener('click', () => post({ cmd: 'sceneStep', dir: -1 }));
+$('next').addEventListener('click', () => post({ cmd: 'sceneStep', dir: 1 }));
+$('close').addEventListener('click', () => { view = null; paramKey = ''; $('sheet').classList.remove('show'); });
+$('pbyp').addEventListener('click', () => view && post({ cmd: 'slotBypass', rack: view[0], slot: view[1], value: -1 }));
+$('filter').addEventListener('input', () => { paramKey = ''; renderParams(); });
+$('sheet').addEventListener('click', (e) => { if (e.target === $('sheet')) $('close').click(); });
+
+// Parameter sliders: send at most every 40 ms while dragging
+let pending = {}, timer = null;
+$('params').addEventListener('input', (e) => {
+  const r = e.target;
+  if (!r.dataset.param || !view) return;
+  const i = +r.dataset.param, v = r.value / 1000;
+  r.style.setProperty('--p', v * 100 + '%');
+  touching[i] = Date.now();
+  pending[i] = v;
+  if (!timer) timer = setTimeout(() => {
+    for (const [idx, val] of Object.entries(pending)) post({ cmd: 'param', rack: view[0], slot: view[1], index: +idx, value: val });
+    pending = {}; timer = null;
+  }, 40);
+});
+
+poll();
+</script>
+</body>
+</html>

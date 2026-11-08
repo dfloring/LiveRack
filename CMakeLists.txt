@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(LiveRack VERSION 0.10.0)
+project(LiveRack VERSION 0.11.0)
 
 set(CMAKE_CXX_STANDARD 17)
 if(APPLE)
@@ -46,7 +46,13 @@ target_sources(LiveRack PRIVATE
     Source/RoutingMatrix.cpp
     Source/ScopeEditor.cpp
     Source/DevicesPanel.cpp
-    Source/Shortcuts.cpp)
+    Source/Shortcuts.cpp
+    Source/WebRemote.cpp)
+
+# The iPad / web remote page and icon, compiled into the app
+juce_add_binary_data(LiveRackWebData SOURCES
+    Resources/web/remote.html
+    Resources/LiveRackIcon.png)
 
 # Windows: ASIO drivers (Dante Virtual Soundcard, SoundGrid, interfaces) need
 # Steinberg's ASIO SDK (GPLv3 option). Pass -DASIO_SDK_DIR=<folder with common/iasiodrv.h>
@@ -81,6 +87,7 @@ target_link_libraries(LiveRack
         juce::juce_audio_utils
         juce::juce_audio_processors
         juce::juce_osc
+        LiveRackWebData
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags

@@ -12,13 +12,22 @@
 - **Console Link:** follows scene recalls and channel selection (Yamaha RCP, X32 scenes/snippets/cues)
 - **Snapshots with scope** down to individual plugins, Recall Safe racks, in-place recall with no audio gap
 - **Custom pages, Hot Plugins, User Keys,** keyboard shortcuts, MIDI controllers with MIDI Learn, tap tempo
+- **iPad / web remote:** run racks and every plugin parameter from Safari on an iPad
 - **OSC remote** and a **Companion module** (`companion-module-liverack-host/`)
+- **Mac and Windows** builds (Windows with ASIO for Dante Virtual Soundcard and SoundGrid)
 
 > Status: early and in active development. Test it on your rig before relying on it for a show.
 
 ---
 
-# User guide (v0.10)
+## Download
+
+Get the latest build from [Releases](../../releases): the Mac app (Apple silicon), the Windows app (x64, ASIO) and the Companion module. Every push to `main` is also built under [Actions](../../actions).
+
+- **Mac:** unzip, then right-click `LiveRack.app` > **Open** the first time (it isn't notarised).
+- **Windows:** unzip and run `LiveRack.exe`. If Windows warns about an unknown publisher: **More info > Run anyway**. Pick your ASIO driver (Dante Virtual Soundcard, SoundGrid) in Devices > driver Settings.
+
+# User guide (v0.11)
 
 Any number of independent racks of VST3/AU plugins on one or more audio drivers at once (Dante Virtual Soundcard, a Dante interface, the Waves SoundGrid Driver). Snapshots save and recall everything, and the last session comes back automatically on launch.
 
@@ -97,6 +106,17 @@ Any number of MIDI devices at once. **MIDI Learn:**
 
 Buttons (notes, CCs above 0, program changes) press; CCs move parameters. LiveRack sends LED feedback (note or CC 127 / 0) to the MIDI output with the same name as the input. Mappings are listed under Devices > MIDI mappings.
 
+## iPad / web remote
+
+LiveRack runs a small web server (port 8080; Devices > Controllers > **iPad / web remote** shows the address and turns it on or off). On an iPad on the same network, open that address in Safari, e.g. `http://192.168.1.20:8080`. **Share > Add to Home Screen** gives it an app-like icon that opens full screen.
+
+- Rack strips for the current page: tap the header to select, **BYPASS** to bypass, with level and gain reduction
+- Tap a plugin to open **all its parameters** as touch sliders (with filter and plugin bypass); meters like gain reduction show read-only
+- Pages, User Keys, previous / next scene and tap tempo
+- Any number of iPads, phones or computers at once; it shows "Not connected" if LiveRack goes away
+
+The plugins' own windows aren't shown on the iPad yet (that needs streaming the window image; planned).
+
 ## Companion
 
 The `companion-module-liverack-host` folder holds a module for Bitfocus Companion 5 (module API 2.1): actions, feedbacks, variables and ready-made presets (rack bypass buttons in each rack's colour with gain reduction, User Keys, Hot Plugins, scenes, tap tempo, pages). Double-click its `install.command` to build it, then import the `.tgz` in Companion (Modules > Import module package). See its README.
@@ -131,14 +151,14 @@ Feedback: `/liverack/racks`, `/selected`, `/scene`, `/bpm`, `/page` (0 = All), `
 
 ## Files
 
-Settings live in `~/Library/Application Support/LiveRack`: `audio-drivers.xml`, `plugins.xml`, `last-session.liverack`, `console-link*.xml`, `user-keys.xml`, `shortcuts.xml`, `midi-control.xml`, `osc-remote.xml`, `plugin-library.xml`, `layout.xml`.
+Settings live in `~/Library/Application Support/LiveRack`: `audio-drivers.xml`, `plugins.xml`, `last-session.liverack`, `console-link*.xml`, `user-keys.xml`, `shortcuts.xml`, `midi-control.xml`, `osc-remote.xml`, `web-remote.xml`, `plugin-library.xml`, `layout.xml`.
 
 ## Layout
 
 - `Source/RackEngine.*`: audio engine, drivers, latency groups, snapshots (no GUI code: this is the part that moves to a DSP server later)
 - `Source/MainComponent.*`: main window; `RackStripsView`, `PluginDock`, `ControlBars` (Hot Plugins, User Keys)
 - `Source/RoutingMatrix.*`, `ScopeEditor.*`, `DevicesPanel.*`: the tool windows
-- `Source/Actions.*`, `MidiControl.*`, `OscRemote.*`, `Shortcuts.*`: control from keys, MIDI and OSC
+- `Source/Actions.*`, `MidiControl.*`, `OscRemote.*`, `Shortcuts.*`, `WebRemote.*`: control from keys, MIDI, OSC and the web remote (`Resources/web/remote.html`)
 - `companion-module-liverack-host/`: the Companion module
 - `Source/ConsoleLink*`: console following
 

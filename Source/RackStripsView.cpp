@@ -917,6 +917,14 @@ void RackStripsView::previewMenu (int which, int rack)
 }
 #endif
 
+float RackStripsView::getOutputLevel (int rack) const
+{
+    if (! juce::isPositiveAndBelow (rack, (int) content->levels.size()))
+        return 0.0f;
+    const float db = juce::Decibels::gainToDecibels (content->levels[(size_t) rack][1], -60.0f);
+    return juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f);
+}
+
 float RackStripsView::getMaxGainReduction (int rack) const
 {
     float gr = 0.0f;

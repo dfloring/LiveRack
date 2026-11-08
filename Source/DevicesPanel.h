@@ -3,6 +3,7 @@
 #include "ConsoleLink.h"
 #include "MidiControl.h"
 #include "OscRemote.h"
+#include "WebRemote.h"
 
 // Audio drivers, consoles (with their card slots) and controllers, each as
 // a panel with live status lights
@@ -16,6 +17,7 @@ public:
         std::vector<std::unique_ptr<ConsoleLink>>& consoles;
         MidiControl& midi;
         OscRemote& osc;
+        WebRemote& web;
         std::function<void (int driver)> openDriverSettings;
         std::function<void (int console)> openConsoleSettings;
         std::function<void()> addConsole;

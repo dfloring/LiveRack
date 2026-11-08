@@ -11,6 +11,7 @@
 #include "MidiControl.h"
 #include "Theme.h"
 #include "Shortcuts.h"
+#include "WebRemote.h"
 
 class RoutingMatrix;
 class ScopeEditor;
@@ -122,6 +123,10 @@ private:
     juce::String shortcutOwner (const juce::KeyPress&) const; // what already uses it, or empty
     void clearShortcut (const juce::KeyPress&);
 
+    // iPad / web remote
+    juce::String buildWebState (const juce::String& query);
+    void handleWebCommand (const juce::var&);
+
     // OSC remote
     void handleOsc (const juce::String& address, const juce::Array<juce::var>& args);
 
@@ -134,6 +139,7 @@ private:
     int selectedRack = -1, selectedSlot = -1;
 
     OscRemote osc;
+    WebRemote webRemote;
     std::unique_ptr<MidiControl> midi;
 
     // Toolbar

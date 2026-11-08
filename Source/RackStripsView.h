@@ -39,6 +39,7 @@ public:
     void updateMeters();
     void scrollToRack (int rack);
     float getMaxGainReduction (int rack) const;
+    float getOutputLevel (int rack) const;      // 0..1 on the meter's scale
    #if LIVERACK_PREVIEW_HOOKS
     void previewMenu (int which, int rack);
    #endif // dB shown on the rack's plugins (60 = muted)
