@@ -1,6 +1,7 @@
 #pragma once
 #include "RackEngine.h"
 #include "PluginWindow.h"
+#include "PluginViewCapture.h"
 #include "ConsoleLink.h"
 #include "RackStripsView.h"
 #include "PluginDock.h"
@@ -126,6 +127,16 @@ private:
     // iPad / web remote
     juce::String buildWebState (const juce::String& query);
     void handleWebCommand (const juce::var&);
+    std::shared_ptr<PluginViewCapture> openRemoteView (const juce::String& query, juce::String& error);
+    void closeRemoteView (std::shared_ptr<PluginViewCapture>);
+
+    struct RemoteView
+    {
+        std::weak_ptr<PluginViewCapture> capture;
+        juce::AudioProcessor* plugin = nullptr;
+        bool openedWindow = false; // opened for the remote: close it afterwards
+    };
+    std::vector<RemoteView> remoteViews;
 
     // OSC remote
     void handleOsc (const juce::String& address, const juce::Array<juce::var>& args);

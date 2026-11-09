@@ -13,6 +13,11 @@ public:
         setUsingNativeTitleBar (true);
 
         juce::AudioProcessorEditor* editor = p.hasEditor() ? p.createEditorIfNeeded() : nullptr;
+       #if LIVERACK_PREVIEW_HOOKS
+        // Previews: JUCE-drawn editors, so window capture can be tested
+        if (juce::SystemStats::getEnvironmentVariable ("LIVERACK_PREVIEW_GENERIC", {}).isNotEmpty())
+            editor = nullptr;
+       #endif
         if (editor == nullptr)
             editor = new juce::GenericAudioProcessorEditor (p);
 

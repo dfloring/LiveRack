@@ -336,6 +336,21 @@ MainComponent::MainComponent()
     osc.onMessage = [this] (const juce::String& a, const juce::Array<juce::var>& args) { handleOsc (a, args); };
     webRemote.buildState = [this] (const juce::String& q) { return buildWebState (q); };
     webRemote.onCommand  = [this] (const juce::var& c) { handleWebCommand (c); };
+    {
+        juce::Component::SafePointer<MainComponent> safe (this);
+        webRemote.openPluginView = [safe] (const juce::String& q, juce::String& error) -> std::shared_ptr<PluginViewCapture>
+        {
+            if (safe == nullptr) { error = "LiveRack is closing."; return nullptr; }
+            return safe->openRemoteView (q, error);
+        };
+        webRemote.closePluginView = [safe] (std::shared_ptr<PluginViewCapture> c)
+        {
+            if (safe != nullptr)
+                safe->closeRemoteView (std::move (c));
+            else if (c != nullptr)
+                c->stop();
+        };
+    }
 
     // Consoles: console-link.xml, console-link-2.xml, ...
     const int numConsoles = juce::jmax (1, AppSettings::get ("consoles").getIntValue());
@@ -393,6 +408,12 @@ MainComponent::~MainComponent()
     webRemote.setEnabled (false, webRemote.getPort());
     webRemote.buildState = nullptr;
     webRemote.onCommand = nullptr;
+    webRemote.openPluginView = nullptr;
+    webRemote.closePluginView = nullptr;
+    for (auto& v : remoteViews)
+        if (auto c = v.capture.lock())
+            c->stop();
+    remoteViews.clear();
 
     for (auto& c : consoles)
     {
@@ -1425,6 +1446,19 @@ void MainComponent::setTwoWindowMode (bool shouldBeTwo)
 // Floating editor windows
 void MainComponent::closeEditorFor (juce::AudioProcessor* p)
 {
+    // Anything showing this window on the web remote ends first
+    for (auto it = remoteViews.begin(); it != remoteViews.end();)
+    {
+        if (it->plugin == p)
+        {
+            if (auto c = it->capture.lock())
+                c->windowClosed ("The plugin window was closed on the Mac.");
+            it = remoteViews.erase (it);
+        }
+        else
+            ++it;
+    }
+
     editorWindows.erase (std::remove_if (editorWindows.begin(), editorWindows.end(),
                                          [p] (const auto& w) { return &w->processor == p; }),
                          editorWindows.end());
@@ -2136,6 +2170,7 @@ juce::String MainComponent::buildWebState (const juce::String& query)
     r->setProperty ("page", engine.getCurrentPage());
     r->setProperty ("selected", selectedRack);
     r->setProperty ("selectedSlot", selectedSlot);
+    r->setProperty ("pluginWindows", PluginViewCapture::isSupported());
 
     juce::Array<juce::var> pages;
     for (auto& p : engine.getPages())
@@ -2234,6 +2269,107 @@ juce::String MainComponent::buildWebState (const juce::String& query)
         }
 
     return juce::JSON::toString (root, true);
+}
+
+//==============================================================================
+// The plugin's own window on the web remote
+std::shared_ptr<PluginViewCapture> MainComponent::openRemoteView (const juce::String& query, juce::String& error)
+{
+    auto param = [&query] (const juce::String& name)
+    {
+        for (auto& part : juce::StringArray::fromTokens (query, "&", ""))
+            if (part.startsWith (name + "="))
+                return juce::URL::removeEscapeChars (part.fromFirstOccurrenceOf ("=", false, false));
+        return juce::String();
+    };
+
+    const auto viewText = param ("view");
+    const int rack = viewText.upToFirstOccurrenceOf (":", false, false).getIntValue();
+    const int slot = viewText.fromFirstOccurrenceOf (":", false, false).getIntValue();
+    auto* plugin = viewText.containsChar (':') ? engine.getPlugin (rack, slot) : nullptr;
+
+    if (plugin == nullptr)
+    {
+        error = "That plugin isn't there any more.";
+        return nullptr;
+    }
+
+    auto findWindow = [this, plugin]() -> PluginWindow*
+    {
+        for (auto& w : editorWindows)
+            if (&w->processor == plugin)
+                return w.get();
+        return nullptr;
+    };
+
+    // The remote shows a plugin's own window, so it needs one
+    auto* window = findWindow();
+    const bool opened = window == nullptr;
+    if (opened)
+    {
+        popOutEditor (rack, slot);
+        window = findWindow();
+    }
+
+    if (window == nullptr)
+    {
+        error = "Couldn't open the plugin window.";
+        return nullptr;
+    }
+
+    window->toFront (false);
+
+    PluginViewCapture::Options options;
+    if (auto s = param ("scale"); s.isNotEmpty())
+        options.scale = juce::jlimit (0.5f, 3.0f, s.getFloatValue());
+    if (auto q = param ("q"); q.isNotEmpty())
+        options.quality = juce::jlimit (0.2f, 0.95f, q.getFloatValue());
+
+    auto capture = PluginViewCapture::create (*window, options, error);
+    if (capture == nullptr)
+    {
+        const bool othersUseIt = std::any_of (remoteViews.begin(), remoteViews.end(), [plugin] (auto& v) { return v.plugin == plugin; });
+        if (opened && ! othersUseIt)
+        {
+            closeEditorFor (plugin);
+            refreshAll();
+        }
+        return nullptr;
+    }
+
+    remoteViews.push_back ({ capture, plugin, opened });
+    return capture;
+}
+
+void MainComponent::closeRemoteView (std::shared_ptr<PluginViewCapture> capture)
+{
+    if (capture == nullptr)
+        return;
+
+    capture->stop();
+
+    auto it = std::find_if (remoteViews.begin(), remoteViews.end(),
+                            [&capture] (auto& v) { return v.capture.lock() == capture; });
+    if (it == remoteViews.end())
+        return; // the window already closed
+
+    auto* plugin = it->plugin;
+    bool closeWindow = it->openedWindow;
+    remoteViews.erase (it);
+
+    // Another device still showing it keeps the window
+    for (auto& v : remoteViews)
+        if (v.plugin == plugin)
+        {
+            v.openedWindow = v.openedWindow || closeWindow;
+            closeWindow = false;
+        }
+
+    if (closeWindow)
+    {
+        closeEditorFor (plugin);
+        refreshAll(); // dock it again if it's selected
+    }
 }
 
 void MainComponent::handleWebCommand (const juce::var& c)

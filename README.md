@@ -12,7 +12,7 @@
 - **Console Link:** follows scene recalls and channel selection (Yamaha RCP, X32 scenes/snippets/cues)
 - **Snapshots with scope** down to individual plugins, Recall Safe racks, in-place recall with no audio gap
 - **Custom pages, Hot Plugins, User Keys,** keyboard shortcuts, MIDI controllers with MIDI Learn, tap tempo
-- **iPad / web remote:** run racks and every plugin parameter from Safari on an iPad
+- **iPad / web remote:** run racks and every plugin parameter from Safari on an iPad, including **the plugin's own window, live** (Mac)
 - **OSC remote** and a **Companion module** (`companion-module-liverack-host/`)
 - **Mac and Windows** builds (Windows with ASIO for Dante Virtual Soundcard and SoundGrid)
 
@@ -27,7 +27,7 @@ Get the latest build from [Releases](../../releases): the Mac app (Apple silicon
 - **Mac:** unzip, then right-click `LiveRack.app` > **Open** the first time (it isn't notarised).
 - **Windows:** unzip and run `LiveRack.exe`. If Windows warns about an unknown publisher: **More info > Run anyway**. Pick your ASIO driver (Dante Virtual Soundcard, SoundGrid) in Devices > driver Settings.
 
-# User guide (v0.11)
+# User guide (v0.12)
 
 Any number of independent racks of VST3/AU plugins on one or more audio drivers at once (Dante Virtual Soundcard, a Dante interface, the Waves SoundGrid Driver). Snapshots save and recall everything, and the last session comes back automatically on launch.
 
@@ -115,7 +115,19 @@ LiveRack runs a small web server (port 8080; Devices > Controllers > **iPad / we
 - Pages, User Keys, previous / next scene and tap tempo
 - Any number of iPads, phones or computers at once; it shows "Not connected" if LiveRack goes away
 
-The plugins' own windows aren't shown on the iPad yet (that needs streaming the window image; planned).
+### Plugin windows on the iPad (Mac)
+
+Tapping a plugin shows **its own window, live**, and you work it with your fingers. LiveRack opens the window on the Mac if it isn't open, keeps it in front while the iPad uses it, and closes it again when you're done.
+
+- **Tap** = click, **drag** = click-drag (knobs, faders, EQ points), **double-tap** = double-click (resets many controls)
+- **Two-finger drag** = scroll wheel, **two-finger tap** = right-click
+- **Shift / Option / Cmd / Ctrl** stay on until tapped again: Shift-drag for fine adjust, Option-click to reset, as each plugin does it
+- **Right-click** makes the next tap a right-click; **Keyboard** types into the plugin's value boxes
+- The plugin's preset and option menus open as a touch list
+- **Sharp / Fast** picks picture quality; **Sliders** goes back to the parameter list
+- **First time:** macOS asks for **Screen Recording** permission for LiveRack (System Settings > Privacy & Security > Screen & System Audio Recording). Turn it on and reopen LiveRack. Because builds aren't signed with an Apple developer ID, each new LiveRack version needs the switch turned off and on again.
+
+On Windows the iPad shows the sliders for now.
 
 ## Companion
 
@@ -159,6 +171,7 @@ Settings live in `~/Library/Application Support/LiveRack`: `audio-drivers.xml`, 
 - `Source/MainComponent.*`: main window; `RackStripsView`, `PluginDock`, `ControlBars` (Hot Plugins, User Keys)
 - `Source/RoutingMatrix.*`, `ScopeEditor.*`, `DevicesPanel.*`: the tool windows
 - `Source/Actions.*`, `MidiControl.*`, `OscRemote.*`, `Shortcuts.*`, `WebRemote.*`: control from keys, MIDI, OSC and the web remote (`Resources/web/remote.html`)
+- `Source/PluginViewCapture*`: plugin windows on the web remote (ScreenCaptureKit on the Mac)
 - `companion-module-liverack-host/`: the Companion module
 - `Source/ConsoleLink*`: console following
 

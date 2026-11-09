@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.22)
-project(LiveRack VERSION 0.11.0)
+project(LiveRack VERSION 0.12.0)
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 if(APPLE)
@@ -47,7 +50,17 @@ target_sources(LiveRack PRIVATE
     Source/ScopeEditor.cpp
     Source/DevicesPanel.cpp
     Source/Shortcuts.cpp
-    Source/WebRemote.cpp)
+    Source/WebRemote.cpp
+    Source/PluginViewCapture.cpp)
+
+# Plugin windows on the web remote: ScreenCaptureKit capture on the Mac
+if(APPLE)
+    target_sources(LiveRack PRIVATE Source/PluginViewCaptureMac.mm)
+    set_source_files_properties(Source/PluginViewCaptureMac.mm PROPERTIES COMPILE_OPTIONS "-fno-objc-arc")
+    target_link_libraries(LiveRack PRIVATE
+        "-weak_framework ScreenCaptureKit"
+        "-framework CoreMedia" "-framework CoreVideo" "-framework ImageIO")
+endif()
 
 # The iPad / web remote page and icon, compiled into the app
 juce_add_binary_data(LiveRackWebData SOURCES
