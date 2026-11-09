@@ -3,6 +3,9 @@
 #include <atomic>
 #include <cmath>
 
+static void writeScope (juce::XmlElement&, const SnapshotScope&);
+static SnapshotScope scopeFromXml (const juce::XmlElement&);
+
 //==============================================================================
 static void storePeak (std::atomic<float>& slot, float value)
 {
@@ -1403,11 +1406,7 @@ std::unique_ptr<juce::XmlElement> RackEngine::createSnapshot() const
     xml->setAttribute ("version", 3);
     xml->setAttribute ("bpm", bpm.load());
 
-    auto* sc = xml->createNewChildElement ("SCOPE");
-    sc->setAttribute ("pluginSettings", scope.pluginSettings);
-    sc->setAttribute ("pluginBypass", scope.pluginBypass);
-    sc->setAttribute ("rackBypass", scope.rackBypass);
-    sc->setAttribute ("bpm", scope.bpm);
+    writeScope (*xml->createNewChildElement ("SCOPE"), scope);
 
     for (int rackIndex = 0; rackIndex < (int) racks.size(); ++rackIndex)
     {
@@ -1466,16 +1465,29 @@ std::unique_ptr<juce::XmlElement> RackEngine::createSnapshot() const
     return xml;
 }
 
+static void writeScope (juce::XmlElement& sc, const SnapshotScope& s)
+{
+    sc.setAttribute ("pluginSettings", s.pluginSettings);
+    sc.setAttribute ("pluginBypass", s.pluginBypass);
+    sc.setAttribute ("rackBypass", s.rackBypass);
+    sc.setAttribute ("bpm", s.bpm);
+}
+
+static SnapshotScope scopeFromXml (const juce::XmlElement& sc)
+{
+    SnapshotScope s;
+    s.pluginSettings = sc.getBoolAttribute ("pluginSettings", true);
+    s.pluginBypass   = sc.getBoolAttribute ("pluginBypass", true);
+    s.rackBypass     = sc.getBoolAttribute ("rackBypass", true);
+    s.bpm            = sc.getBoolAttribute ("bpm", true);
+    return s;
+}
+
 void RackEngine::readScope (const juce::XmlElement& xml)
 {
     if (auto* sc = xml.getChildByName ("SCOPE"))
     {
-        SnapshotScope s;
-        s.pluginSettings = sc->getBoolAttribute ("pluginSettings", true);
-        s.pluginBypass   = sc->getBoolAttribute ("pluginBypass", true);
-        s.rackBypass     = sc->getBoolAttribute ("rackBypass", true);
-        s.bpm            = sc->getBoolAttribute ("bpm", true);
-        scope = s;
+        scope = scopeFromXml (*sc);
     }
     else
     {
@@ -1703,6 +1715,7 @@ std::unique_ptr<juce::XmlElement> RackEngine::captureSnapshotData() const
 {
     auto x = std::make_unique<juce::XmlElement> ("SNAPSHOT");
     x->setAttribute ("bpm", bpm.load());
+    writeScope (*x->createNewChildElement ("SCOPE"), scope);
 
     for (int ri = 0; ri < (int) racks.size(); ++ri)
     {
@@ -1721,6 +1734,7 @@ std::unique_ptr<juce::XmlElement> RackEngine::captureSnapshotData() const
             auto* sx = rx->createNewChildElement ("SLOT");
             sx->setAttribute ("id", getSlotId (ri, si));
             sx->setAttribute ("bypassed", node->isBypassed());
+            sx->setAttribute ("inScope", isSlotInScope (ri, si));
 
             juce::MemoryBlock state;
             plugin->getStateInformation (state);
@@ -1772,6 +1786,7 @@ bool RackEngine::recallSnapshot (int number, juce::String& note)
         return false;
 
     const auto data = snap->data; // keeps it alive if the list changes
+    const auto sc = getScopeFor (number);
     int missing = 0;
 
     for (int ri = 0; ri < (int) racks.size(); ++ri)
@@ -1791,14 +1806,11 @@ bool RackEngine::recallSnapshot (int number, juce::String& note)
             continue;
         }
 
-        if (scope.rackBypass)
+        if (sc.rackBypass)
             r->bypassed = rx->getBoolAttribute ("bypassed", false);
 
         for (int si = 0; si < (int) r->slots.size(); ++si)
         {
-            if (! isSlotInScope (ri, si))
-                continue;
-
             const juce::XmlElement* sx = nullptr;
             const int id = getSlotId (ri, si);
             for (auto* e : rx->getChildWithTagNameIterator ("SLOT"))
@@ -1811,9 +1823,15 @@ bool RackEngine::recallSnapshot (int number, juce::String& note)
                 continue;
             }
 
-            auto& node = r->slots[(size_t) si];
+            if (! sx->getBoolAttribute ("inScope", isSlotInScope (ri, si)))
+                continue;
 
-            if (scope.pluginSettings)
+            auto& node = r->slots[(size_t) si];
+            // A plugin's own bypass parameter is part of its state: keep the
+            // current bypass when the scope leaves it alone
+            const bool bypassWas = node->isBypassed();
+
+            if (sc.pluginSettings)
                 if (auto* stateXml = sx->getChildByName ("STATE"))
                 {
                     juce::MemoryBlock state;
@@ -1821,12 +1839,11 @@ bool RackEngine::recallSnapshot (int number, juce::String& note)
                         node->getProcessor()->setStateInformation (state.getData(), (int) state.getSize());
                 }
 
-            if (scope.pluginBypass)
-                node->setBypassed (sx->getBoolAttribute ("bypassed", false));
+            node->setBypassed (sc.pluginBypass ? sx->getBoolAttribute ("bypassed", false) : bypassWas);
         }
     }
 
-    if (scope.bpm && data->hasAttribute ("bpm"))
+    if (sc.bpm && data->hasAttribute ("bpm"))
         bpm = juce::jlimit (20.0, 300.0, data->getDoubleAttribute ("bpm", 120.0));
 
     if (missing > 0)
@@ -1835,6 +1852,71 @@ bool RackEngine::recallSnapshot (int number, juce::String& note)
     timerCallback();
     sendChangeMessage();
     return true;
+}
+
+static juce::XmlElement* findSnapshotSlot (juce::XmlElement& data, int rackId, int slotId)
+{
+    for (auto* rx : data.getChildWithTagNameIterator ("RACK"))
+        if (rx->getIntAttribute ("id") == rackId)
+            for (auto* sx : rx->getChildWithTagNameIterator ("SLOT"))
+                if (sx->getIntAttribute ("id") == slotId)
+                    return sx;
+    return nullptr;
+}
+
+SnapshotScope RackEngine::getScopeFor (int snapshot) const
+{
+    auto* snap = getSnapshotInfo (snapshot);
+    if (snap == nullptr || snap->data == nullptr)
+        return scope;
+    auto* sc = snap->data->getChildByName ("SCOPE");
+    return sc != nullptr ? scopeFromXml (*sc) : scope;   // 0.13.0 snapshots: the show's scope
+}
+
+void RackEngine::setScopeFor (int snapshot, const SnapshotScope& s)
+{
+    auto* snap = getSnapshotInfo (snapshot);
+    if (snap == nullptr || snap->data == nullptr)
+    {
+        setScope (s);
+        return;
+    }
+    if (auto* old = snap->data->getChildByName ("SCOPE"))
+        snap->data->removeChildElement (old, true);
+    writeScope (*snap->data->createNewChildElement ("SCOPE"), s);
+    sendChangeMessage();
+}
+
+bool RackEngine::snapshotHasSlot (int snapshot, int rack, int slot) const
+{
+    auto* snap = getSnapshotInfo (snapshot);
+    if (snap == nullptr || snap->data == nullptr)
+        return true;
+    return findSnapshotSlot (*snap->data, getRackId (rack), getSlotId (rack, slot)) != nullptr;
+}
+
+bool RackEngine::isSlotInScopeFor (int snapshot, int rack, int slot) const
+{
+    auto* snap = getSnapshotInfo (snapshot);
+    if (snap == nullptr || snap->data == nullptr)
+        return isSlotInScope (rack, slot);
+    auto* sx = findSnapshotSlot (*snap->data, getRackId (rack), getSlotId (rack, slot));
+    return sx != nullptr && sx->getBoolAttribute ("inScope", isSlotInScope (rack, slot));
+}
+
+void RackEngine::setSlotInScopeFor (int snapshot, int rack, int slot, bool in)
+{
+    auto* snap = getSnapshotInfo (snapshot);
+    if (snap == nullptr || snap->data == nullptr)
+    {
+        setSlotInScope (rack, slot, in);
+        return;
+    }
+    if (auto* sx = findSnapshotSlot (*snap->data, getRackId (rack), getSlotId (rack, slot)))
+    {
+        sx->setAttribute ("inScope", in);
+        sendChangeMessage();
+    }
 }
 
 void RackEngine::renameSnapshot (int number, const juce::String& name)
@@ -1863,6 +1945,8 @@ bool RackEngine::importSceneFile (const juce::XmlElement& full, int number, cons
 
     auto x = std::make_unique<juce::XmlElement> ("SNAPSHOT");
     x->setAttribute ("bpm", full.getDoubleAttribute ("bpm", bpm.load()));
+    writeScope (*x->createNewChildElement ("SCOPE"),
+                full.getChildByName ("SCOPE") != nullptr ? scopeFromXml (*full.getChildByName ("SCOPE")) : scope);
     int ri = 0;
 
     for (auto* rackXml : full.getChildWithTagNameIterator ("RACK"))
@@ -1877,6 +1961,7 @@ bool RackEngine::importSceneFile (const juce::XmlElement& full, int number, cons
             auto* sx = rx->createNewChildElement ("SLOT");
             sx->setAttribute ("id", getSlotId (ri, si++));
             sx->setAttribute ("bypassed", slotXml->getBoolAttribute ("bypassed", false));
+            sx->setAttribute ("inScope", slotXml->getBoolAttribute ("inScope", true));
             if (auto* st = slotXml->getChildByName ("STATE"))
                 sx->addChildElement (new juce::XmlElement (*st));
         }

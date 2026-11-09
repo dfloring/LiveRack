@@ -80,23 +80,77 @@ void PluginDock::releaseEditor()
 int PluginDock::getPreferredHeight() const
 {
     const int chrome = 10 + 32 + 8 + (tabs.isEmpty() ? 0 : 36) + 10;
-    return chrome + (editor != nullptr ? editor->getHeight() : 140);
+    return chrome + (editor != nullptr ? juce::jmax (editor->getHeight(), naturalSize.y) : 140);
 }
 
 void PluginDock::componentMovedOrResized (juce::Component&, bool, bool wasResized)
 {
-    if (! wasResized)
+    if (! wasResized || fitting)
         return;
+
+    // The plugin (or the user) changed its size, unless it's just finishing
+    // the size the panel asked for
+    if (editor != nullptr && juce::Point<int> (editor->getWidth(), editor->getHeight()) != lastFitted)
+        naturalSize = { editor->getWidth(), editor->getHeight() };
 
     layoutEditor();
     if (onPreferredHeightChanged != nullptr)
         onPreferredHeightChanged();
 }
 
+// Fits the editor in the panel: a resizable one is sized to the space (up
+// to its own size, within its limits). One that can't resize and doesn't fit
+// opens in its own window instead of falling off the edge. (Plugin editors
+// are native views on the Mac, so they can't be scaled or scrolled here.)
 void PluginDock::layoutEditor()
 {
-    if (editor != nullptr)
-        editor->setTopLeftPosition (juce::jmax (0, (editorHolder.getWidth() - editor->getWidth()) / 2), 0);
+    if (editor == nullptr)
+        return;
+
+    const auto avail = editorHolder.getLocalBounds();
+    if (avail.getWidth() < 50 || avail.getHeight() < 50)
+        return;
+
+    if (editor->isResizable())
+    {
+        juce::Rectangle<int> b (editor->getX(), editor->getY(),
+                                juce::jmin (naturalSize.x, avail.getWidth()),
+                                juce::jmin (naturalSize.y, avail.getHeight()));
+        if (auto* c = editor->getConstrainer())
+            c->checkBounds (b, editor->getBounds(), {}, false, false, true, true);
+
+        if (b.getWidth() != editor->getWidth() || b.getHeight() != editor->getHeight())
+        {
+            const juce::ScopedValueSetter<bool> svs (fitting, true);
+            lastFitted = { b.getWidth(), b.getHeight() };
+            editor->setSize (b.getWidth(), b.getHeight());
+        }
+    }
+
+    editor->setTopLeftPosition (juce::jmax (0, (avail.getWidth() - editor->getWidth()) / 2), 0);
+
+    const bool cutOff = editor->getWidth() > avail.getWidth() + 2 || editor->getHeight() > avail.getHeight() + 2;
+
+    if (cutOff && ! poppedTooBig)
+    {
+        poppedTooBig = true;
+        // Wait for the layout to settle (the panel may be about to grow); if it
+        // still doesn't fit, take it out of the panel
+        juce::Component::SafePointer<PluginDock> safe (this);
+        auto* shown = shownProcessor;
+        juce::Timer::callAfterDelay (400, [safe, shown]
+        {
+            if (safe == nullptr || safe->editor == nullptr || safe->shownProcessor != shown)
+                return;
+            const auto a = safe->editorHolder.getLocalBounds();
+            if (safe->editor->getWidth() > a.getWidth() + 2 || safe->editor->getHeight() > a.getHeight() + 2)
+            {
+                safe->tooBig = shown;
+                safe->releaseEditor();
+                safe->show (safe->rack, safe->slot);
+            }
+        });
+    }
 }
 
 void PluginDock::show (int newRack, int newSlot)
@@ -110,7 +164,14 @@ void PluginDock::show (int newRack, int newSlot)
     if (plugin != shownProcessor)
         releaseEditor();
 
-    if (plugin == nullptr)
+    if (plugin != tooBig)
+        tooBig = nullptr;
+
+    if (plugin != nullptr && plugin == tooBig)
+    {
+        message = "This plugin is too big for this panel. Pop Out opens it in its own window, or make the window bigger.";
+    }
+    else if (plugin == nullptr)
     {
         message = rack >= 0 ? "No plugin in this rack yet. Click \"+ Add plugin\" in the strip."
                             : "Add a rack to get started.";
@@ -129,6 +190,8 @@ void PluginDock::show (int newRack, int newSlot)
 
             editor.reset (ed);
             shownProcessor = plugin;
+            naturalSize = { ed->getWidth(), ed->getHeight() };
+            poppedTooBig = false;
             editorHolder.addAndMakeVisible (ed);
             ed->addComponentListener (this);
             message.clear();
@@ -353,4 +416,18 @@ void PluginDock::resized()
 
     editorHolder.setBounds (area);
     layoutEditor();
+
+    // A plugin that was too big gets another go when the panel grows enough
+    if (tooBig != nullptr && area.getWidth() >= naturalSize.x && area.getHeight() >= naturalSize.y)
+    {
+        juce::Component::SafePointer<PluginDock> safe (this);
+        juce::MessageManager::callAsync ([safe]
+        {
+            if (safe != nullptr && safe->tooBig != nullptr)
+            {
+                safe->tooBig = nullptr;
+                safe->show (safe->rack, safe->slot);
+            }
+        });
+    }
 }

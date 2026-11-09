@@ -24,7 +24,7 @@ export function buildVariables(state) {
 		definitions[`rack_${n}_latency`] = { name: `Rack ${n} latency (ms)` }
 		definitions[`rack_${n}_group`] = { name: `Rack ${n} latency group` }
 		values[`rack_${n}_name`] = r.name
-		values[`rack_${n}_gr`] = r.gr >= 59 ? 'MUTE' : r.gr > 0.4 ? `-${r.gr.toFixed(1)}` : ''
+		values[`rack_${n}_gr`] = r.gr >= 59 ? '-inf' : r.gr > 0.4 ? `-${r.gr.toFixed(1)}` : ''
 		values[`rack_${n}_latency`] = (r.latency || 0).toFixed(2)
 		values[`rack_${n}_group`] = r.group
 	})

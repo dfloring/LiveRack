@@ -148,8 +148,16 @@ public:
     // Snapshot scope: which plugins a snapshot recalls, and what else
     bool isSlotInScope (int rack, int slot) const;
     void setSlotInScope (int rack, int slot, bool);
-    const SnapshotScope& getScope() const { return scope; }
+    const SnapshotScope& getScope() const { return scope; }   // what new snapshots start with
     void setScope (const SnapshotScope&);
+
+    // Each snapshot keeps its own scope (copied from the one above when it's
+    // stored). snapshot -1 = the scope new snapshots start with.
+    SnapshotScope getScopeFor (int snapshot) const;
+    void setScopeFor (int snapshot, const SnapshotScope&);
+    bool isSlotInScopeFor (int snapshot, int rack, int slot) const;
+    void setSlotInScopeFor (int snapshot, int rack, int slot, bool);
+    bool snapshotHasSlot (int snapshot, int rack, int slot) const;
 
     // Hot Plugins: up to 12 pinned plugins (by slot id)
     static constexpr int maxHotPlugins = 12;

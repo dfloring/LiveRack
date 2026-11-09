@@ -89,13 +89,13 @@ Give racks a group letter (A–H) with the badge on the strip. Every rack in a g
 - The **show** holds everything: racks, plugins and their settings, routing, latency groups, pages, Hot Plugins, User Keys, BPM, scope, the rack window, and all the snapshots. **Save** (Cmd+S) writes it; the folder button has **Save As**, **Open** (Cmd+O) and **New Show**. The window title shows the show's name and "(edited)" when it has unsaved changes; opening another show asks first. An edited show is also kept automatically every minute and on quit, and comes back on launch.
 - A **snapshot** is a numbered (and optionally named) set of plugin settings stored in the show. **STORE** stores one; console scene numbers map to snapshot numbers.
 - Recalling a snapshot **never adds, removes or moves plugins or racks**. It sets the settings and bypass of the plugins already in the show, and (if in scope) rack bypass and BPM. A plugin added after the snapshot was stored is left as it is (the status bar says how many); a plugin that was deleted is skipped.
-- **Scope** (one for the whole show) sets what recalls change: plugin settings, plugin bypass, rack bypass and BPM, plus a map of every plugin. Click a plugin, or a rack's name for the whole rack, to include it or leave it alone. A plugin can also be set from its right-click menu (**Recalled by snapshots**).
+- **Scope:** each snapshot has its own: what its recall changes (plugin settings, plugin bypass, rack bypass, BPM) and which plugins it touches. The Scope window edits any snapshot's scope (pick it at the top right), or the "New snapshots" scope that a newly stored snapshot starts with. Click a plugin, or a rack's name for the whole rack, to include it or leave it alone. Also from the snapshot list (**Scope of Snapshot**) and a plugin's right-click menu (**Recalled by new snapshots / by snapshot N**). With plugin bypass out of scope, a recall keeps the plugin's current bypass even if its saved settings include a bypass switch.
 - **Recall Safe** racks are never touched by recalls.
 - Old files: opening a pre-0.13 `.liverack` file opens it as a show. Scene files in a console's scene folder are imported into the show the first time their scene is recalled (if they have the same racks and plugins).
 
 ## Rack window
 
-The plugin panel shows the selected rack: its colour, name, console channel, latency, in/out meters, **Rack Bypass**, and a tab for each plugin. The rack window button (View group) moves it into its own window, e.g. on a second screen. Whether it's open and where are saved in the show.
+The plugin panel shows the selected rack: its colour, name, console channel, latency, in/out meters, **Rack Bypass**, and a tab for each plugin. A resizable plugin window is sized to fit the panel. One that can't resize and doesn't fit isn't squeezed in: **Pop Out** opens it in its own window, or make the window bigger and it comes back. The rack window button (View group) moves it into its own window, e.g. on a second screen. Whether it's open and where are saved in the show.
 
 ## Console Link (follow the console, like Waves ProLink)
 

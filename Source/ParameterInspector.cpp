@@ -93,7 +93,7 @@ void ParameterInspector::timerCallback()
     float db = 0.0f;
     if (GainReduction::read (plugin, probe, db))
         sourceLabel.setText ("GR source: " + probe.describe (plugin) + "    now: "
-                               + (std::isinf (db) ? juce::String ("MUTE") : db < 0.05f ? juce::String ("0.0 dB") : "-" + juce::String (db, 1) + " dB"),
+                               + (std::isinf (db) || db >= 60.0f ? juce::String ("-inf dB") : db < 0.05f ? juce::String ("0.0 dB") : "-" + juce::String (db, 1) + " dB"),
                              juce::dontSendNotification);
 }
 

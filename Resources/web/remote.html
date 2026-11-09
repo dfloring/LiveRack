@@ -202,7 +202,7 @@ function render() {
     if (!r.slots.length) h += `<div class="empty" style="padding:12px">No plugins</div>`;
     h += `</div>
       <div class="meter"><i style="width:${Math.round(r.level * 100)}%"></i></div>
-      <div class="foot"><button class="${r.bypass ? 'byp' : ''}" data-bypass="${ri}">${r.bypass ? 'BYPASSED' : 'BYPASS'}</button><span class="gr">${r.gr >= 59 ? 'MUTE' : r.gr > 0.4 ? '-' + r.gr.toFixed(1) : ''}</span></div>
+      <div class="foot"><button class="${r.bypass ? 'byp' : ''}" data-bypass="${ri}">${r.bypass ? 'BYPASSED' : 'BYPASS'}</button><span class="gr">${r.gr >= 59 ? '-inf' : r.gr > 0.4 ? '-' + r.gr.toFixed(1) : ''}</span></div>
     </div>`;
   });
   const strips = $('strips'), scroll = strips.scrollLeft;

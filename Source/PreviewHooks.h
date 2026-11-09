@@ -72,6 +72,8 @@ struct PreviewHooks
         if (open == "slotmenu") m.showSlotMenu (5, 1, m.strips.getSlotScreenBounds (5, 1));
         if (open == "rackmenu") m.showRackMenu (4);
         if (open == "comp")     m.select (0, 1);
+        if (open == "toggle")   juce::Timer::callAfterDelay (1500, [&m] { m.select (0, 1); m.setTwoWindowMode (true); m.setTwoWindowMode (false); m.select (0, 2); });
+        if (open == "popout")   juce::Timer::callAfterDelay (1500, [&m] { m.select (0, 2); m.popOutEditor (0, 2); });
         if (open == "picker")
         {
             m.showAddPluginMenu (0);
@@ -116,11 +118,60 @@ struct PreviewHooks
                 m.openShowFile (f);
                 std::cerr << "SHOWFILE reopened: racks " << m.engine.getNumRacks() << " snapshots " << m.engine.getSnapshots().size()
                           << " note: " << m.consoleNote << " edited " << m.engine.isShowEdited() << std::endl;
+                // Each snapshot keeps its own scope
+                {
+                    auto& e = m.engine;
+                    auto* comp = e.getPlugin (0, 1);
+                    e.setSlotInScope (0, 1, true);
+                    m.storeScene (20, "Comp in");
+                    e.setSlotInScope (0, 1, false);
+                    m.storeScene (21, "Comp out");
+                    comp->getParameters()[0]->setValueNotifyingHost (0.11f);
+                    m.storeScene (22, "Comp low");
+                    const float low = comp->getParameters()[0]->getValue();
+                    comp->getParameters()[0]->setValueNotifyingHost (0.9f);
+                    m.recallScene (21);
+                    const bool keptBy21 = std::abs (comp->getParameters()[0]->getValue() - 0.9f) < 0.01f;
+                    m.recallScene (20);
+                    const bool setBy20 = std::abs (comp->getParameters()[0]->getValue() - 0.9f) > 0.01f;
+                    std::cerr << "SHOWFILE per-snapshot scope: 21 leaves comp " << keptBy21 << ", 20 recalls it " << setBy20
+                              << ", 21 scope says out " << ! e.isSlotInScopeFor (21, 0, 1) << ", 20 in " << e.isSlotInScopeFor (20, 0, 1) << std::endl;
+                    // editing a stored snapshot's scope
+                    e.setSlotInScopeFor (22, 0, 1, true);
+                    auto sc = e.getScopeFor (22); sc.pluginBypass = false; e.setScopeFor (22, sc);
+                    comp->getParameters()[0]->setValueNotifyingHost (0.9f);
+                    e.setSlotBypassed (0, 1, true);
+                    std::cerr << "SHOWFILE before recall bypassed " << e.isSlotBypassed (0, 1) << " scopeFor22.bypass " << e.getScopeFor (22).pluginBypass << std::endl;
+                    m.recallScene (22);
+                    std::cerr << "SHOWFILE edited scope of 22: comp back to low " << (std::abs (comp->getParameters()[0]->getValue() - low) < 0.01f)
+                              << ", bypass left on " << e.isSlotBypassed (0, 1) << ", default scope bypass still " << e.getScope().pluginBypass << std::endl;
+                    e.setSlotBypassed (0, 1, false);
+                    // survives save / open
+                    m.saveShow (false);
+                    m.openShowFile (f);
+                    std::cerr << "SHOWFILE after reopen: 21 out " << ! e.isSlotInScopeFor (21, 0, 1) << ", 22 bypass scope " << e.getScopeFor (22).pluginBypass << std::endl;
+                    m.scopeEditor = nullptr;
+                    m.currentScene = 22;
+                    m.showScope();
+                }
+                // A plugin editor too big for the panel opens in its own window
+                if (auto* top = m.getTopLevelComponent())
+                    top->setSize (1300, 780);
+                m.select (0, 2);
+                juce::Timer::callAfterDelay (1500, [&m]
+                {
+                    auto* p = m.engine.getPlugin (0, 2);
+                    auto* ed = p != nullptr ? p->getActiveEditor() : nullptr;
+                    std::cerr << "SHOWFILE big editor " << (ed ? ed->getWidth() : 0) << "x" << (ed ? ed->getHeight() : 0)
+                              << " in own window " << (ed != nullptr && ed->getTopLevelComponent() != m.getTopLevelComponent()) << std::endl;
+                });
+                juce::Timer::callAfterDelay (2500, [&m]
+                {
                 m.setTwoWindowMode (true);
                 m.storeWindowLayout();
                 auto* w = m.engine.getShowExtra ("WINDOWS");
                 std::cerr << "SHOWFILE windows extra two=" << (w != nullptr ? w->getBoolAttribute ("twoWindows") : -1) << std::endl;
-                m.showSnapshotMenu();
+                });
             });
 
         if (open == "selftest")

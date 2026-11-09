@@ -204,7 +204,7 @@ public:
             const bool recentDrop = s.dropouts > 0 && juce::Time::getCurrentTime() - s.lastDropout < juce::RelativeTime::minutes (5);
             juce::String rest;
             rest << juce::String (s.sampleRate / 1000.0, 1) << " kHz  " << s.bufferSize << " smp  DSP "
-                 << juce::String (s.cpu * 100.0, 0) << "% (pk " << juce::String (s.peakCpu * 100.0, 0) << "%)";
+                 << juce::String ((int) std::ceil (s.cpu * 100.0)) << "% (pk " << juce::String ((int) std::ceil (s.peakCpu * 100.0)) << "%)";
             if (s.dropouts >= 0)
             {
                 rest << "  " << s.dropouts << (s.dropouts == 1 ? " drop" : " drops");
@@ -1216,7 +1216,9 @@ void MainComponent::showSlotMenu (int rack, int slot, juce::Rectangle<int> scree
     m.addItem (2, "Open in its own window");
     m.addItem (8, hot ? "Unpin from Hot Plugins" : "Pin to Hot Plugins",
                hot || (int) engine.getHotPlugins().size() < RackEngine::maxHotPlugins);
-    m.addItem (9, "Recalled by snapshots", true, engine.isSlotInScope (rack, slot));
+    m.addItem (9, "Recalled by new snapshots", true, engine.isSlotInScope (rack, slot));
+    if (engine.getSnapshotInfo (currentScene) != nullptr && engine.snapshotHasSlot (currentScene, rack, slot))
+        m.addItem (11, "Recalled by snapshot " + juce::String (currentScene), true, engine.isSlotInScopeFor (currentScene, rack, slot));
     if (engine.getRackConfig (rack).isMonoToStereo())
         m.addItem (10, "Make this the stereo point", true, engine.getStereoPoint (rack) == slot);
     m.addItem (3, "Move up", slot > 0);
@@ -1235,7 +1237,8 @@ void MainComponent::showSlotMenu (int rack, int slot, juce::Rectangle<int> scree
                                         : juce::PopupMenu::Options().withTargetScreenArea (screenArea);
 
     juce::Component::SafePointer<MainComponent> safe (this);
-    m.showMenuAsync (options, [safe, rack, slot, slotId, hot] (int result)
+    const int scene = currentScene;
+    m.showMenuAsync (options, [safe, rack, slot, slotId, hot, scene] (int result)
     {
         if (safe == nullptr)
             return;
@@ -1251,6 +1254,7 @@ void MainComponent::showSlotMenu (int rack, int slot, juce::Rectangle<int> scree
             case 6: safe->showParameters (rack, slot); break;
             case 8: if (hot) e.unpinHot (slotId); else e.pinHot (slotId); break;
             case 9: e.setSlotInScope (rack, slot, ! e.isSlotInScope (rack, slot)); break;
+            case 11: e.setSlotInScopeFor (scene, rack, slot, ! e.isSlotInScopeFor (scene, rack, slot)); break;
             case 10:
                 safe->dock.releaseEditor();
                 e.setStereoPoint (rack, slot);
@@ -1619,7 +1623,7 @@ void MainComponent::showScope()
     }
 
     juce::Component::SafePointer<MainComponent> safe (this);
-    scopeEditor = new ScopeEditor (engine);
+    scopeEditor = new ScopeEditor (engine, engine.getSnapshotInfo (currentScene) != nullptr ? currentScene : -1);
     scopeWindow = std::make_unique<ToolWindow> ("LiveRack - Snapshot Scope", scopeEditor, "scopeWindow", [safe]
     {
         juce::MessageManager::callAsync ([safe]
@@ -1897,6 +1901,7 @@ void MainComponent::showSnapshotMenu()
     const auto num = has ? " " + juce::String (currentScene) : juce::String();
     m.addItem (2, "Rename Snapshot" + num + "...", has);
     m.addItem (3, "Delete Snapshot" + num, has);
+    m.addItem (4, "Scope of Snapshot" + num + "...", has);
 
     juce::Component::SafePointer<MainComponent> safe (this);
     m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (sceneChip)),
@@ -1905,6 +1910,7 @@ void MainComponent::showSnapshotMenu()
             if (safe == nullptr || r == 0) return;
             if (r >= 1000) { safe->recallScene (r - 1000); return; }
             if (r == 1) safe->showStoreSceneDialog();
+            if (r == 4) { safe->scopeWindow.reset(); safe->scopeEditor = nullptr; safe->showScope(); }
             if (r == 3)
             {
                 safe->engine.deleteSnapshot (safe->currentScene);

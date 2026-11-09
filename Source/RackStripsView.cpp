@@ -437,7 +437,7 @@ public:
             }
 
             juce::String label = m.estimated ? "~GR" : "GR";
-            if (isMuted)     label = "MUTE";
+            if (isMuted)     label = m.estimated ? "~-inf" : "-inf";
             else if (active) label = (m.estimated ? "~-" : "-") + juce::String (m.gr, 1);
 
             g.setColour (grColour.withAlpha (active ? 1.0f : 0.45f));
@@ -931,8 +931,12 @@ void RackStripsView::updateMeters()
                 continue;
             }
 
+            // 60 dB or more of reduction (a closed gate, say) reads as -inf
+            if (gr >= 60.0f)
+                gr = GainReduction::muted;
+
             if (std::isinf (gr) || std::isinf (m.gr))
-                m.gr = gr;                                                // straight to / from MUTE
+                m.gr = gr;                                                // straight to / from -inf
             else
                 m.gr = gr > m.gr ? gr : m.gr * 0.7f + gr * 0.3f;         // fast attack, smooth release
         }

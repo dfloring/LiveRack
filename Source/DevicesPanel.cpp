@@ -118,7 +118,7 @@ public:
         g.setColour (Theme::textDim);
         g.setFont (juce::FontOptions (11.5f));
         g.drawText ("DSP", dspRow, juce::Justification::centredLeft);
-        g.drawText (juce::String (s.cpu * 100.0, 0) + "%  (peak " + juce::String (s.peakCpu * 100.0, 0) + "%)", dspRow, juce::Justification::centredRight);
+        g.drawText (juce::String ((int) std::ceil (s.cpu * 100.0)) + "%  (peak " + juce::String ((int) std::ceil (s.peakCpu * 100.0)) + "%)", dspRow, juce::Justification::centredRight);
         auto bar = area.removeFromTop (8).toFloat();
         g.setColour (Theme::raised);
         g.fillRoundedRectangle (bar, 4.0f);

@@ -18,7 +18,7 @@ namespace
 class ScopeEditor::Map : public juce::Component
 {
 public:
-    explicit Map (RackEngine& e) : engine (e) {}
+    Map (RackEngine& e, const int& t) : engine (e), target (t) {}
 
     void update()
     {
@@ -47,7 +47,7 @@ public:
             const int n = engine.getNumSlots (r);
             int in = 0;
             for (int s = 0; s < n; ++s)
-                if (engine.isSlotInScope (r, s)) ++in;
+                if (engine.isSlotInScopeFor (target, r, s)) ++in;
 
             const bool safe = cfg.recallSafe;
             const float alpha = safe ? 0.5f : 1.0f;
@@ -74,7 +74,8 @@ public:
             for (int s = 0; s < n; ++s)
             {
                 auto b = item (r, s).toFloat();
-                const bool on = engine.isSlotInScope (r, s) && ! safe;
+                const bool on = engine.isSlotInScopeFor (target, r, s) && ! safe;
+                const bool absent = ! engine.snapshotHasSlot (target, r, s);
 
                 g.setColour (on ? juce::Colour (0xff2f5f94) : Theme::raised);
                 g.fillRoundedRectangle (b, 8.0f);
@@ -102,8 +103,14 @@ public:
                 auto* p = engine.getPlugin (r, s);
                 g.setColour (on ? juce::Colours::white : Theme::textDim);
                 g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-                g.drawFittedText (p != nullptr ? p->getName() : "?", b.withTrimmedLeft (38.0f).reduced (4.0f, 0.0f).toNearestInt(),
-                                  juce::Justification::centredLeft, 1, 0.8f);
+                auto label = b.withTrimmedLeft (38.0f).reduced (4.0f, 0.0f).toNearestInt();
+                if (absent)
+                {
+                    g.setFont (juce::FontOptions (10.5f));
+                    g.drawText ("not in this snapshot", label.removeFromBottom (14), juce::Justification::centredLeft);
+                    g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+                }
+                g.drawFittedText (p != nullptr ? p->getName() : "?", label, juce::Justification::centredLeft, 1, 0.8f);
             }
         }
 
@@ -125,28 +132,40 @@ public:
             {
                 bool all = true;
                 for (int s = 0; s < engine.getNumSlots (r); ++s)
-                    all = all && engine.isSlotInScope (r, s);
+                    all = all && (engine.isSlotInScopeFor (target, r, s) || ! engine.snapshotHasSlot (target, r, s));
                 for (int s = 0; s < engine.getNumSlots (r); ++s)
-                    engine.setSlotInScope (r, s, ! all);
+                    engine.setSlotInScopeFor (target, r, s, ! all);
                 return;
             }
 
             for (int s = 0; s < engine.getNumSlots (r); ++s)
                 if (item (r, s).contains (e.getPosition()))
                 {
-                    engine.setSlotInScope (r, s, ! engine.isSlotInScope (r, s));
+                    engine.setSlotInScopeFor (target, r, s, ! engine.isSlotInScopeFor (target, r, s));
                     return;
                 }
         }
     }
 
     RackEngine& engine;
+    const int& target;
 };
 
 //==============================================================================
-ScopeEditor::ScopeEditor (RackEngine& e) : engine (e)
+ScopeEditor::ScopeEditor (RackEngine& e, int snapshot) : engine (e), target (snapshot)
 {
-    map = std::make_unique<Map> (e);
+    map = std::make_unique<Map> (e, target);
+
+    targetBox.onChange = [this]
+    {
+        const int id = targetBox.getSelectedId();
+        if (id > 0)
+        {
+            target = id == 1 ? -1 : id - 1000;
+            refresh();
+        }
+    };
+    addAndMakeVisible (targetBox);
 
     for (auto& def : pillDefs)
     {
@@ -154,9 +173,9 @@ ScopeEditor::ScopeEditor (RackEngine& e) : engine (e)
         auto member = def.member;
         b->onClick = [this, member]
         {
-            auto s = engine.getScope();
+            auto s = engine.getScopeFor (target);
             s.*member = ! (s.*member);
-            engine.setScope (s);
+            engine.setScopeFor (target, s);
         };
         addAndMakeVisible (b);
     }
@@ -164,7 +183,7 @@ ScopeEditor::ScopeEditor (RackEngine& e) : engine (e)
     summary.setFont (juce::FontOptions (14.0f, juce::Font::bold));
     help.setFont (juce::FontOptions (13.0f));
     help.setColour (juce::Label::textColourId, Theme::textDim);
-    help.setText ("What every snapshot in this show recalls. Snapshots never add, remove or move plugins. "
+    help.setText ("Each snapshot has its own scope; new snapshots start with the \"New snapshots\" one. Snapshots never add, remove or move plugins. "
                   "Click a plugin to include or leave it alone, or a rack name for the whole rack. Recall Safe racks are never touched.",
                   juce::dontSendNotification);
     addAndMakeVisible (summary);
@@ -182,7 +201,29 @@ ScopeEditor::~ScopeEditor() = default;
 
 void ScopeEditor::refresh()
 {
-    const auto s = engine.getScope();
+    // The snapshot list, and which one is being edited
+    if (target >= 0 && engine.getSnapshotInfo (target) == nullptr)
+        target = -1;
+
+    juce::StringArray names { "New snapshots" };
+    for (auto& snap : engine.getSnapshots())
+        names.add ("Snapshot " + juce::String (snap.number) + (snap.name.isNotEmpty() ? "  " + snap.name : juce::String()));
+
+    juce::StringArray shown;
+    for (int i = 0; i < targetBox.getNumItems(); ++i)
+        shown.add (targetBox.getItemText (i));
+
+    if (shown != names)
+    {
+        targetBox.clear (juce::dontSendNotification);
+        targetBox.addItem (names[0], 1);
+        int i = 1;
+        for (auto& snap : engine.getSnapshots())
+            targetBox.addItem (names[i++], 1000 + snap.number);
+    }
+    targetBox.setSelectedId (target < 0 ? 1 : 1000 + target, juce::dontSendNotification);
+
+    const auto s = engine.getScopeFor (target);
     int i = 0;
     for (auto& def : pillDefs)
         pills[i++]->setToggleState (s.*(def.member), juce::dontSendNotification);
@@ -194,7 +235,7 @@ void ScopeEditor::refresh()
         for (int sl = 0; sl < engine.getNumSlots (r); ++sl)
         {
             ++total;
-            if (engine.isSlotInScope (r, sl)) ++in;
+            if (engine.isSlotInScopeFor (target, r, sl)) ++in;
         }
     }
 
@@ -210,6 +251,7 @@ void ScopeEditor::paint (juce::Graphics& g)
     g.setColour (Theme::textDim);
     g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
     g.drawText ("RECALLS", 16, 12, 200, 16, juce::Justification::centredLeft);
+    g.drawText ("SCOPE OF", targetBox.getX() - 80, targetBox.getY(), 72, targetBox.getHeight(), juce::Justification::centredRight);
 }
 
 void ScopeEditor::resized()
@@ -218,6 +260,8 @@ void ScopeEditor::resized()
     area.removeFromTop (20);
 
     auto row = area.removeFromTop (44);
+    targetBox.setBounds (row.removeFromRight (300).withSizeKeepingCentre (300, 34));
+    row.removeFromRight (90);
     for (auto* p : pills)
     {
         p->setBounds (row.removeFromLeft (juce::jmax (110, p->getBestWidthForHeight (44) + 24)));

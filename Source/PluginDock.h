@@ -53,6 +53,10 @@ private:
 
     juce::AudioProcessor* shownProcessor = nullptr;
     std::unique_ptr<juce::AudioProcessorEditor> editor;
+    juce::Point<int> naturalSize;   // the editor's own size, before fitting it in
+    juce::Point<int> lastFitted;    // the size the panel last asked for
+    bool fitting = false, poppedTooBig = false;
+    juce::AudioProcessor* tooBig = nullptr;  // doesn't fit and can't resize: not shown here
     juce::String message;
 
     juce::Rectangle<int> headerArea, meterArea;
