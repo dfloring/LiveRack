@@ -574,7 +574,9 @@ void WebRemote::runPluginView (juce::StreamingSocket& socket, const juce::String
 
                 if (t == "ack")
                     inFlight = juce::jmax (0, inFlight - 1);
-                else if (t != "ping")
+                else if (t == "ping")
+                    lost = ! ws.sendText ("{\"t\":\"pong\"}"); // lets the page tell a live link from a dead one
+                else
                     juce::MessageManager::callAsync ([weak, event] { if (auto c = weak.lock()) c->input (event); });
             }
         }

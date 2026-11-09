@@ -372,8 +372,10 @@ function connectGui(g) {
   g.ws = ws;
   g.ended = false;
 
+  g.heard = performance.now();
   ws.onmessage = async (ev) => {
-    if (gui !== g) return;
+    if (gui !== g || g.ws !== ws) return;
+    g.heard = performance.now();
     if (typeof ev.data === 'string') { guiText(g, JSON.parse(ev.data)); return; }
     try {
       const bmp = await createImageBitmap(ev.data);
@@ -384,11 +386,25 @@ function connectGui(g) {
     if (ws.readyState === 1) ws.send('{"t":"ack"}');
   };
   ws.onclose = () => {
-    if (gui !== g || g.ended) return;
+    if (gui !== g || g.ended || g.ws !== ws || document.hidden) return;
     showMsg('Reconnecting\u2026', false);
     setTimeout(() => { if (gui === g && !g.ended) connectGui(g); }, 1000);
   };
 }
+
+// iPadOS freezes Safari's pages in the background, which kills the stream.
+// Let go while hidden, and pick straight back up on return.
+function reconnectGui(g) {
+  const old = g.ws;
+  g.ws = null;
+  if (old) { old.onclose = null; try { old.close(); } catch (e) {} }
+  if (gui === g && !g.ended && !document.hidden) { showMsg('Reconnecting\u2026', false); connectGui(g); }
+}
+document.addEventListener('visibilitychange', () => {
+  if (!gui || gui.ended) return;
+  if (document.hidden) { const ws = gui.ws; gui.ws = null; if (ws) { ws.onclose = null; try { ws.close(); } catch (e) {} } }
+  else reconnectGui(gui);
+});
 
 function guiText(g, m) {
   if (m.t === 'open') showMsg('', false);
@@ -419,6 +435,8 @@ window.addEventListener('resize', () => { if (gui) fitCanvas(); });
 setInterval(() => {
   if (!gui) return;
   sendGui({ t: 'ping' });
+  // Nothing heard for a while (not even a pong): the link is dead, start over
+  if (!gui.ended && !document.hidden && gui.heard && performance.now() - gui.heard > 8000) reconnectGui(gui);
   const now = performance.now(), secs = (now - gui.statT) / 1000;
   if (secs > 0) $('gstat').textContent = `${Math.round(gui.frames / secs)} fps \u00b7 ${(gui.bytes / secs / 1048576).toFixed(1)} MB/s`;
   gui.frames = 0; gui.bytes = 0; gui.statT = now;
