@@ -250,7 +250,7 @@ public:
         g.setColour (Theme::textDim);
         g.setFont (juce::FontOptions (13.0f));
         juce::String sub = off ? "Link off: open Settings to choose the console"
-                               : s.address + "  " + (s.type == ConsoleLink::Type::yamahaRcp ? "RCP" : "OSC")
+                               : s.address + "  " + (ConsoleLink::isYamaha (s.type) ? "RCP" : "OSC")
                                  + (l.isConnected() ? "  connected" : "  not connected");
         g.drawText (sub, top.withTrimmedLeft (nameW + 14), juce::Justification::centredLeft, true);
 

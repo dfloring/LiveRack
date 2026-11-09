@@ -6,8 +6,8 @@
 class ConsoleLink::RcpThread : public juce::Thread
 {
 public:
-    RcpThread (ConsoleLink& o, juce::String h)
-        : juce::Thread ("Yamaha RCP"), owner (o), host (std::move (h)) {}
+    RcpThread (ConsoleLink& o, juce::String h, juce::String list)
+        : juce::Thread ("Yamaha RCP"), owner (o), host (std::move (h)), sceneList (std::move (list)) {}
 
     ~RcpThread() override { stopThread (4000); }
 
@@ -25,7 +25,7 @@ public:
             }
 
             owner.post ("#connected");
-            send (socket, "sscurrent_ex MIXER:Lib/Scene"); // ask for the current scene
+            send (socket, "sscurrent_ex " + sceneList); // ask for the current scene
             auto lastSend = juce::Time::getMillisecondCounter();
 
             juce::String pending;
@@ -41,7 +41,7 @@ public:
                 // Poll now and then so a dead connection is noticed
                 if (juce::Time::getMillisecondCounter() - lastSend > 20000)
                 {
-                    send (socket, "sscurrent_ex MIXER:Lib/Scene");
+                    send (socket, "sscurrent_ex " + sceneList);
                     lastSend = juce::Time::getMillisecondCounter();
                 }
 
@@ -77,7 +77,7 @@ private:
     }
 
     ConsoleLink& owner;
-    juce::String host;
+    juce::String host, sceneList;
 };
 
 //==============================================================================
@@ -108,6 +108,7 @@ juce::String ConsoleLink::typeName (Type t)
     switch (t)
     {
         case Type::yamahaRcp:    return "Yamaha CL/QL";
+        case Type::yamahaDm7:    return "Yamaha DM7";
         case Type::behringerX32: return "Behringer X32";
         case Type::off:          break;
     }
@@ -134,10 +135,10 @@ void ConsoleLink::start()
     if (settings.type == Type::off || host.isEmpty())
         return;
 
-    if (settings.type == Type::yamahaRcp)
+    if (isYamaha (settings.type))
     {
-        addLog ("Connecting to Yamaha console at " + host + ":49280");
-        rcp = std::make_unique<RcpThread> (*this, host);
+        addLog ("Connecting to Yamaha console at " + host + ":49280, scene list " + rcpSceneList());
+        rcp = std::make_unique<RcpThread> (*this, host, rcpSceneList());
         rcp->startThread();
     }
     else if (settings.type == Type::behringerX32)
@@ -255,16 +256,30 @@ void ConsoleLink::handleRcpLine (const juce::String& line)
 
     // NOTIFY sscurrent_ex MIXER:Lib/Scene 12   (a recall happened)
     // OK sscurrent_ex MIXER:Lib/Scene 12 ...   (answer to our query)
-    if (t.size() >= 4 && t[2] == "MIXER:Lib/Scene"
+    // DM7: NOTIFY sscurrent_ex scene_a 4.00    (point scenes: 4.10 -> 4)
+    if (t.size() >= 4 && t[2].equalsIgnoreCase (rcpSceneList())
         && (t[1] == "sscurrent_ex" || t[1] == "ssrecall_ex"))
     {
-        const int scene = t[3].getIntValue();
+        const auto number = t[3].unquoted();
+        if (! number.containsOnly ("0123456789.") || number.isEmpty())
+            return;
+
+        const int scene = number.getIntValue();
+        if (number.contains (".") && number.fromFirstOccurrenceOf (".", false, false).getIntValue() != 0)
+            addLog ("Point scene " + number + ": recalling snapshot " + juce::String (scene));
 
         if (t[0] == "NOTIFY")
             sceneChanged (scene);
         else if (t[0] == "OK")
             currentScene = scene;
     }
+}
+
+juce::String ConsoleLink::rcpSceneList() const
+{
+    if (settings.type == Type::yamahaDm7)
+        return settings.dm7Side == 1 ? "scene_b" : "scene_a";
+    return "MIXER:Lib/Scene";
 }
 
 void ConsoleLink::sendX32 (const juce::String& address)
@@ -394,6 +409,7 @@ void ConsoleLink::saveSettingsTo (const juce::File& file) const
     xml.setAttribute ("recallScenes", settings.recallScenes);
     xml.setAttribute ("followSelection", settings.followSelection);
     xml.setAttribute ("x32Follow", settings.x32Follow);
+    xml.setAttribute ("dm7Side", settings.dm7Side);
     xml.setAttribute ("name", settings.name);
     for (auto& c : settings.slots)
     {
@@ -416,7 +432,8 @@ void ConsoleLink::loadSettingsFrom (const juce::File& file)
         return;
 
     Settings s;
-    s.type            = (Type) juce::jlimit (0, 2, xml->getIntAttribute ("type", 0));
+    s.type            = (Type) juce::jlimit (0, 3, xml->getIntAttribute ("type", 0));
+    s.dm7Side         = juce::jlimit (0, 1, xml->getIntAttribute ("dm7Side", 0));
     s.address         = xml->getStringAttribute ("address");
     s.recallScenes    = xml->getBoolAttribute ("recallScenes", true);
     s.followSelection = xml->getBoolAttribute ("followSelection", true);
@@ -471,6 +488,9 @@ std::vector<ConsoleLink::CardSlot> ConsoleLink::defaultSlots (Type t)
     if (t == Type::yamahaRcp)
         return { { "Built-in Dante", 1, 0, 1, 64 }, { "MY Slot 1", 0, 0, 1, 0 },
                  { "MY Slot 2", 0, 0, 1, 0 }, { "MY Slot 3", 0, 0, 1, 0 } };
+
+    if (t == Type::yamahaDm7)
+        return { { "Built-in Dante", 1, 0, 1, 64 }, { "PY Slot 1", 0, 0, 1, 0 }, { "PY Slot 2", 0, 0, 1, 0 } };
 
     if (t == Type::behringerX32)
         return { { "Card slot", 2, 0, 1, 32 }, { "AES50 A", 3, 0, 1, 0 }, { "AES50 B", 0, 0, 1, 0 } };

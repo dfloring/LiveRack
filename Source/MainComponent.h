@@ -114,6 +114,10 @@ private:
     void showConsoleSettings (int);
     void showStoreSceneDialog();
     void finishStoreScene (int result);
+    void backUpShowFile (const juce::File&);
+    juce::String snapshotLabel (int number) const;
+    void confirm (const juce::String& title, const juce::String& message,
+                  const juce::String& okText, std::function<void()> onOk);
     void storeScene (int scene, const juce::String& name = {});
     void showSnapshotMenu();
     void recallScene (int scene);

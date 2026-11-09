@@ -1706,6 +1706,9 @@ void MainComponent::saveShow (bool askForFile)
         storeWindowLayout();
         auto xml = engine.createShow();
 
+        if (xml != nullptr)
+            backUpShowFile (f);
+
         if (xml == nullptr || ! xml->writeTo (f))
         {
             showError ("Couldn't save the show", f.getFullPathName());
@@ -1741,6 +1744,36 @@ void MainComponent::saveShow (bool askForFile)
             if (f != juce::File())
                 write (f);
         });
+}
+
+// Before a save writes over a show file, the old file is copied into a
+// "<Show> Backups" folder next to it. The newest 20 are kept.
+void MainComponent::backUpShowFile (const juce::File& f)
+{
+    if (! f.existsAsFile())
+        return;
+
+    const auto folder = f.getParentDirectory().getChildFile (f.getFileNameWithoutExtension() + " Backups");
+    if (! folder.createDirectory())
+        return;
+
+    auto backups = folder.findChildFiles (juce::File::findFiles, false, "*.liverack");
+    std::sort (backups.begin(), backups.end(),
+               [] (const juce::File& a, const juce::File& b) { return a.getFileName() > b.getFileName(); });
+
+    // Nothing changed since the newest backup: don't make another
+    if (! backups.isEmpty() && backups[0].hasIdenticalContentTo (f))
+        return;
+
+    const auto stamp = f.getLastModificationTime().formatted ("%Y-%m-%d %H%M%S");
+    if (! f.copyFileTo (folder.getChildFile (f.getFileNameWithoutExtension() + " " + stamp + ".liverack")))
+        return;
+
+    backups = folder.findChildFiles (juce::File::findFiles, false, "*.liverack");
+    std::sort (backups.begin(), backups.end(),
+               [] (const juce::File& a, const juce::File& b) { return a.getFileName() > b.getFileName(); });
+    for (int i = 20; i < backups.size(); ++i)
+        backups.getReference (i).deleteFile();
 }
 
 // Asks to save an edited show first; then does what was asked
@@ -1913,8 +1946,16 @@ void MainComponent::showSnapshotMenu()
             if (r == 4) { safe->scopeWindow.reset(); safe->scopeEditor = nullptr; safe->showScope(); }
             if (r == 3)
             {
-                safe->engine.deleteSnapshot (safe->currentScene);
-                safe->consoleNote = "Deleted snapshot " + juce::String (safe->currentScene);
+                const int number = safe->currentScene;
+                safe->confirm ("Delete " + safe->snapshotLabel (number) + "?",
+                               "Its plugin settings are removed from the show.", "Delete",
+                               [safe, number]
+                               {
+                                   if (safe == nullptr) return;
+                                   safe->engine.deleteSnapshot (number);
+                                   safe->consoleNote = "Deleted snapshot " + juce::String (number);
+                                   safe->repaint();
+                               });
             }
             if (r == 2)
             {
@@ -1938,6 +1979,21 @@ void MainComponent::mouseUp (const juce::MouseEvent& e)
 {
     if (sceneChip.contains (e.getPosition()))
         showSnapshotMenu();
+}
+
+juce::String MainComponent::snapshotLabel (int number) const
+{
+    auto* info = engine.getSnapshotInfo (number);
+    return "Snapshot " + juce::String (number)
+         + (info != nullptr && info->name.isNotEmpty() ? " (" + info->name + ")" : juce::String());
+}
+
+void MainComponent::confirm (const juce::String& title, const juce::String& message,
+                             const juce::String& okText, std::function<void()> onOk)
+{
+    auto options = juce::MessageBoxOptions::makeOptionsOkCancel (juce::MessageBoxIconType::QuestionIcon,
+                                                                 title, message, okText, "Cancel", this);
+    juce::AlertWindow::showAsync (options, [onOk] (int result) { if (result == 1 && onOk != nullptr) onOk(); });
 }
 
 void MainComponent::showError (const juce::String& title, const juce::String& message)
@@ -2082,11 +2138,21 @@ void MainComponent::showStoreSceneDialog()
 
 void MainComponent::finishStoreScene (int result)
 {
-    if (sceneDialog != nullptr && result == 1)
-        storeScene (juce::jmax (0, sceneDialog->getTextEditorContents ("scene").getIntValue()),
-                    sceneDialog->getTextEditorContents ("name"));
-
     juce::Component::SafePointer<MainComponent> safe (this);
+
+    if (sceneDialog != nullptr && result == 1)
+    {
+        const int number = juce::jmax (0, sceneDialog->getTextEditorContents ("scene").getIntValue());
+        const auto name = sceneDialog->getTextEditorContents ("name");
+
+        if (engine.getSnapshotInfo (number) != nullptr)
+            confirm ("Replace " + snapshotLabel (number) + "?",
+                     "The snapshot already exists. Storing replaces its plugin settings with the current ones.", "Replace",
+                     [safe, number, name] { if (safe != nullptr) safe->storeScene (number, name); });
+        else
+            storeScene (number, name);
+    }
+
     juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->sceneDialog.reset(); });
 }
 

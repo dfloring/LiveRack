@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/banner.png" alt="LiveRack: live audio plugin host for Mac" width="100%"></p>
 
-**LiveRack** hosts racks of VST3 and Audio Unit plugins for live mixing, in the spirit of Waves SuperRack and Fourier transform.engine. It runs on a Mac with Apple silicon, talks to your console over Dante or the Waves SoundGrid Driver, follows scene recalls and channel selection from Yamaha CL/QL and Behringer X32 consoles, and can be driven from a Stream Deck through Bitfocus Companion.
+**LiveRack** hosts racks of VST3 and Audio Unit plugins for live mixing, in the spirit of Waves SuperRack and Fourier transform.engine. It runs on a Mac with Apple silicon, talks to your console over Dante or the Waves SoundGrid Driver, follows scene recalls and channel selection from Yamaha CL/QL/DM7 and Behringer X32 consoles, and can be driven from a Stream Deck through Bitfocus Companion.
 
 <p align="center"><img src="docs/screenshot-main.png" alt="LiveRack main window" width="100%"></p>
 
@@ -86,7 +86,7 @@ Give racks a group letter (A–H) with the badge on the strip. Every rack in a g
 
 ## Show file and snapshots
 
-- The **show** holds everything: racks, plugins and their settings, routing, latency groups, pages, Hot Plugins, User Keys, BPM, scope, the rack window, and all the snapshots. **Save** (Cmd+S) writes it; the folder button has **Save As**, **Open** (Cmd+O) and **New Show**. The window title shows the show's name and "(edited)" when it has unsaved changes; opening another show asks first. An edited show is also kept automatically every minute and on quit, and comes back on launch.
+- The **show** holds everything: racks, plugins and their settings, routing, latency groups, pages, Hot Plugins, User Keys, BPM, scope, the rack window, and all the snapshots. **Save** (Cmd+S) writes it; the folder button has **Save As**, **Open** (Cmd+O) and **New Show**. The window title shows the show's name and "(edited)" when it has unsaved changes; opening another show asks first. An edited show is also kept automatically every minute and on quit, and comes back on launch. Each save first copies the previous version into a "<Show> Backups" folder next to the show file (the newest 20 are kept). Storing over an existing snapshot from the Store dialog, and deleting one, ask first.
 - A **snapshot** is a numbered (and optionally named) set of plugin settings stored in the show. **STORE** stores one; console scene numbers map to snapshot numbers.
 - Recalling a snapshot **never adds, removes or moves plugins or racks**. It sets the settings and bypass of the plugins already in the show, and (if in scope) rack bypass and BPM. A plugin added after the snapshot was stored is left as it is (the status bar says how many); a plugin that was deleted is skipped.
 - **Scope:** each snapshot has its own: what its recall changes (plugin settings, plugin bypass, rack bypass, BPM) and which plugins it touches. The Scope window edits any snapshot's scope (pick it at the top right), or the "New snapshots" scope that a newly stored snapshot starts with. Click a plugin, or a rack's name for the whole rack, to include it or leave it alone. Also from the snapshot list (**Scope of Snapshot**) and a plugin's right-click menu (**Recalled by new snapshots / by snapshot N**). With plugin bypass out of scope, a recall keeps the plugin's current bypass even if its saved settings include a bypass switch.
@@ -100,6 +100,7 @@ The plugin panel shows the selected rack: its colour, name, console channel, lat
 ## Console Link (follow the console, like Waves ProLink)
 
 - **Yamaha CL/QL:** Remote Control Protocol, TCP port 49280. Use the console's IP from SETUP > NETWORK (FOR MIXER CONTROL).
+- **Yamaha DM7:** the same protocol and port, using the For Mixer Control IP. Pick scene list A, or B for the second side in Split mode. Scene 4.00 recalls snapshot 4; point scenes such as 4.10 also recall snapshot 4. (Not yet tested on a real DM7: the console link log shows what it sends.)
 - **Behringer X32:** OSC on UDP port 10023. Choose whether LiveRack follows **Scenes, Snippets or Cues**, press **Learn**, then recall one on the X32.
 
 Workflow: set up racks, then **STORE** a snapshot with the console's scene number. When the console recalls scene 12, LiveRack recalls snapshot 12. Give racks a console channel (**CH** on the strip) so selecting that channel on the console selects the rack.

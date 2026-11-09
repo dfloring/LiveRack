@@ -174,6 +174,35 @@ struct PreviewHooks
                 });
             });
 
+        if (open == "dm7")
+            juce::Timer::callAfterDelay (600, [&m]
+            {
+                // Backups: two saves with a change between make one backup
+                auto f = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("Backup Test.liverack");
+                f.getParentDirectory().getChildFile ("Backup Test Backups").deleteRecursively();
+                f.deleteFile();
+                m.engine.setShowFile (f);
+                m.saveShow (false);
+                m.saveShow (false); // same content again
+                m.storeScene (5, "Five");
+                m.saveShow (false);
+                const auto backups = f.getParentDirectory().getChildFile ("Backup Test Backups")
+                                      .findChildFiles (juce::File::findFiles, false, "*.liverack");
+                std::cerr << "BACKUPS count " << backups.size() << std::endl;
+
+                ConsoleLink::Settings s;
+                s.type = ConsoleLink::Type::yamahaDm7;
+                s.address = "127.0.0.1";
+                m.consoles[0]->setSettings (s);
+                m.engine.getPlugin (0, 1)->getParameters()[0]->setValueNotifyingHost (0.95f);
+                juce::Timer::callAfterDelay (4000, [&m]
+                {
+                    std::cerr << "DM7 note: " << m.consoleNote << " | status " << m.consoles[0]->getStatusText() << std::endl;
+                    for (auto& l : m.consoles[0]->getLog())
+                        std::cerr << "DM7 log: " << l << std::endl;
+                });
+            });
+
         if (open == "selftest")
             juce::Timer::callAfterDelay (600, [&m] { selfTest (m); });
         if (open == "selftest2")

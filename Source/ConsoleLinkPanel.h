@@ -27,7 +27,7 @@ private:
     juce::TextEditor addressEditor, logView;
     juce::TextButton folderButton { "Choose..." }, applyButton { "Connect" };
     juce::Label followLabel { {}, "X32 follows" }, triggerLabel;
-    juce::ComboBox followBox;
+    juce::ComboBox followBox, sideBox;
     juce::TextButton learnButton { "Learn" };
     juce::ToggleButton recallToggle { "Recall a snapshot when the console recalls a scene" },
                        followToggle { "Select the matching rack when a channel is selected" };

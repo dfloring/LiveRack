@@ -9,6 +9,13 @@ ConsoleLinkPanel::ConsoleLinkPanel (ConsoleLink& l, std::function<void()> applie
     typeBox.addItem ("Off", 1);
     typeBox.addItem ("Yamaha CL/QL (RCP)", 2);
     typeBox.addItem ("Behringer X32 (OSC)", 3);
+    typeBox.addItem ("Yamaha DM7 (RCP)", 4);
+    typeBox.onChange = [this] { timerCallback(); resized(); };
+
+    sideBox.addItem ("Scene list A", 1);
+    sideBox.addItem ("Scene list B (Split mode)", 2);
+    sideBox.setSelectedId (s.dm7Side + 1, juce::dontSendNotification);
+    sideBox.onChange = [this] { apply(); };
     typeBox.setSelectedId ((int) s.type + 1, juce::dontSendNotification);
 
     addressEditor.setText (s.address, false);
@@ -44,7 +51,7 @@ ConsoleLinkPanel::ConsoleLinkPanel (ConsoleLink& l, std::function<void()> applie
     for (auto* c : std::initializer_list<juce::Component*> {
              &typeLabel, &addressLabel, &folderLabel, &folderPath, &statusLabel, &logLabel,
              &typeBox, &addressEditor, &logView, &folderButton, &applyButton,
-             &recallToggle, &followToggle, &followLabel, &followBox, &learnButton, &triggerLabel })
+             &recallToggle, &followToggle, &followLabel, &followBox, &learnButton, &triggerLabel, &sideBox })
         addAndMakeVisible (c);
 
     startTimerHz (4);
@@ -67,6 +74,7 @@ void ConsoleLinkPanel::resized()
 
     r = row();
     followLabel.setBounds (r.removeFromLeft (110));
+    sideBox.setBounds (r.withWidth (240));
     followBox.setBounds (r.removeFromLeft (140));
     r.removeFromLeft (8);
     learnButton.setBounds (r.removeFromLeft (80));
@@ -96,8 +104,15 @@ void ConsoleLinkPanel::timerCallback()
     statusLabel.setText (link.getStatusText(), juce::dontSendNotification);
 
     const bool isX32 = typeBox.getSelectedId() == 3;
-    for (auto* c : std::initializer_list<juce::Component*> { &followLabel, &followBox, &learnButton, &triggerLabel })
+    const bool isDm7 = typeBox.getSelectedId() == 4;
+    for (auto* c : std::initializer_list<juce::Component*> { &followBox, &learnButton, &triggerLabel })
+    {
+        c->setVisible (! isDm7);
         c->setEnabled (isX32);
+    }
+    sideBox.setVisible (isDm7);
+    followLabel.setEnabled (isX32 || isDm7);
+    followLabel.setText (isDm7 ? "DM7 follows" : "X32 follows", juce::dontSendNotification);
 
     const auto& st = link.getSettings();
     triggerLabel.setText (link.isLearning() ? "Listening... recall one on the X32"
@@ -121,6 +136,7 @@ void ConsoleLinkPanel::apply()
     s.recallScenes    = recallToggle.getToggleState();
     s.followSelection = followToggle.getToggleState();
     s.x32Follow       = juce::jmax (0, followBox.getSelectedId() - 1);
+    s.dm7Side         = juce::jmax (0, sideBox.getSelectedId() - 1);
 
     // Keep learned trigger addresses
     for (int i = 0; i < 3; ++i)

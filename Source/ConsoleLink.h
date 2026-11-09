@@ -8,6 +8,9 @@
 //
 //  - Yamaha CL/QL: Yamaha Remote Control Protocol, TCP port 49280.
 //    Scene recalls arrive as "NOTIFY sscurrent_ex MIXER:Lib/Scene <n>".
+//  - Yamaha DM7: the same protocol, but the scene lists are "scene_a" and
+//    "scene_b" (B is the second side in Split mode), and scene numbers have
+//    two decimals ("4.00"). Point scenes like 4.10 recall snapshot 4.
 //  - Behringer X32: OSC on UDP port 10023, kept alive with /xremote.
 //    Scene: /-show/prepos/current, selected channel: /-stat/selidx.
 //
@@ -17,7 +20,7 @@ class ConsoleLink : private juce::Timer,
                     private juce::OSCReceiver::Listener<juce::OSCReceiver::MessageLoopCallback>
 {
 public:
-    enum class Type { off = 0, yamahaRcp, behringerX32 };
+    enum class Type { off = 0, yamahaRcp, behringerX32, yamahaDm7 };
 
     struct CardSlot
     {
@@ -40,6 +43,8 @@ public:
         // announces it (learned from the console with "Learn")
         int x32Follow = 0; // 0 = scenes, 1 = snippets, 2 = cues
         juce::String x32Trigger[3] { "/-show/prepos/current", "/-show/prepos/current", "/-show/prepos/current" };
+
+        int dm7Side = 0; // DM7: 0 = scene list A, 1 = scene list B (Split mode)
 
         juce::String name;            // label shown in LiveRack, e.g. "FOH CL5"
         std::vector<CardSlot> slots;  // what's in the console's card slots
@@ -85,6 +90,8 @@ public:
     void loadSettingsFrom (const juce::File&);
 
     static juce::String typeName (Type);
+    static bool isYamaha (Type t) { return t == Type::yamahaRcp || t == Type::yamahaDm7; }
+    juce::String rcpSceneList() const; // "MIXER:Lib/Scene", "scene_a" or "scene_b"
 
 private:
     class RcpThread;
