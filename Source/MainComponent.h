@@ -137,6 +137,7 @@ private:
         bool openedWindow = false; // opened for the remote: close it afterwards
     };
     std::vector<RemoteView> remoteViews;
+    std::vector<juce::AudioProcessor*> lingeringWindows; // remote left; closes soon unless it comes back
 
     // OSC remote
     void handleOsc (const juce::String& address, const juce::Array<juce::var>& args);

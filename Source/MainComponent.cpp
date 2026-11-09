@@ -1446,6 +1446,8 @@ void MainComponent::setTwoWindowMode (bool shouldBeTwo)
 // Floating editor windows
 void MainComponent::closeEditorFor (juce::AudioProcessor* p)
 {
+    lingeringWindows.erase (std::remove (lingeringWindows.begin(), lingeringWindows.end(), p), lingeringWindows.end());
+
     // Anything showing this window on the web remote ends first
     for (auto it = remoteViews.begin(); it != remoteViews.end();)
     {
@@ -1476,6 +1478,7 @@ void MainComponent::closeEditorsForRack (int rack)
 
 void MainComponent::closeAllEditors()
 {
+    lingeringWindows.clear();
     dock.releaseEditor();
     editorWindows.clear();
     inspectorWindows.clear();
@@ -2304,8 +2307,15 @@ std::shared_ptr<PluginViewCapture> MainComponent::openRemoteView (const juce::St
 
     // The remote shows a plugin's own window, so it needs one
     auto* window = findWindow();
-    const bool opened = window == nullptr;
-    if (opened)
+
+    // Reconnecting after a dropout: the window we opened is still waiting
+    const auto lingering = std::find (lingeringWindows.begin(), lingeringWindows.end(), plugin);
+    const bool reclaimed = lingering != lingeringWindows.end() && window != nullptr;
+    if (lingering != lingeringWindows.end())
+        lingeringWindows.erase (lingering);
+
+    const bool opened = window == nullptr || reclaimed;
+    if (window == nullptr)
     {
         popOutEditor (rack, slot);
         window = findWindow();
@@ -2367,8 +2377,22 @@ void MainComponent::closeRemoteView (std::shared_ptr<PluginViewCapture> capture)
 
     if (closeWindow)
     {
-        closeEditorFor (plugin);
-        refreshAll(); // dock it again if it's selected
+        // Give a dropped connection a few seconds to come back before closing
+        // the window, so a Wi-Fi blip doesn't make it flash closed and open
+        lingeringWindows.push_back (plugin);
+        juce::Component::SafePointer<MainComponent> safe (this);
+        juce::Timer::callAfterDelay (4000, [safe, plugin]
+        {
+            if (safe == nullptr)
+                return;
+            auto& list = safe->lingeringWindows;
+            const auto found = std::find (list.begin(), list.end(), plugin);
+            if (found == list.end())
+                return; // came back, or the window closed anyway
+            list.erase (found);
+            safe->closeEditorFor (plugin);
+            safe->refreshAll(); // dock it again if it's selected
+        });
     }
 }
 

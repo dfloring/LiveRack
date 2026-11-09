@@ -7,10 +7,67 @@
  #include <netinet/in.h>
  #include <netinet/tcp.h>
  #include <sys/socket.h>
+ #include <cerrno>
 #endif
 
 namespace
 {
+//==============================================================================
+// Sends everything, waiting while the network catches up. JUCE's non-blocking
+// read() leaves the socket non-blocking, so a plain write fails with "would
+// block" as soon as the send buffer fills (a big frame over Wi-Fi).
+bool sendAll (juce::StreamingSocket& socket, const void* data, size_t size)
+{
+    const auto fd = socket.getRawSocketHandle();
+    auto* p = static_cast<const char*> (data);
+    auto lastProgress = juce::Time::getMillisecondCounter();
+
+    while (size > 0)
+    {
+        const int chunk = (int) juce::jmin (size, (size_t) 1 << 20);
+       #if JUCE_WINDOWS
+        juce::ignoreUnused (fd);
+        const int n = socket.write (p, chunk);
+        const bool wouldBlock = n < 0 && socket.isConnected(); // a real error shows up in the wait below
+       #elif JUCE_LINUX || JUCE_BSD
+        const int n = (int) ::send (fd, p, (size_t) chunk, MSG_NOSIGNAL);
+        const bool wouldBlock = n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR);
+       #else
+        const int n = (int) ::send (fd, p, (size_t) chunk, 0);
+        const bool wouldBlock = n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR);
+       #endif
+
+        if (n > 0)
+        {
+            p += n;
+            size -= (size_t) n;
+            lastProgress = juce::Time::getMillisecondCounter();
+            continue;
+        }
+
+        if (! wouldBlock)
+            return false;
+
+        // No room yet: wait for it, but give up on a connection that's stuck
+        if (juce::Time::getMillisecondCounter() - lastProgress > 5000)
+            return false;
+        if (socket.waitUntilReady (false, 200) < 0)
+            return false;
+    }
+    return true;
+}
+
+// A closed connection must not kill the app with SIGPIPE
+void noSigPipe (juce::StreamingSocket& socket)
+{
+   #if JUCE_MAC || JUCE_IOS
+    int on = 1;
+    setsockopt (socket.getRawSocketHandle(), SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof (on));
+   #else
+    juce::ignoreUnused (socket);
+   #endif
+}
+
 //==============================================================================
 // SHA-1, only for the WebSocket handshake
 juce::MemoryBlock sha1 (const juce::String& text)
@@ -173,19 +230,7 @@ private:
         return writeAll (head, n) && (size == 0 || writeAll (data, size));
     }
 
-    bool writeAll (const void* data, size_t size)
-    {
-        auto* p = static_cast<const char*> (data);
-        while (size > 0)
-        {
-            const int n = socket.write (p, (int) juce::jmin (size, (size_t) 1 << 20));
-            if (n <= 0)
-                return false;
-            p += n;
-            size -= (size_t) n;
-        }
-        return true;
-    }
+    bool writeAll (const void* data, size_t size) { return sendAll (socket, data, size); }
 
     bool readAll (void* data, size_t size)
     {
@@ -317,13 +362,14 @@ void WebRemote::respond (juce::StreamingSocket& s, int status, const juce::Strin
          << "Cache-Control: no-store\r\n"
          << "Connection: close\r\n\r\n";
 
-    s.write (head.toRawUTF8(), (int) head.getNumBytesAsUTF8());
-    if (size > 0)
-        s.write (data, (int) size);
+    if (sendAll (s, head.toRawUTF8(), head.getNumBytesAsUTF8()) && size > 0)
+        sendAll (s, data, size);
 }
 
 void WebRemote::handle (std::unique_ptr<juce::StreamingSocket> socket)
 {
+    noSigPipe (*socket);
+
     // Read the request head
     juce::MemoryBlock buffer;
     char chunk[4096];
@@ -504,15 +550,20 @@ void WebRemote::runPluginView (juce::StreamingSocket& socket, const juce::String
 
     while (alive && ! stopping.load())
     {
-        const int ready = socket.waitUntilReady (true, 4);
+        int ready = socket.waitUntilReady (true, 4);
         if (ready < 0)
             break;
 
-        if (ready > 0)
+        // Read everything the page has sent so far
+        bool lost = false;
+        for (int reads = 0; ready > 0 && reads < 64; ++reads, ready = socket.waitUntilReady (true, 0))
         {
             const int type = ws.read (message);
             if (type < 0)
+            {
+                lost = true;
                 break;
+            }
 
             if (type == 1)
             {
@@ -527,6 +578,8 @@ void WebRemote::runPluginView (juce::StreamingSocket& socket, const juce::String
                     juce::MessageManager::callAsync ([weak, event] { if (auto c = weak.lock()) c->input (event); });
             }
         }
+        if (lost || ready < 0)
+            break;
 
         juce::String text;
         while (capture->takeMessage (text))
