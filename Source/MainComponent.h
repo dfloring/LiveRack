@@ -46,6 +46,7 @@ private:
     void timerCallback() override;
     using juce::Component::keyPressed;
     bool keyPressed (const juce::KeyPress&, juce::Component*) override;
+    void mouseUp (const juce::MouseEvent&) override;
     void sendFeedback();
 
     // Selection
@@ -88,9 +89,20 @@ private:
     void showRouting (int rack = -1);
     void showScope();
     void showPluginScanner();
-    void saveSnapshot();
-    void loadSnapshot();
-    void loadSnapshotFile (const juce::File&);
+    // The show file: everything, including its snapshots
+    void saveShow (bool askForFile);
+    void openShow();
+    void newShow();
+    void openShowFile (const juce::File&);
+    void showShowMenu();
+    void afterShowLoaded();
+    void checkUnsavedThen (std::function<void()>);
+    void updateWindowTitle();
+    void storeWindowLayout();                       // into the show
+    void applyWindowLayout (const juce::XmlElement*);
+    juce::String showName() const;
+    juce::uint32 ignoreEditsUntil = 0;
+    juce::String shownTitle;
     void showError (const juce::String& title, const juce::String& message);
 
     // Consoles
@@ -102,7 +114,8 @@ private:
     void showConsoleSettings (int);
     void showStoreSceneDialog();
     void finishStoreScene (int result);
-    void storeScene (int scene);
+    void storeScene (int scene, const juce::String& name = {});
+    void showSnapshotMenu();
     void recallScene (int scene);
     void stepScene (int direction);
     void selectRackForChannel (int console, int channel);
@@ -155,11 +168,21 @@ private:
     std::unique_ptr<MidiControl> midi;
 
     // Toolbar
-    juce::TextButton devicesButton { "Devices" }, routingButton { "Routing" }, scopeButton { "Scope" },
-                     scanButton { "Plugins" }, storeSceneButton { "Store Scene" },
-                     addRackButton { "+ Rack" }, windowModeButton { "Two Windows" },
-                     stackRowsButton { "Stack Rows" },
-                     saveButton { "Save" }, loadButton { "Load" }, tapButton { "TAP" };
+    // Toolbar, in groups: show file | snapshots | setup | view ... tempo
+    Theme::IconButton saveButton      { "Save", "save", "Save the show (Cmd+S)" },
+                      loadButton      { "Show", "show", "Open, save as or start a show" },
+                      prevSceneButton { "Previous", "prev", "Previous snapshot" },
+                      nextSceneButton { "Next", "next", "Next snapshot" },
+                      devicesButton   { "Devices", "devices", "Audio drivers, consoles and controllers" },
+                      routingButton   { "Routing", "routing", "Patch rack inputs and outputs" },
+                      scanButton      { "Plugins", "plugins", "Plugin library and scanning" },
+                      scopeButton     { "Scope", "scope", "What snapshots recall" },
+                      addRackButton   { "Add Rack", "addrack", "Add a rack" },
+                      windowModeButton { "Two Windows", "windows", "Rack window: the plugin panel in its own window" },
+                      stackRowsButton { "Stack Rows", "stack", "Stack racks in rows to fit the window" };
+    juce::TextButton storeSceneButton { "STORE" }, tapButton { "TAP" };
+    std::vector<juce::Rectangle<int>> toolbarGroups;
+    juce::Rectangle<int> sceneChip;
     class BpmDisplay;
     std::unique_ptr<BpmDisplay> bpmDisplay;
 

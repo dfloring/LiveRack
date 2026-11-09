@@ -1,5 +1,6 @@
 #include "PluginDock.h"
 #include "RackStripsView.h"
+#include "Theme.h"
 
 // A plugin tab that can be dragged
 class PluginDock::TabButton : public juce::TextButton
@@ -41,11 +42,15 @@ private:
 
 PluginDock::PluginDock (RackEngine& e) : engine (e)
 {
-    title.setFont (juce::FontOptions (16.0f, juce::Font::bold));
-    addAndMakeVisible (title);
-
-    for (auto* b : { &bypassButton, &popOutButton, &removeButton })
+    for (auto* b : { &rackBypassButton, &bypassButton, &popOutButton, &removeButton })
         addAndMakeVisible (b);
+
+    rackBypassButton.onClick = [this]
+    {
+        if (rack >= 0)
+            engine.setRackBypassed (rack, ! engine.isRackBypassed (rack));
+    };
+    rackBypassButton.setTooltip ("Bypass the whole rack");
 
     bypassButton.onClick = [this] { if (onToggleBypass != nullptr) onToggleBypass (rack, slot); };
     popOutButton.onClick = [this] { if (onPopOut != nullptr) onPopOut (rack, slot); };
@@ -74,7 +79,7 @@ void PluginDock::releaseEditor()
 
 int PluginDock::getPreferredHeight() const
 {
-    const int chrome = 10 + 30 + 8 + (tabs.isEmpty() ? 0 : 36) + 10;
+    const int chrome = 10 + 32 + 8 + (tabs.isEmpty() ? 0 : 36) + 10;
     return chrome + (editor != nullptr ? editor->getHeight() : 140);
 }
 
@@ -150,7 +155,8 @@ void PluginDock::rebuildTabs()
         auto* plugin = engine.getPlugin (rack, s);
         auto* tab = tabs.add (new TabButton (juce::String (s + 1) + ". " + (plugin != nullptr ? plugin->getName() : "?"), rack, s));
         tab->setToggleState (s == slot, juce::dontSendNotification);
-        tab->setColour (juce::TextButton::buttonOnColourId, colour.withAlpha (0.6f));
+        tab->setColour (juce::TextButton::buttonOnColourId, Theme::accentDeep);
+        juce::ignoreUnused (colour);
         tab->onClick = [this, s] { if (onSelectSlot != nullptr) onSelectSlot (rack, s); };
         addAndMakeVisible (tab);
     }
@@ -161,20 +167,19 @@ void PluginDock::updateHeader()
     auto* plugin = engine.getPlugin (rack, slot);
     const bool hasPlugin = plugin != nullptr;
 
-    juce::String t;
-    if (rack >= 0)
-        t << engine.getRackConfig (rack).name;
-    if (hasPlugin)
-        t << "   " << juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xba")) << "   " << plugin->getName();
-
-    title.setText (t, juce::dontSendNotification);
-    title.setColour (juce::Label::textColourId, rack >= 0 ? RackStripsView::colourFor (engine, rack).brighter (0.3f)
-                                                         : juce::Colours::white);
-
     const bool bypassed = engine.isSlotBypassed (rack, slot);
     bypassButton.setColour (juce::TextButton::buttonColourId,
-                            bypassed ? juce::Colour (0xffe08a2c) : getLookAndFeel().findColour (juce::TextButton::buttonColourId));
+                            bypassed ? Theme::amber : getLookAndFeel().findColour (juce::TextButton::buttonColourId));
+    bypassButton.setColour (juce::TextButton::textColourOffId, bypassed ? Theme::background : Theme::text);
     bypassButton.setButtonText (bypassed ? "Bypassed" : "Bypass");
+
+    const bool rackBypassed = rack >= 0 && engine.isRackBypassed (rack);
+    rackBypassButton.setColour (juce::TextButton::buttonColourId,
+                                rackBypassed ? Theme::amber : getLookAndFeel().findColour (juce::TextButton::buttonColourId));
+    rackBypassButton.setColour (juce::TextButton::textColourOffId, rackBypassed ? Theme::background : Theme::text);
+    rackBypassButton.setButtonText (rackBypassed ? "Rack Bypassed" : "Rack Bypass");
+    rackBypassButton.setEnabled (rack >= 0);
+    repaint (headerArea);
 
     for (auto* b : { &bypassButton, &popOutButton, &removeButton })
         b->setEnabled (hasPlugin);
@@ -241,10 +246,71 @@ void PluginDock::paintOverChildren (juce::Graphics& g)
     g.fillRoundedRectangle ((float) x, (float) first.getY(), 3.0f, (float) first.getHeight(), 1.5f);
 }
 
+void PluginDock::updateMeters()
+{
+    if (rack >= 0 && ! meterArea.isEmpty())
+        repaint (meterArea);
+}
+
 void PluginDock::paint (juce::Graphics& g)
 {
-    g.setColour (juce::Colour (0xff1f2328));
+    g.setColour (Theme::panel);
     g.fillRoundedRectangle (getLocalBounds().toFloat(), 8.0f);
+    g.setColour (Theme::border);
+    g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 8.0f, 1.0f);
+
+    // Header: the rack's colour, number and name, channel and latency, meters
+    if (rack >= 0)
+    {
+        const auto cfg = engine.getRackConfig (rack);
+        const bool rackBypassed = engine.isRackBypassed (rack);
+        auto h = headerArea;
+
+        g.setColour (RackStripsView::colourFor (engine, rack).withAlpha (rackBypassed ? 0.4f : 1.0f));
+        g.fillRoundedRectangle (h.removeFromLeft (4).toFloat().reduced (0.0f, 4.0f), 2.0f);
+        h.removeFromLeft (10);
+
+        g.setColour (Theme::textDim);
+        g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        const auto num = juce::String (rack + 1);
+        g.drawText (num, h.removeFromLeft (20), juce::Justification::centredLeft);
+
+        g.setColour (rackBypassed ? Theme::textDim : Theme::text);
+        g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
+        const int nameW = juce::jmin (240, juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (17.0f, juce::Font::bold), cfg.name) + 4);
+        g.drawText (cfg.name, h.removeFromLeft (nameW), juce::Justification::centredLeft, true);
+        h.removeFromLeft (14);
+
+        juce::String sub;
+        sub << (cfg.consoleChannel > 0 ? "CH " + juce::String (cfg.consoleChannel) : juce::String ("CH -"));
+        const double ms = engine.getRackTotalLatencyMs (rack);
+        sub << "   " << (ms > 0.005 ? "+" + juce::String (ms, 2) + " ms" : juce::String ("no added latency"));
+        if (cfg.latencyGroup > 0)
+            sub << "   group " << RackConfig::groupName (cfg.latencyGroup);
+        g.setColour (Theme::textDim);
+        g.setFont (juce::FontOptions (12.0f));
+        g.drawText (sub, h.removeFromLeft (220), juce::Justification::centredLeft, true);
+
+        // In / out meters, side by side
+        auto m = meterArea;
+        for (int io = 0; io < 2; ++io)
+        {
+            auto row = m.removeFromTop (m.getHeight() / (2 - io));
+            g.setColour (Theme::textDim);
+            g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+            g.drawText (io == 0 ? "IN" : "OUT", row.removeFromLeft (28), juce::Justification::centredLeft);
+            auto bar = row.withSizeKeepingCentre (row.getWidth(), 6).toFloat();
+            const float level = levelFor != nullptr ? juce::jlimit (0.0f, 1.0f, levelFor (rack, io == 1)) : 0.0f;
+            const float seg = 3.0f, gap = 1.0f;
+            for (float x = bar.getX(); x + seg <= bar.getRight(); x += seg + gap)
+            {
+                const float n = (x + seg * 0.5f - bar.getX()) / bar.getWidth();
+                const auto c = n >= 0.9f ? Theme::red : n >= 0.7f ? Theme::amber : Theme::green;
+                g.setColour (n <= level ? c : c.withAlpha (0.08f));
+                g.fillRect (x, bar.getY(), seg, bar.getHeight());
+            }
+        }
+    }
 
     if (message.isNotEmpty())
     {
@@ -258,14 +324,18 @@ void PluginDock::resized()
 {
     auto area = getLocalBounds().reduced (10);
 
-    auto header = area.removeFromTop (30);
-    removeButton.setBounds (header.removeFromRight (90));
+    auto header = area.removeFromTop (32);
+    removeButton.setBounds (header.removeFromRight (84));
     header.removeFromRight (6);
-    popOutButton.setBounds (header.removeFromRight (90));
+    popOutButton.setBounds (header.removeFromRight (84));
     header.removeFromRight (6);
-    bypassButton.setBounds (header.removeFromRight (90));
-    header.removeFromRight (10);
-    title.setBounds (header);
+    bypassButton.setBounds (header.removeFromRight (96));
+    header.removeFromRight (6);
+    rackBypassButton.setBounds (header.removeFromRight (124));
+    header.removeFromRight (16);
+    meterArea = header.removeFromRight (juce::jmin (180, juce::jmax (0, header.getWidth() - 360)));
+    header.removeFromRight (12);
+    headerArea = header;
 
     area.removeFromTop (8);
 

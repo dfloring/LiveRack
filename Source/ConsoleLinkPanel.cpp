@@ -14,7 +14,7 @@ ConsoleLinkPanel::ConsoleLinkPanel (ConsoleLink& l, std::function<void()> applie
     addressEditor.setText (s.address, false);
     addressEditor.setTextToShowWhenEmpty ("e.g. 192.168.0.128", juce::Colours::grey);
 
-    folderPath.setText (folder.isDirectory() ? folder.getFullPathName() : "(none)", juce::dontSendNotification);
+    folderPath.setText (folder.isDirectory() ? folder.getFullPathName() : "(none: snapshots are kept in the show)", juce::dontSendNotification);
     folderPath.setColour (juce::Label::textColourId, juce::Colours::lightgrey);
 
     followBox.addItem ("Scenes", 1);
@@ -139,7 +139,7 @@ void ConsoleLinkPanel::apply()
 
 void ConsoleLinkPanel::chooseFolder()
 {
-    chooser = std::make_unique<juce::FileChooser> ("Choose the folder for scene snapshots",
+    chooser = std::make_unique<juce::FileChooser> ("Choose a folder of pre-0.13 scene files to import",
         folder.isDirectory() ? folder : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory));
 
     juce::Component::SafePointer<ConsoleLinkPanel> safe (this);

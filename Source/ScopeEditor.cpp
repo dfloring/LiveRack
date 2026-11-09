@@ -11,9 +11,6 @@ namespace
         { "Plugin settings", &SnapshotScope::pluginSettings },
         { "Plugin bypass",   &SnapshotScope::pluginBypass },
         { "Rack bypass",     &SnapshotScope::rackBypass },
-        { "Routing & groups", &SnapshotScope::routing },
-        { "Names & colours", &SnapshotScope::namesColours },
-        { "Hot Plugins",     &SnapshotScope::hotPlugins },
         { "BPM",             &SnapshotScope::bpm },
     };
 }
@@ -167,7 +164,7 @@ ScopeEditor::ScopeEditor (RackEngine& e) : engine (e)
     summary.setFont (juce::FontOptions (14.0f, juce::Font::bold));
     help.setFont (juce::FontOptions (13.0f));
     help.setColour (juce::Label::textColourId, Theme::textDim);
-    help.setText ("This scope is stored with the next Store Scene / Save Snapshot, and comes back when that snapshot is recalled. "
+    help.setText ("What every snapshot in this show recalls. Snapshots never add, remove or move plugins. "
                   "Click a plugin to include or leave it alone, or a rack name for the whole rack. Recall Safe racks are never touched.",
                   juce::dontSendNotification);
     addAndMakeVisible (summary);

@@ -38,7 +38,7 @@ int HotPluginsBar::tileAt (juce::Point<int> p) const
 void HotPluginsBar::paint (juce::Graphics& g)
 {
     drawHeading (g, getLocalBounds().removeFromTop (16), "HOT PLUGINS",
-                 "Right-click a plugin on a strip > Pin to Hot Plugins. Drag to reorder.");
+                 engine.getHotPlugins().empty() ? "Right-click a plugin on a strip > Pin to Hot Plugins" : "");
 
     const auto& hot = engine.getHotPlugins();
     const int selRack = host.getSelectedRack(), selSlot = host.getSelectedSlot();
@@ -52,10 +52,10 @@ void HotPluginsBar::paint (juce::Graphics& g)
         if (! used)
         {
             juce::Path outline, dashed;
-            outline.addRoundedRectangle (r.reduced (0.5f), 8.0f);
+            outline.addRoundedRectangle (r.reduced (0.5f), 6.0f);
             const float dashes[] = { 4.0f, 4.0f };
             juce::PathStrokeType (1.0f).createDashedStroke (dashed, outline, dashes, 2);
-            g.setColour (Theme::border);
+            g.setColour (Theme::border.brighter (0.15f));
             g.fillPath (dashed);
             continue;
         }
@@ -63,10 +63,10 @@ void HotPluginsBar::paint (juce::Graphics& g)
         const bool current = rack == selRack && slot == selSlot;
         const bool target = dragFrom >= 0 && i == dragOver && dragOver != dragFrom;
 
-        g.setColour (current ? Theme::accentDeep : Theme::panel);
-        g.fillRoundedRectangle (r, 8.0f);
+        g.setColour (current ? Theme::accentDeep : Theme::raised);
+        g.fillRoundedRectangle (r, 6.0f);
         g.setColour (current || target ? Theme::accent : Theme::border);
-        g.drawRoundedRectangle (r.reduced (0.5f), 8.0f, target ? 2.0f : 1.0f);
+        g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, target ? 2.0f : 1.0f);
 
         auto inner = r.reduced (8.0f, 6.0f);
         g.setColour (RackStripsView::colourFor (engine, rack));
@@ -206,8 +206,7 @@ void UserKeysBar::press (int i)
 
 void UserKeysBar::paint (juce::Graphics& g)
 {
-    drawHeading (g, getLocalBounds().removeFromTop (16), "USER KEYS",
-                 "Lit = on. Right-click to assign, set a keyboard shortcut or MIDI Learn.");
+    drawHeading (g, getLocalBounds().removeFromTop (16), "USER KEYS", "");
 
     for (int i = 0; i < numKeys; ++i)
     {
@@ -217,13 +216,13 @@ void UserKeysBar::paint (juce::Graphics& g)
         const bool lit = assigned && host.isActionActive (a);
         const bool down = i == pressedKey;
 
-        auto fill = lit ? Theme::amber : Theme::panel;
+        auto fill = lit ? Theme::amber : assigned ? Theme::raised : Theme::panel;
         if (down) fill = fill.brighter (0.15f);
 
         g.setColour (fill);
-        g.fillRoundedRectangle (r, 9.0f);
+        g.fillRoundedRectangle (r, 6.0f);
         g.setColour (lit ? Theme::amber : Theme::border);
-        g.drawRoundedRectangle (r.reduced (0.5f), 9.0f, 1.0f);
+        g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
 
         auto inner = r.reduced (8.0f, 5.0f);
         const auto ink = lit ? juce::Colour (0xff101214) : Theme::text;
@@ -287,7 +286,9 @@ void UserKeysBar::mouseDown (const juce::MouseEvent& e)
     }
 }
 
-void UserKeysBar::save() const
+// Kept in the show (so a show brings its own keys) and in user-keys.xml
+// (the keys a new show starts with)
+juce::XmlElement UserKeysBar::toXml() const
 {
     juce::XmlElement xml ("USERKEYS");
     for (int i = 0; i < numKeys; ++i)
@@ -296,17 +297,33 @@ void UserKeysBar::save() const
         keys[(size_t) i].writeTo (*e);
         e->setAttribute ("shortcut", Shortcuts::toText (shortcuts[(size_t) i]));
     }
+    return xml;
+}
+
+void UserKeysBar::save() const
+{
+    const auto xml = toXml();
     xml.writeTo (RackEngine::getSettingsDir().getChildFile ("user-keys.xml"));
+    engine.setShowExtra (xml);
 }
 
 void UserKeysBar::load()
 {
-    auto file = RackEngine::getSettingsDir().getChildFile ("user-keys.xml");
-
     for (int i = 0; i < numKeys; ++i)
+    {
         shortcuts[(size_t) i] = juce::KeyPress (juce::KeyPress::F1Key + i); // defaults: F1-F8
+        keys[(size_t) i] = {};
+    }
 
-    if (auto xml = juce::parseXML (file))
+    std::unique_ptr<juce::XmlElement> fromFile;
+    const juce::XmlElement* xml = engine.getShowExtra ("USERKEYS");
+    if (xml == nullptr)
+    {
+        fromFile = juce::parseXML (RackEngine::getSettingsDir().getChildFile ("user-keys.xml"));
+        xml = fromFile.get();
+    }
+
+    if (xml != nullptr)
     {
         int i = 0;
         for (auto* k : xml->getChildWithTagNameIterator ("KEY"))
@@ -316,6 +333,8 @@ void UserKeysBar::load()
                     shortcuts[(size_t) i] = Shortcuts::fromText (k->getStringAttribute ("shortcut"));
                 keys[(size_t) i++] = Action::readFrom (*k);
             }
+        engine.setShowExtra (toXml());
+        repaint();
         return;
     }
 
@@ -328,6 +347,7 @@ void UserKeysBar::load()
     keys[5].type = Action::hotPlugin;     keys[5].number = 2;
     keys[6].type = Action::twoWindows;
     keys[7].type = Action::tapTempo;
+    engine.setShowExtra (toXml());
 }
 
 //==============================================================================
@@ -368,22 +388,18 @@ void PageTabs::paint (juce::Graphics& g)
 
         if (isAdd)
         {
-            juce::Path outline, dashed;
-            outline.addRoundedRectangle (r.reduced (0.5f), 8.0f);
-            const float dashes[] = { 4.0f, 4.0f };
-            juce::PathStrokeType (1.0f).createDashedStroke (dashed, outline, dashes, 2);
-            g.setColour (Theme::border.brighter (0.2f));
-            g.fillPath (dashed);
             g.setColour (Theme::textDim);
             g.setFont (juce::FontOptions (13.5f, juce::Font::bold));
             g.drawText ("+ Page", r.toNearestInt(), juce::Justification::centred);
             continue;
         }
 
-        g.setColour (on ? Theme::accentDeep : Theme::panel);
-        g.fillRoundedRectangle (r, 8.0f);
-        g.setColour (on ? Theme::accent : Theme::border);
-        g.drawRoundedRectangle (r.reduced (0.5f), 8.0f, 1.0f);
+        // Tabs: the current one is underlined with the accent
+        if (on)
+        {
+            g.setColour (Theme::accent);
+            g.fillRoundedRectangle (r.removeFromBottom (2.0f).reduced (6.0f, 0.0f), 1.0f);
+        }
 
         const juce::String name = page < 0 ? juce::String ("All") : pages[(size_t) page].name;
         int n = engine.getNumRacks();
@@ -398,7 +414,7 @@ void PageTabs::paint (juce::Graphics& g)
         g.setColour (Theme::textDim);
         g.setFont (juce::FontOptions (12.0f));
         g.drawText (juce::String (n), t.removeFromRight (18.0f).toNearestInt(), juce::Justification::centredRight);
-        g.setColour (on ? juce::Colours::white : Theme::text);
+        g.setColour (on ? Theme::text : Theme::textDim);
         g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
         g.drawFittedText (name, t.toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
     }

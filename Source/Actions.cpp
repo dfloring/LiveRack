@@ -26,12 +26,12 @@ juce::String Action::describe (const RackEngine& engine) const
         case selectRack:    return "Select " + rackName (rack);
         case openPlugin:    return "Open " + pluginName (slotId);
         case hotPlugin:     return "Hot Plugin " + juce::String (number);
-        case recallScene:   return "Scene " + juce::String (number);
-        case nextScene:     return "Next Scene";
-        case prevScene:     return "Previous Scene";
+        case recallScene:   return "Snapshot " + juce::String (number);
+        case nextScene:     return "Next Snapshot";
+        case prevScene:     return "Previous Snapshot";
         case tapTempo:      return "Tap Tempo";
-        case twoWindows:    return "Two Windows";
-        case storeScene:    return "Store Scene";
+        case twoWindows:    return "Rack Window";
+        case storeScene:    return "Store Snapshot";
         case showPage:
             if (number <= 0) return "Page: All";
             if (number <= (int) engine.getPages().size()) return "Page: " + engine.getPages()[(size_t) number - 1].name;
@@ -129,8 +129,11 @@ void Action::showChooser (const RackEngine& engine, const Action& current, int s
     for (int i = 1; i <= RackEngine::maxHotPlugins; ++i)
         add (hot, make (hotPlugin, -1, 0, i), "Hot Plugin " + juce::String (i));
 
-    for (int i = 0; i <= 30; ++i)
-        add (scenes, make (recallScene, -1, 0, i), "Scene " + juce::String (i));
+    for (auto& snap : engine.getSnapshots())
+        add (scenes, make (recallScene, -1, 0, snap.number), juce::String (snap.number) + (snap.name.isNotEmpty() ? "  " + snap.name : juce::String()));
+    if (engine.getSnapshots().empty())
+        for (int i = 0; i <= 30; ++i)
+            add (scenes, make (recallScene, -1, 0, i), "Snapshot " + juce::String (i));
 
     m.addSectionHeader ("Assign");
     m.addSubMenu ("Bypass rack", bypassRack);
@@ -145,13 +148,13 @@ void Action::showChooser (const RackEngine& engine, const Action& current, int s
         add (pagesMenu, make (showPage, -1, 0, i + 1), engine.getPages()[(size_t) i].name);
     m.addSubMenu ("Show page", pagesMenu);
     m.addSeparator();
-    m.addSubMenu ("Recall scene", scenes);
-    add (m, make (nextScene), "Next scene");
-    add (m, make (prevScene), "Previous scene");
-    add (m, make (storeScene), "Store scene (current number)");
+    m.addSubMenu ("Recall snapshot", scenes);
+    add (m, make (nextScene), "Next snapshot");
+    add (m, make (prevScene), "Previous snapshot");
+    add (m, make (storeScene), "Store snapshot (current number)");
     m.addSeparator();
     add (m, make (tapTempo), "Tap tempo");
-    add (m, make (twoWindows), "Two windows on/off");
+    add (m, make (twoWindows), "Rack window on/off");
     m.addSeparator();
     add (m, make (none), "Clear");
 

@@ -88,16 +88,40 @@ struct PreviewHooks
         if (open == "params")   { m.select (0, 1); m.showParameters (0, 1); }
         if (open == "roundtrip")
         {
-            auto xml = m.engine.createSnapshot();
+            auto xml = m.engine.createShow();
             m.closeAllEditors();
             m.engine.clearAll();
             juce::String error;
-            const bool ok = m.engine.loadSnapshot (*xml, error);
+            const bool ok = m.engine.loadShow (*xml, error);
             std::cerr << "ROUNDTRIP full reload ok=" << ok << " racks=" << m.engine.getNumRacks()
                       << " error='" << error << "'" << std::endl;
             std::cerr << "ROUNDTRIP second load is in-place=" << m.engine.snapshotMatchesCurrentLayout (*xml) << std::endl;
             m.select (0, 1);
         }
+
+        if (open == "showfile")
+            juce::Timer::callAfterDelay (800, [&m]
+            {
+                auto f = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("Test Show.liverack");
+                m.engine.setShowFile (f);
+                m.storeScene (12, "Verse");
+                m.saveShow (false);
+                std::cerr << "SHOWFILE saved " << f.existsAsFile() << " edited " << m.engine.isShowEdited() << " title " << m.shownTitle << std::endl;
+                m.engine.getPlugin (0, 1)->getParameters()[0]->setValueNotifyingHost (0.95f);
+                m.engine.setSlotBypassed (1, 0, true);
+                m.recallScene (12);
+                std::cerr << "SHOWFILE recall note: " << m.consoleNote << " | kick comp bypassed " << m.engine.isSlotBypassed (1, 0) << std::endl;
+                m.newShow();
+                std::cerr << "SHOWFILE new: racks " << m.engine.getNumRacks() << " snapshots " << m.engine.getSnapshots().size() << std::endl;
+                m.openShowFile (f);
+                std::cerr << "SHOWFILE reopened: racks " << m.engine.getNumRacks() << " snapshots " << m.engine.getSnapshots().size()
+                          << " note: " << m.consoleNote << " edited " << m.engine.isShowEdited() << std::endl;
+                m.setTwoWindowMode (true);
+                m.storeWindowLayout();
+                auto* w = m.engine.getShowExtra ("WINDOWS");
+                std::cerr << "SHOWFILE windows extra two=" << (w != nullptr ? w->getBoolAttribute ("twoWindows") : -1) << std::endl;
+                m.showSnapshotMenu();
+            });
 
         if (open == "selftest")
             juce::Timer::callAfterDelay (600, [&m] { selfTest (m); });
@@ -204,42 +228,70 @@ struct PreviewHooks
             say ("driver removed: " + juce::String (e.getNumDrivers()) + " driver(s)");
         }
 
-        // --- Snapshot round trip
+        // --- Show file round trip, with snapshots
         e.setBpm (96.5);
         auto scope = e.getScope();
-        scope.namesColours = false;
+        scope.rackBypass = false;
         e.setScope (scope);
+        e.storeSnapshot (5, "Verse");
+        e.storeSnapshot (2, "Intro");
         const auto hotBefore = e.getHotPlugins();
         const int idBefore = e.getSlotId (0, 1);
-        auto xml = e.createSnapshot();
+        auto xml = e.createShow();
 
         m.closeAllEditors();
-        e.clearAll();
+        e.newShow();
         e.setBpm (120.0);
         juce::String error;
-        const bool ok = e.loadSnapshot (*xml, error);
+        const bool ok = e.loadShow (*xml, error);
         say ("full reload ok=" + juce::String ((int) ok) + " racks=" + juce::String (e.getNumRacks()) + " error='" + error + "'");
         say ("bpm after reload " + juce::String (e.getBpm(), 1) + " (expect 96.5)");
         say ("plugin id kept: " + juce::String ((int) (e.getSlotId (0, 1) == idBefore)));
         say ("hot plugins kept: " + juce::String ((int) (e.getHotPlugins() == hotBefore)) + " count " + juce::String ((int) e.getHotPlugins().size()));
-        say ("scope kept: namesColours=" + juce::String ((int) e.getScope().namesColours) + " slot(0,0) inScope=" + juce::String ((int) e.isSlotInScope (0, 0)));
+        say ("scope kept: rackBypass=" + juce::String ((int) e.getScope().rackBypass) + " slot(0,0) inScope=" + juce::String ((int) e.isSlotInScope (0, 0)));
+        say ("snapshots kept: " + juce::String ((int) e.getSnapshots().size()) + " first " + juce::String (e.getSnapshots()[0].number)
+             + " " + e.getSnapshots()[0].name + " (expect 2 Intro), 5 is " + (e.getSnapshotInfo (5) ? e.getSnapshotInfo (5)->name : juce::String ("missing")));
         say ("Keys still group " + RackConfig::groupName (e.getRackConfig (4).latencyGroup));
+        say ("second open is in-place=" + juce::String ((int) e.snapshotMatchesCurrentLayout (*xml)));
 
-        // In-place recall follows scope: a plugin left out keeps its settings
+        // Snapshot recall follows scope: a plugin left out keeps its settings
         auto* gate = e.getPlugin (0, 0);   // Lead Vox gate: out of scope
         auto* comp = e.getPlugin (0, 1);   // Lead Vox compressor: in scope
-        const float gateBefore = gate->getParameters()[0]->getValue();
         const float compBefore = comp->getParameters()[0]->getValue();
         gate->getParameters()[0]->setValueNotifyingHost (0.9f);
         comp->getParameters()[0]->setValueNotifyingHost (0.9f);
         e.setRackName (0, "Renamed");
-        const bool inPlace = e.snapshotMatchesCurrentLayout (*xml);
-        e.loadSnapshot (*xml, error);
-        say ("in place=" + juce::String ((int) inPlace)
+        const bool rackBypBefore = e.isRackBypassed (6);
+        e.setRackBypassed (6, ! rackBypBefore);
+        e.setSlotBypassed (0, 1, true);
+        const int racksBefore = e.getNumRacks();
+        {
+            juce::String err;
+            e.addPlugin (1, e.getSlotDescription (0, 1), err); // new since the snapshot
+        }
+        juce::String note;
+        const bool found = e.recallSnapshot (5, note);
+        say ("recall 5 found=" + juce::String ((int) found)
              + "  gate (out of scope) kept 0.9: " + juce::String ((int) (std::abs (gate->getParameters()[0]->getValue() - 0.9f) < 0.01f))
              + "  comp (in scope) back to " + juce::String (compBefore, 2) + ": " + juce::String ((int) (std::abs (comp->getParameters()[0]->getValue() - compBefore) < 0.01f))
-             + "  name kept (names not in scope): " + e.getRackConfig (0).name);
-        juce::ignoreUnused (gateBefore);
+             + "  comp bypass back off: " + juce::String ((int) ! e.isSlotBypassed (0, 1))
+             + "  name kept: " + e.getRackConfig (0).name
+             + "  rack bypass left (not in scope): " + juce::String ((int) (e.isRackBypassed (6) != rackBypBefore))
+             + "  racks unchanged: " + juce::String ((int) (e.getNumRacks() == racksBefore)));
+        say ("recall note: '" + note + "' (expect 1 plugin isn't in this snapshot)");
+        say ("recall 99 found=" + juce::String ((int) e.recallSnapshot (99, note)) + " (expect 0)");
+        e.removePlugin (1, e.getNumSlots (1) - 1);
+        e.setRackBypassed (6, rackBypBefore);
+
+        // A pre-0.13 scene file (a full rig) imports as a snapshot
+        {
+            auto old = e.createSnapshot();
+            juce::String err;
+            const bool imported = e.importSceneFile (*old, 7, "Old", err);
+            say ("scene file import ok=" + juce::String ((int) imported) + " err='" + err + "' now " + juce::String ((int) e.getSnapshots().size()) + " snapshots");
+            e.deleteSnapshot (7);
+            say ("after delete: " + juce::String ((int) e.getSnapshots().size()) + " snapshots");
+        }
 
         // --- OSC: bypass rack 2 over the network, read the feedback
         juce::DatagramSocket client (false);
@@ -357,9 +409,11 @@ struct PreviewHooks
              + ", stereo point " + juce::String (e.getStereoPoint (e.getNumRacks() - 1)));
         m.refreshAll();
 
-        // A store-scene snapshot doesn't carry pages
-        auto snap = e.createSnapshot();
-        say ("scene snapshot has PAGES: " + juce::String ((int) (snap->getChildByName ("PAGES") != nullptr)) + " (expect 0)");
+        // The show carries pages and snapshots
+        auto show = e.createShow();
+        say ("show has PAGES: " + juce::String ((int) (show->getChildByName ("PAGES") != nullptr))
+             + " SNAPSHOTS: " + juce::String (show->getChildByName ("SNAPSHOTS") != nullptr ? show->getChildByName ("SNAPSHOTS")->getNumChildElements() : -1)
+             + " USERKEYS: " + juce::String ((int) (show->getChildByName ("USERKEYS") != nullptr)));
 
         // --- Auto-patch: Pastor Mic (index 5) uses out 9; a new empty rack patched to input 9 must not take it
         RackConfig blank;

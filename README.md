@@ -27,9 +27,9 @@ Get the latest build from [Releases](../../releases): the Mac app (Apple silicon
 - **Mac:** unzip, then right-click `LiveRack.app` > **Open** the first time (it isn't notarised).
 - **Windows:** unzip and run `LiveRack.exe`. If Windows warns about an unknown publisher: **More info > Run anyway**. Pick your ASIO driver (Dante Virtual Soundcard, SoundGrid) in Devices > driver Settings.
 
-# User guide (v0.12)
+# User guide (v0.13)
 
-Any number of independent racks of VST3/AU plugins on one or more audio drivers at once (Dante Virtual Soundcard, a Dante interface, the Waves SoundGrid Driver). Snapshots save and recall everything, and the last session comes back automatically on launch.
+Any number of independent racks of VST3/AU plugins on one or more audio drivers at once (Dante Virtual Soundcard, a Dante interface, the Waves SoundGrid Driver). Everything lives in one **show file** (`.liverack`) with its snapshots inside it, and the open show comes back automatically on launch.
 
 ## Build (Mac, Apple silicon)
 
@@ -44,9 +44,9 @@ App: `build/LiveRack_artefacts/Release/LiveRack.app`
 
 ## The main window
 
-- **Top bar:** Devices, Routing, Scope, Plugins (scan), Store Scene, + Rack, Two Windows, Stack Rows, Save / Load, and **BPM** with **TAP**. Click the BPM number to type a tempo.
-- **Pages** (tabs above the strips): **All** shows every rack; **+ Page** makes a page (starting with the selected rack). Put racks on pages from a rack's right-click menu > **Pages** (a rack can be on several), or right-click a page tab > Add. New racks join the page you're on. Selecting a rack (from the console, a key, MIDI or OSC) switches to a page that has it. Pages are saved with the session, not in snapshots.
-- **Hot Plugins** (under the top bar): up to 12 pinned plugins. Right-click a plugin on a strip > **Pin to Hot Plugins**. Click a tile to open that plugin; drag tiles to reorder; right-click to unpin. Hot Plugins are stored in snapshots.
+- **Top bar,** in groups: **Show** (save; open, save as, new), **Snapshots** (previous / next, the current snapshot: click it for the list, rename and delete; **STORE**), **Setup** (Devices, Routing, Plugins, Scope), **View** (add rack, rack window, stack rows), and **BPM** with **TAP**. Hover a button for its name. Click the BPM number to type a tempo.
+- **Pages** (tabs above the strips): **All** shows every rack; **+ Page** makes a page (starting with the selected rack). Put racks on pages from a rack's right-click menu > **Pages** (a rack can be on several), or right-click a page tab > Add. New racks join the page you're on. Selecting a rack (from the console, a key, MIDI or OSC) switches to a page that has it. Pages are saved in the show, not in snapshots.
+- **Hot Plugins** (under the top bar): up to 12 pinned plugins. Right-click a plugin on a strip > **Pin to Hot Plugins**. Click a tile to open that plugin; drag tiles to reorder; right-click to unpin. Hot Plugins are saved in the show.
 - **Strips:** each rack's header shows its name and console channel (**CH**, click to set). Double-click the name to rename in place. The badges under it are buttons:
   - **MONO / M>S / ST**: switch format: mono, mono in with stereo out, or stereo (the rack drops out for a moment while its plugins switch over)
   - **A–H**: latency group (dashed = none)
@@ -84,19 +84,25 @@ Set a rack's format badge to **M>S**: one input, stereo outputs. Plugins run mon
 
 Give racks a group letter (A–H) with the badge on the strip. Every rack in a group is delayed to match the slowest one, so all those inputs stay sample-aligned. It re-aligns automatically when plugins are added, removed or change their latency. A bypassed rack in a group keeps the group's delay. Ungrouped racks stay as fast as possible. The strip shows the group and the rack's total latency; the group menu shows each group's latency. Channels that don't go through LiveRack aren't delayed: if they need to line up, set the console's input delay to the group's figure.
 
-## Snapshots and scope
+## Show file and snapshots
 
-- **Scope** sets what the next stored snapshot recalls: plugin settings, plugin bypass, rack bypass, routing & groups, names & colours, Hot Plugins and BPM, plus a map of every plugin. Click a plugin, or a rack's name for the whole rack, to include it or leave it alone. A plugin can also be set from its right-click menu (**Recalled by snapshots**).
-- The scope is saved inside the snapshot and comes back when it's recalled.
-- If a snapshot has the same racks and plugins as what's loaded, it's recalled in place following its scope: no reload, no audio gap, editors stay open. A snapshot with different racks or plugins reloads everything.
+- The **show** holds everything: racks, plugins and their settings, routing, latency groups, pages, Hot Plugins, User Keys, BPM, scope, the rack window, and all the snapshots. **Save** (Cmd+S) writes it; the folder button has **Save As**, **Open** (Cmd+O) and **New Show**. The window title shows the show's name and "(edited)" when it has unsaved changes; opening another show asks first. An edited show is also kept automatically every minute and on quit, and comes back on launch.
+- A **snapshot** is a numbered (and optionally named) set of plugin settings stored in the show. **STORE** stores one; console scene numbers map to snapshot numbers.
+- Recalling a snapshot **never adds, removes or moves plugins or racks**. It sets the settings and bypass of the plugins already in the show, and (if in scope) rack bypass and BPM. A plugin added after the snapshot was stored is left as it is (the status bar says how many); a plugin that was deleted is skipped.
+- **Scope** (one for the whole show) sets what recalls change: plugin settings, plugin bypass, rack bypass and BPM, plus a map of every plugin. Click a plugin, or a rack's name for the whole rack, to include it or leave it alone. A plugin can also be set from its right-click menu (**Recalled by snapshots**).
 - **Recall Safe** racks are never touched by recalls.
+- Old files: opening a pre-0.13 `.liverack` file opens it as a show. Scene files in a console's scene folder are imported into the show the first time their scene is recalled (if they have the same racks and plugins).
+
+## Rack window
+
+The plugin panel shows the selected rack: its colour, name, console channel, latency, in/out meters, **Rack Bypass**, and a tab for each plugin. The rack window button (View group) moves it into its own window, e.g. on a second screen. Whether it's open and where are saved in the show.
 
 ## Console Link (follow the console, like Waves ProLink)
 
 - **Yamaha CL/QL:** Remote Control Protocol, TCP port 49280. Use the console's IP from SETUP > NETWORK (FOR MIXER CONTROL).
 - **Behringer X32:** OSC on UDP port 10023. Choose whether LiveRack follows **Scenes, Snippets or Cues**, press **Learn**, then recall one on the X32.
 
-Workflow: pick a **scene folder** in the console's Settings; set up racks, then **Store Scene** with the console's scene number (saves e.g. `012.liverack`). When the console recalls scene 12, LiveRack recalls that file. Give racks a console channel (**CH** on the strip) so selecting that channel on the console selects the rack.
+Workflow: set up racks, then **STORE** a snapshot with the console's scene number. When the console recalls scene 12, LiveRack recalls snapshot 12. Give racks a console channel (**CH** on the strip) so selecting that channel on the console selects the rack.
 
 ## MIDI controllers
 

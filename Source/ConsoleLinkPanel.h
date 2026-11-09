@@ -21,7 +21,7 @@ private:
 
     juce::Label typeLabel    { {}, "Console" },
                 addressLabel { {}, "IP address" },
-                folderLabel  { {}, "Scene folder" },
+                folderLabel  { {}, "Old scenes" },
                 folderPath, statusLabel, logLabel { {}, "Messages from the console" };
     juce::ComboBox typeBox;
     juce::TextEditor addressEditor, logView;

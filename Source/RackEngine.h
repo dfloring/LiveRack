@@ -34,7 +34,6 @@ struct RackConfig
     static juce::String groupName (int g) { return g <= 0 ? juce::String ("-") : juce::String::charToString ((juce::juce_wchar) ('A' + g - 1)); }
 };
 
-// What a snapshot recalls (besides which plugins are in scope, kept per plugin)
 // A custom page: a named set of racks, in the user's order (by rack id)
 struct RackPage
 {
@@ -42,10 +41,20 @@ struct RackPage
     std::vector<int> rackIds;
 };
 
+// What recalling a snapshot changes (besides which plugins are in scope, kept
+// per plugin). Snapshots never add, remove or move plugins or racks.
 struct SnapshotScope
 {
-    bool pluginSettings = true, pluginBypass = true, rackBypass = true,
-         namesColours = true, hotPlugins = true, bpm = true, routing = true;
+    bool pluginSettings = true, pluginBypass = true, rackBypass = true, bpm = true;
+};
+
+// A snapshot stored in the show: settings for the plugins already in it,
+// matched by rack and plugin id
+struct ShowSnapshot
+{
+    int number = 0;
+    juce::String name;
+    std::shared_ptr<juce::XmlElement> data;
 };
 
 // Live figures for one audio driver, for the status bar and device panel
@@ -165,17 +174,44 @@ public:
     void tapTempo();
 
     //==============================================================================
-    // Snapshots: racks + plugins + full plugin state + bypass + scope + hot
-    // plugins + BPM. When a snapshot has the same racks and plugins as what's
-    // loaded, it is recalled in place (nothing reloaded, no gap in audio),
-    // following its scope.
+    // The show: racks, plugins and their state, routing, pages, Hot Plugins,
+    // BPM, scope, the stored snapshots, and extra sections the UI keeps
+    // (user keys, window layout). One .liverack file holds all of it.
+    std::unique_ptr<juce::XmlElement> createShow() const;
+    bool loadShow (const juce::XmlElement&, juce::String& error);
+    void newShow();
+
+    // The show's current racks and plugins without pages or snapshots
+    // (also how pre-0.13 files and scene files are laid out)
     std::unique_ptr<juce::XmlElement> createSnapshot() const;
-    bool loadSnapshot (const juce::XmlElement&, juce::String& error);
-    bool snapshotMatchesCurrentLayout (const juce::XmlElement&) const;
+    bool snapshotMatchesCurrentLayout (const juce::XmlElement&, bool checkIds = true) const;
+
+    juce::File getShowFile() const { return showFile; }
+    void setShowFile (const juce::File& f) { showFile = f; }
+    bool isShowEdited() const { return showEdited; }
+    void setShowEdited (bool e) { showEdited = e; }
+
+    // Named sections of the show kept for the UI (copied in and out whole)
+    const juce::XmlElement* getShowExtra (const juce::String& tag) const;
+    void setShowExtra (const juce::XmlElement&);
+
+    //==============================================================================
+    // Snapshots stored in the show, by number (console scene numbers map to
+    // these). Recall only changes plugin settings and bypass, rack bypass and
+    // BPM, following the scope; racks marked recall safe are left alone.
+    const std::vector<ShowSnapshot>& getSnapshots() const { return snapshots; }
+    const ShowSnapshot* getSnapshotInfo (int number) const;
+    void storeSnapshot (int number, const juce::String& name = {});
+    bool recallSnapshot (int number, juce::String& note);   // false = no such snapshot
+    void renameSnapshot (int number, const juce::String& name);
+    void deleteSnapshot (int number);
+    // A pre-0.13 scene file (a full rig) becomes a snapshot, if it has the
+    // same racks and plugins as the show
+    bool importSceneFile (const juce::XmlElement&, int number, const juce::String& name, juce::String& error);
 
     static juce::File getSettingsDir();
 
-    // Last session is saved on quit and can be restored on launch
+    // The open show is kept on quit (and every so often) and restored on launch
     void saveSession();
     bool restoreSession (juce::String& error);
     void saveSettings();
@@ -189,7 +225,9 @@ private:
     void timerCallback() override;      // keeps latency groups aligned
     void rebuildDriverLists();          // after racks are added/removed/moved between drivers
     void configureRack (Rack&, bool updateDriverLists);
-    void applySnapshotInPlace (const juce::XmlElement&);
+    void applyShowInPlace (const juce::XmlElement&);
+    bool loadRig (const juce::XmlElement&, juce::String& error);
+    std::unique_ptr<juce::XmlElement> captureSnapshotData() const;
     void relayoutRack (Rack&);          // re-request plugin channel layouts along the chain
     void detachRack (Rack&);            // take off its driver before rebuilding its graph
     void readScope (const juce::XmlElement&);
@@ -206,6 +244,10 @@ private:
     std::vector<std::unique_ptr<Rack>> racks;
 
     SnapshotScope scope;
+    std::vector<ShowSnapshot> snapshots;
+    juce::OwnedArray<juce::XmlElement> showExtras;
+    juce::File showFile;
+    bool showEdited = false;
     std::vector<RackPage> pages;
     int currentPage = -1;
     std::vector<int> hotPlugins;

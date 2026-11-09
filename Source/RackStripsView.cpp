@@ -6,12 +6,12 @@
 
 namespace
 {
-    const juce::Colour stripBack   { 0xff2b3036 };
-    const juce::Colour slotBack    { 0xff3a4149 };
-    const juce::Colour meterBack   { 0xff1b1f23 };
-    const juce::Colour bypassOn    { 0xffe08a2c };
-    const juce::Colour safeOn      { 0xff3fa66b };
-    const juce::Colour buttonOff   { 0xff3a4149 };
+    const juce::Colour stripBack   { 0xff1a1d21 };
+    const juce::Colour slotBack    { 0xff23272c };
+    const juce::Colour meterBack   { 0xff0b0d0f };
+    const juce::Colour bypassOn    { 0xffe0a030 };
+    const juce::Colour safeOn      { 0xff3fb950 };
+    const juce::Colour buttonOff   { 0xff23272c };
 
     juce::String arrow() { return juce::String (juce::CharPointer_UTF8 ("\xe2\x86\x92")); }
 
@@ -132,10 +132,12 @@ public:
 
         cols = (cells + rows - 1) / rows;
     }
-    static constexpr int headerH = 34, badgeH = 28, ioH = 22, slotH = 28, slotGap = 4, footerH = 26, latencyH = 18, meterW = 5;
+    static constexpr int headerH = 34, badgeH = 28, ioH = 22, slotH = 28, slotGap = 4, footerH = 26, latencyH = 18, meterW = 6;
 
     int selectedRack = -1, selectedSlot = -1;
     std::vector<std::array<float, 2>> levels; // per rack: input, output
+    struct MeterHold { float level[2] {}; int ticks[2] {}, clipTicks[2] {}; };
+    std::vector<MeterHold> holds;             // peak hold and clip, per rack
 
     PluginLibrary* library = nullptr;
 
@@ -285,36 +287,38 @@ public:
         const bool isSelected = r == selectedRack;
         const auto colour = colourForIndex (cfg.effectiveColour (r));
 
-        // Strip body and selection outline
+        // Strip body, its colour along the top, and the selection outline
+        auto body = l.strip.toFloat();
         g.setColour (stripBack);
-        g.fillRoundedRectangle (l.strip.toFloat(), 8.0f);
-
-        if (isSelected)
+        g.fillRoundedRectangle (body, 8.0f);
         {
-            g.setColour (colour);
-            g.drawRoundedRectangle (l.strip.toFloat().reduced (0.75f), 8.0f, 1.5f);
+            juce::Graphics::ScopedSaveState save (g);
+            juce::Path clip;
+            clip.addRoundedRectangle (body, 8.0f);
+            g.reduceClipRegion (clip);
+            g.setColour (colour.withAlpha (bypassed ? 0.4f : 1.0f));
+            g.fillRect (body.withHeight (4.0f));
         }
 
-        // Header: rack colour, number, name, console channel
-        g.setColour (colour.withAlpha (bypassed ? 0.35f : 1.0f));
-        g.fillRoundedRectangle (l.header.toFloat(), 6.0f);
+        g.setColour (isSelected ? juce::Colour (0xff5a636e) : Theme::border);
+        g.drawRoundedRectangle (body.reduced (0.5f), 8.0f, isSelected ? 1.5f : 1.0f);
 
-        const auto ink = juce::Colour (0xff101214);
-        auto text = l.header.reduced (8, 0);
+        // Header: number, name, console channel
+        auto text = l.header.reduced (6, 0).withTrimmedTop (2);
         text.removeFromRight (l.chBadge.getWidth() + 4);
-        g.setColour (ink.withAlpha (0.75f));
+        g.setColour (Theme::textDim);
         g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
         g.drawText (juce::String (r + 1), text.removeFromLeft (18), juce::Justification::centredLeft);
-        g.setColour (ink);
+        g.setColour (bypassed ? Theme::textDim : Theme::text);
         g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
         g.drawFittedText (cfg.name, text, juce::Justification::centredLeft, 1, 0.75f);
 
-        g.setColour (juce::Colours::black.withAlpha (0.25f));
-        g.fillRoundedRectangle (l.chBadge.toFloat(), 5.0f);
-        g.setColour (ink);
+        g.setColour (Theme::raised);
+        g.fillRoundedRectangle (l.chBadge.toFloat().withTrimmedTop (2.0f), 5.0f);
+        g.setColour (Theme::textDim.brighter (0.2f));
         g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
         g.drawText (cfg.consoleChannel > 0 ? "CH " + juce::String (cfg.consoleChannel) : juce::String ("CH -"),
-                    l.chBadge, juce::Justification::centred);
+                    l.chBadge.withTrimmedTop (2), juce::Justification::centred);
 
         // Badges: format, latency group, recall safe, colour
         paintBadge (g, l.formatBadge, cfg.formatName(), cfg.isMonoToStereo(), Theme::accent.withAlpha (0.8f), false);
@@ -353,8 +357,9 @@ public:
         // Meters
         const auto lv = juce::isPositiveAndBelow (r, (int) levels.size()) ? levels[(size_t) r]
                                                                              : std::array<float, 2> { 0.0f, 0.0f };
-        paintMeter (g, l.meterIn, lv[0]);
-        paintMeter (g, l.meterOut, lv[1]);
+        const auto hd = juce::isPositiveAndBelow (r, (int) holds.size()) ? holds[(size_t) r] : MeterHold {};
+        paintMeter (g, l.meterIn, lv[0], hd.level[0], hd.clipTicks[0] > 0);
+        paintMeter (g, l.meterOut, lv[1], hd.level[1], hd.clipTicks[1] > 0);
 
         // Latency: the rack's total, and its group's
         const double ms = engine.getRackTotalLatencyMs (r);
@@ -382,9 +387,15 @@ public:
 
         if (isSelected)
         {
-            g.setColour (colour);
+            g.setColour (Theme::accent);
             g.drawRoundedRectangle (area.toFloat().reduced (0.75f), 5.0f, 1.5f);
         }
+        else
+        {
+            g.setColour (Theme::border);
+            g.drawRoundedRectangle (area.toFloat().reduced (0.5f), 5.0f, 1.0f);
+        }
+        juce::ignoreUnused (colour);
 
         auto text = area.reduced (8, 0);
 
@@ -440,23 +451,37 @@ public:
         g.drawText (plugin != nullptr ? plugin->getName() : "?", text, juce::Justification::centredLeft, true);
     }
 
-    static void paintMeter (juce::Graphics& g, juce::Rectangle<int> area, float level)
+    // Segmented meter, -60 to 0 dB: green, amber from -18, red from -6;
+    // a peak-hold line, and a clip light above it
+    static void paintMeter (juce::Graphics& g, juce::Rectangle<int> full, float level, float hold, bool clipped)
     {
+        auto clipLight = full.removeFromTop (full.getWidth()).toFloat();
+        full.removeFromTop (2);
+        g.setColour (clipped ? Theme::red : meterBack);
+        g.fillRoundedRectangle (clipLight, 1.0f);
+
+        const auto area = full.toFloat();
         g.setColour (meterBack);
         g.fillRect (area);
 
-        const float db = juce::Decibels::gainToDecibels (level, -60.0f);
-        const float norm = juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f);
+        auto norm = [] (float gain) { return juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (gain, -60.0f) + 60.0f) / 60.0f); };
+        auto zone = [] (float n) { return n >= 0.9f ? Theme::red : n >= 0.7f ? Theme::amber : Theme::green; };
 
-        if (norm <= 0.0f)
-            return;
+        const float lit = norm (level);
+        const float seg = 3.0f, gap = 1.0f;
 
-        const auto a = area.toFloat();
-        juce::ColourGradient grad (juce::Colour (0xff3fbf5f), a.getX(), a.getBottom(),
-                                   juce::Colour (0xffe04a3a), a.getX(), a.getY(), false);
-        grad.addColour (0.8, juce::Colour (0xffe0c03a));
-        g.setGradientFill (grad);
-        g.fillRect (a.withTop (a.getBottom() - a.getHeight() * norm));
+        for (float y = area.getBottom() - seg; y >= area.getY(); y -= seg + gap)
+        {
+            const float n = (area.getBottom() - (y + seg * 0.5f)) / area.getHeight();
+            g.setColour (n <= lit ? zone (n) : zone (n).withAlpha (0.07f));
+            g.fillRect (area.getX(), y, area.getWidth(), seg);
+        }
+
+        if (const float h = norm (hold); h > 0.0f)
+        {
+            g.setColour (Theme::text);
+            g.fillRect (area.getX(), area.getBottom() - area.getHeight() * h, area.getWidth(), 1.5f);
+        }
     }
 
     static void paintBadge (juce::Graphics& g, juce::Rectangle<int> area, const juce::String& label,
@@ -843,6 +868,7 @@ void RackStripsView::updateMeters()
     auto& engine = content->engine;
     const int n = engine.getNumRacks();
     content->levels.resize ((size_t) n, { 0.0f, 0.0f });
+    content->holds.resize ((size_t) n);
 
     for (int r = 0; r < n; ++r)
     {
@@ -853,6 +879,13 @@ void RackStripsView::updateMeters()
             const float peak = juce::jmax (engine.consumePeak (r, io == 1, 0), engine.consumePeak (r, io == 1, 1));
             auto& level = content->levels[(size_t) r][(size_t) io];
             level = juce::jmax (peak, level * 0.82f); // fast attack, smooth fall
+
+            // Peak hold for 1.5 s, clip light for 3 s (called 30 times a second)
+            auto& h = content->holds[(size_t) r];
+            if (peak >= h.level[io])         { h.level[io] = peak; h.ticks[io] = 45; }
+            else if (--h.ticks[io] <= 0)     h.level[io] *= 0.9f;
+            if (peak >= 0.999f)              h.clipTicks[io] = 90;
+            else if (h.clipTicks[io] > 0)    --h.clipTicks[io];
 
             if (io == 0)
                 rackInput = peak;
@@ -916,6 +949,14 @@ void RackStripsView::previewMenu (int which, int rack)
     if (which == 2) content->startRename (rack);
 }
 #endif
+
+float RackStripsView::getLevel (int rack, bool output) const
+{
+    if (! juce::isPositiveAndBelow (rack, (int) content->levels.size()))
+        return 0.0f;
+    const float db = juce::Decibels::gainToDecibels (content->levels[(size_t) rack][output ? 1 : 0], -60.0f);
+    return juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f);
+}
 
 float RackStripsView::getOutputLevel (int rack) const
 {

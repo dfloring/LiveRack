@@ -28,6 +28,10 @@ public:
     void itemDropped (const SourceDetails&) override;
     void paintOverChildren (juce::Graphics&) override;
 
+    // Rack meters in the header (0..1 on the meter scale), and a repaint for them
+    std::function<float (int rack, bool output)> levelFor;
+    void updateMeters();
+
     // Height that shows the current plugin editor at full size
     int getPreferredHeight() const;
 
@@ -51,8 +55,9 @@ private:
     std::unique_ptr<juce::AudioProcessorEditor> editor;
     juce::String message;
 
-    juce::Label title;
-    juce::TextButton bypassButton { "Bypass" }, popOutButton { "Pop Out" }, removeButton { "Remove" };
+    juce::Rectangle<int> headerArea, meterArea;
+    juce::TextButton rackBypassButton { "Rack Bypass" }, bypassButton { "Bypass" },
+                     popOutButton { "Pop Out" }, removeButton { "Remove" };
     juce::OwnedArray<juce::TextButton> tabs;
     juce::Component editorHolder; // plugin editors are often native views: no scrolling container
 };

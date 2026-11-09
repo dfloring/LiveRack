@@ -179,7 +179,7 @@ function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;'
 
 function render() {
   const s = state;
-  $('scene').textContent = s.scene >= 0 ? 'Scene ' + s.scene : 'No scene';
+  $('scene').textContent = s.scene >= 0 ? s.scene + (s.sceneName ? '  ' + s.sceneName : '') : 'No snapshot';
   $('bpm').textContent = Number.isInteger(s.bpm) ? s.bpm : s.bpm.toFixed(1);
 
   // Pages

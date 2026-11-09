@@ -50,7 +50,8 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
 
     void save() const;
-    void load();
+    void load();          // the show's keys, else the last ones used
+    juce::XmlElement toXml() const;
 
     static constexpr int preferredHeight = 64;
 

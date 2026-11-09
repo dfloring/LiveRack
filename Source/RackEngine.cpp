@@ -1407,10 +1407,7 @@ std::unique_ptr<juce::XmlElement> RackEngine::createSnapshot() const
     sc->setAttribute ("pluginSettings", scope.pluginSettings);
     sc->setAttribute ("pluginBypass", scope.pluginBypass);
     sc->setAttribute ("rackBypass", scope.rackBypass);
-    sc->setAttribute ("namesColours", scope.namesColours);
-    sc->setAttribute ("hotPlugins", scope.hotPlugins);
     sc->setAttribute ("bpm", scope.bpm);
-    sc->setAttribute ("routing", scope.routing);
 
     for (int rackIndex = 0; rackIndex < (int) racks.size(); ++rackIndex)
     {
@@ -1477,10 +1474,7 @@ void RackEngine::readScope (const juce::XmlElement& xml)
         s.pluginSettings = sc->getBoolAttribute ("pluginSettings", true);
         s.pluginBypass   = sc->getBoolAttribute ("pluginBypass", true);
         s.rackBypass     = sc->getBoolAttribute ("rackBypass", true);
-        s.namesColours   = sc->getBoolAttribute ("namesColours", true);
-        s.hotPlugins     = sc->getBoolAttribute ("hotPlugins", true);
         s.bpm            = sc->getBoolAttribute ("bpm", true);
-        s.routing        = sc->getBoolAttribute ("routing", true);
         scope = s;
     }
     else
@@ -1523,17 +1517,17 @@ static RackConfig configFromXml (const juce::XmlElement& rackXml)
     return config;
 }
 
-bool RackEngine::loadSnapshot (const juce::XmlElement& xml, juce::String& error)
+bool RackEngine::loadRig (const juce::XmlElement& xml, juce::String& error)
 {
     if (! xml.hasTagName ("LIVERACK"))
     {
-        error = "This isn't a LiveRack snapshot file.";
+        error = "This isn't a LiveRack show file.";
         return false;
     }
 
     if (snapshotMatchesCurrentLayout (xml))
     {
-        applySnapshotInPlace (xml);
+        applyShowInPlace (xml);
         error.clear();
         return true;
     }
@@ -1612,7 +1606,7 @@ bool RackEngine::loadSnapshot (const juce::XmlElement& xml, juce::String& error)
 }
 
 // Same racks (count and format) with the same plugins in the same order
-bool RackEngine::snapshotMatchesCurrentLayout (const juce::XmlElement& xml) const
+bool RackEngine::snapshotMatchesCurrentLayout (const juce::XmlElement& xml, bool checkIds) const
 {
     if (! xml.hasTagName ("LIVERACK") || xml.getChildByName ("RACK") == nullptr)
         return false;
@@ -1624,7 +1618,8 @@ bool RackEngine::snapshotMatchesCurrentLayout (const juce::XmlElement& xml) cons
         auto* r = getRack (rackIndex++);
 
         if (r == nullptr || r->config.stereo != rackXml->getBoolAttribute ("stereo", false)
-            || r->config.monoToStereo != rackXml->getBoolAttribute ("monoToStereo", false))
+            || r->config.monoToStereo != rackXml->getBoolAttribute ("monoToStereo", false)
+            || (checkIds && rackXml->getIntAttribute ("id", 0) != r->config.id))
             return false;
 
         int slot = 0;
@@ -1638,7 +1633,8 @@ bool RackEngine::snapshotMatchesCurrentLayout (const juce::XmlElement& xml) cons
             auto* descXml = slotXml->getChildByName ("PLUGIN");
 
             if (descXml == nullptr || ! desc.loadFromXml (*descXml)
-                || getSlotDescription (rackIndex - 1, slot).createIdentifierString() != desc.createIdentifierString())
+                || getSlotDescription (rackIndex - 1, slot).createIdentifierString() != desc.createIdentifierString()
+                || (checkIds && slotXml->getIntAttribute ("id", 0) != getSlotId (rackIndex - 1, slot)))
                 return false;
 
             ++slot;
@@ -1651,11 +1647,11 @@ bool RackEngine::snapshotMatchesCurrentLayout (const juce::XmlElement& xml) cons
     return rackIndex == getNumRacks();
 }
 
-void RackEngine::applySnapshotInPlace (const juce::XmlElement& xml)
+// Same racks and plugins (and ids) as the file: everything in it is applied
+// without reloading a plugin, so audio keeps running
+void RackEngine::applyShowInPlace (const juce::XmlElement& xml)
 {
-    // The snapshot's own scope decides what it recalls
     readScope (xml);
-    const auto s = scope;
     int rackIndex = 0;
 
     for (auto* rackXml : xml.getChildWithTagNameIterator ("RACK"))
@@ -1663,64 +1659,357 @@ void RackEngine::applySnapshotInPlace (const juce::XmlElement& xml)
         const int ri = rackIndex++;
         auto* r = getRack (ri);
 
-        if (r == nullptr || r->config.recallSafe)
+        if (r == nullptr)
             continue;
 
         auto stored = configFromXml (*rackXml);
-        auto cfg = r->config;
+        stored.id = r->config.id;
+        if (stored.driver >= getNumDrivers())
+            stored.driver = r->config.driver;
 
-        if (s.namesColours)
-        {
-            cfg.name = stored.name;
-            cfg.colourIndex = stored.colourIndex;
-        }
-
-        if (s.routing && stored.driver < getNumDrivers())
-        {
-            cfg.driver = stored.driver;
-            for (int c = 0; c < 2; ++c) { cfg.input[c] = stored.input[c]; cfg.output[c] = stored.output[c]; }
-            cfg.consoleChannel = stored.consoleChannel;
-            cfg.console = stored.console;
-            cfg.latencyGroup = stored.latencyGroup;
-        }
-
-        setRackConfig (ri, cfg);
-
-        if (s.rackBypass)
-            r->bypassed = rackXml->getBoolAttribute ("bypassed", false);
+        setRackConfig (ri, stored);
+        r->bypassed = rackXml->getBoolAttribute ("bypassed", false);
 
         int slot = 0;
 
         for (auto* slotXml : rackXml->getChildWithTagNameIterator ("SLOT"))
         {
-            const int si = slot++;
+            auto& node = r->slots[(size_t) slot++];
+            node->properties.set ("inScope", slotXml->getBoolAttribute ("inScope", true));
+
+            if (auto* stateXml = slotXml->getChildByName ("STATE"))
+            {
+                juce::MemoryBlock state;
+                if (state.fromBase64Encoding (stateXml->getAllSubText().trim()))
+                    node->getProcessor()->setStateInformation (state.getData(), (int) state.getSize());
+            }
+
+            node->setBypassed (slotXml->getBoolAttribute ("bypassed", false));
+        }
+    }
+
+    readHot (xml);
+
+    if (xml.hasAttribute ("bpm"))
+        bpm = juce::jlimit (20.0, 300.0, xml.getDoubleAttribute ("bpm", 120.0));
+
+    timerCallback();
+    sendChangeMessage();
+}
+
+//==============================================================================
+// Snapshots stored in the show
+std::unique_ptr<juce::XmlElement> RackEngine::captureSnapshotData() const
+{
+    auto x = std::make_unique<juce::XmlElement> ("SNAPSHOT");
+    x->setAttribute ("bpm", bpm.load());
+
+    for (int ri = 0; ri < (int) racks.size(); ++ri)
+    {
+        auto& r = racks[(size_t) ri];
+        auto* rx = x->createNewChildElement ("RACK");
+        rx->setAttribute ("id", r->config.id);
+        rx->setAttribute ("bypassed", r->bypassed.load());
+
+        for (int si = 0; si < (int) r->slots.size(); ++si)
+        {
             auto& node = r->slots[(size_t) si];
-            const bool inScope = slotXml->getBoolAttribute ("inScope", true);
-            node->properties.set ("inScope", inScope);
+            auto* plugin = dynamic_cast<juce::AudioPluginInstance*> (node->getProcessor());
+            if (plugin == nullptr)
+                continue;
 
-            if (! inScope)
-                continue; // left exactly as it is
+            auto* sx = rx->createNewChildElement ("SLOT");
+            sx->setAttribute ("id", getSlotId (ri, si));
+            sx->setAttribute ("bypassed", node->isBypassed());
 
-            if (s.pluginSettings)
-                if (auto* stateXml = slotXml->getChildByName ("STATE"))
+            juce::MemoryBlock state;
+            plugin->getStateInformation (state);
+            sx->createNewChildElement ("STATE")->addTextElement (state.toBase64Encoding());
+        }
+    }
+
+    return x;
+}
+
+const ShowSnapshot* RackEngine::getSnapshotInfo (int number) const
+{
+    for (auto& s : snapshots)
+        if (s.number == number)
+            return &s;
+    return nullptr;
+}
+
+static void putSnapshot (std::vector<ShowSnapshot>& list, ShowSnapshot snap)
+{
+    for (auto& s : list)
+        if (s.number == snap.number)
+        {
+            if (snap.name.isEmpty())
+                snap.name = s.name;
+            s = std::move (snap);
+            return;
+        }
+
+    auto at = std::find_if (list.begin(), list.end(), [&] (const ShowSnapshot& s) { return s.number > snap.number; });
+    list.insert (at, std::move (snap));
+}
+
+void RackEngine::storeSnapshot (int number, const juce::String& name)
+{
+    ShowSnapshot snap;
+    snap.number = juce::jmax (0, number);
+    snap.name = name.trim();
+    snap.data = std::shared_ptr<juce::XmlElement> (captureSnapshotData().release());
+    putSnapshot (snapshots, std::move (snap));
+    sendChangeMessage();
+}
+
+bool RackEngine::recallSnapshot (int number, juce::String& note)
+{
+    note.clear();
+    auto* snap = getSnapshotInfo (number);
+    if (snap == nullptr || snap->data == nullptr)
+        return false;
+
+    const auto data = snap->data; // keeps it alive if the list changes
+    int missing = 0;
+
+    for (int ri = 0; ri < (int) racks.size(); ++ri)
+    {
+        auto& r = racks[(size_t) ri];
+        if (r->config.recallSafe)
+            continue;
+
+        const juce::XmlElement* rx = nullptr;
+        for (auto* e : data->getChildWithTagNameIterator ("RACK"))
+            if (e->getIntAttribute ("id") == r->config.id)
+                rx = e;
+
+        if (rx == nullptr)
+        {
+            missing += (int) r->slots.size();
+            continue;
+        }
+
+        if (scope.rackBypass)
+            r->bypassed = rx->getBoolAttribute ("bypassed", false);
+
+        for (int si = 0; si < (int) r->slots.size(); ++si)
+        {
+            if (! isSlotInScope (ri, si))
+                continue;
+
+            const juce::XmlElement* sx = nullptr;
+            const int id = getSlotId (ri, si);
+            for (auto* e : rx->getChildWithTagNameIterator ("SLOT"))
+                if (e->getIntAttribute ("id") == id)
+                    sx = e;
+
+            if (sx == nullptr)
+            {
+                ++missing;
+                continue;
+            }
+
+            auto& node = r->slots[(size_t) si];
+
+            if (scope.pluginSettings)
+                if (auto* stateXml = sx->getChildByName ("STATE"))
                 {
                     juce::MemoryBlock state;
                     if (state.fromBase64Encoding (stateXml->getAllSubText().trim()))
                         node->getProcessor()->setStateInformation (state.getData(), (int) state.getSize());
                 }
 
-            if (s.pluginBypass)
-                node->setBypassed (slotXml->getBoolAttribute ("bypassed", false));
+            if (scope.pluginBypass)
+                node->setBypassed (sx->getBoolAttribute ("bypassed", false));
         }
     }
 
-    if (s.hotPlugins)
-        readHot (xml);
+    if (scope.bpm && data->hasAttribute ("bpm"))
+        bpm = juce::jlimit (20.0, 300.0, data->getDoubleAttribute ("bpm", 120.0));
 
-    if (s.bpm && xml.hasAttribute ("bpm"))
-        bpm = juce::jlimit (20.0, 300.0, xml.getDoubleAttribute ("bpm", 120.0));
+    if (missing > 0)
+        note = juce::String (missing) + (missing == 1 ? " plugin isn't" : " plugins aren't") + " in this snapshot, left as is";
 
     timerCallback();
+    sendChangeMessage();
+    return true;
+}
+
+void RackEngine::renameSnapshot (int number, const juce::String& name)
+{
+    for (auto& s : snapshots)
+        if (s.number == number)
+            s.name = name.trim();
+    sendChangeMessage();
+}
+
+void RackEngine::deleteSnapshot (int number)
+{
+    snapshots.erase (std::remove_if (snapshots.begin(), snapshots.end(),
+                                     [number] (const ShowSnapshot& s) { return s.number == number; }),
+                     snapshots.end());
+    sendChangeMessage();
+}
+
+bool RackEngine::importSceneFile (const juce::XmlElement& full, int number, const juce::String& name, juce::String& error)
+{
+    if (! snapshotMatchesCurrentLayout (full, false))
+    {
+        error = "its racks and plugins don't match this show";
+        return false;
+    }
+
+    auto x = std::make_unique<juce::XmlElement> ("SNAPSHOT");
+    x->setAttribute ("bpm", full.getDoubleAttribute ("bpm", bpm.load()));
+    int ri = 0;
+
+    for (auto* rackXml : full.getChildWithTagNameIterator ("RACK"))
+    {
+        auto* rx = x->createNewChildElement ("RACK");
+        rx->setAttribute ("id", getRackId (ri));
+        rx->setAttribute ("bypassed", rackXml->getBoolAttribute ("bypassed", false));
+        int si = 0;
+
+        for (auto* slotXml : rackXml->getChildWithTagNameIterator ("SLOT"))
+        {
+            auto* sx = rx->createNewChildElement ("SLOT");
+            sx->setAttribute ("id", getSlotId (ri, si++));
+            sx->setAttribute ("bypassed", slotXml->getBoolAttribute ("bypassed", false));
+            if (auto* st = slotXml->getChildByName ("STATE"))
+                sx->addChildElement (new juce::XmlElement (*st));
+        }
+        ++ri;
+    }
+
+    ShowSnapshot snap;
+    snap.number = number;
+    snap.name = name;
+    snap.data = std::shared_ptr<juce::XmlElement> (x.release());
+    putSnapshot (snapshots, std::move (snap));
+    sendChangeMessage();
+    error.clear();
+    return true;
+}
+
+//==============================================================================
+// The show
+static bool isEngineSection (const juce::String& tag)
+{
+    return tag == "SCOPE" || tag == "RACK" || tag == "HOT" || tag == "PAGES" || tag == "SNAPSHOTS"
+        || tag == "SLOT" || tag == "PLUGIN" || tag == "STATE";
+}
+
+const juce::XmlElement* RackEngine::getShowExtra (const juce::String& tag) const
+{
+    for (auto* e : showExtras)
+        if (e->hasTagName (tag))
+            return e;
+    return nullptr;
+}
+
+void RackEngine::setShowExtra (const juce::XmlElement& xml)
+{
+    jassert (! isEngineSection (xml.getTagName()));
+    for (int i = showExtras.size(); --i >= 0;)
+        if (showExtras[i]->hasTagName (xml.getTagName()))
+            showExtras.remove (i);
+    showExtras.add (new juce::XmlElement (xml));
+}
+
+std::unique_ptr<juce::XmlElement> RackEngine::createShow() const
+{
+    auto xml = createSnapshot();
+    xml->setAttribute ("version", 4);
+
+    auto* pagesXml = xml->createNewChildElement ("PAGES");
+    pagesXml->setAttribute ("current", currentPage);
+    for (auto& p : pages)
+    {
+        auto* e = pagesXml->createNewChildElement ("PAGE");
+        e->setAttribute ("name", p.name);
+        juce::StringArray ids;
+        for (int id : p.rackIds) ids.add (juce::String (id));
+        e->setAttribute ("racks", ids.joinIntoString (","));
+    }
+
+    auto* snapsXml = xml->createNewChildElement ("SNAPSHOTS");
+    for (auto& s : snapshots)
+        if (s.data != nullptr)
+        {
+            auto* e = new juce::XmlElement (*s.data);
+            e->setAttribute ("number", s.number);
+            e->setAttribute ("name", s.name);
+            snapsXml->addChildElement (e);
+        }
+
+    for (auto* e : showExtras)
+        xml->addChildElement (new juce::XmlElement (*e));
+
+    return xml;
+}
+
+bool RackEngine::loadShow (const juce::XmlElement& xml, juce::String& error)
+{
+    if (! xml.hasTagName ("LIVERACK"))
+    {
+        error = "This isn't a LiveRack show file.";
+        return false;
+    }
+
+    const bool ok = loadRig (xml, error);
+
+    // A pre-0.13 file has no pages: keep the ones there are
+    if (auto* pagesXml = xml.getChildByName ("PAGES"))
+    {
+        std::vector<RackPage> loaded;
+        for (auto* e : pagesXml->getChildWithTagNameIterator ("PAGE"))
+        {
+            RackPage p;
+            p.name = e->getStringAttribute ("name", "Page");
+            juce::StringArray ids;
+            ids.addTokens (e->getStringAttribute ("racks"), ",", "");
+            for (auto& id : ids)
+                if (id.getIntValue() > 0)
+                    p.rackIds.push_back (id.getIntValue());
+            loaded.push_back (p);
+        }
+        setPages (loaded);
+        setCurrentPage (pagesXml->getIntAttribute ("current", -1));
+    }
+
+    snapshots.clear();
+    if (auto* snapsXml = xml.getChildByName ("SNAPSHOTS"))
+        for (auto* e : snapsXml->getChildWithTagNameIterator ("SNAPSHOT"))
+        {
+            ShowSnapshot s;
+            s.number = juce::jmax (0, e->getIntAttribute ("number"));
+            s.name = e->getStringAttribute ("name");
+            s.data = std::make_shared<juce::XmlElement> (*e);
+            putSnapshot (snapshots, std::move (s));
+        }
+
+    showExtras.clear();
+    for (auto* e : xml.getChildIterator())
+        if (! isEngineSection (e->getTagName()))
+            showExtras.add (new juce::XmlElement (*e));
+
+    sendChangeMessage();
+    return ok;
+}
+
+void RackEngine::newShow()
+{
+    clearAll();
+    setPages ({});
+    setCurrentPage (-1);
+    snapshots.clear();
+    showExtras.clear();
+    scope = {};
+    bpm = 120.0;
+    showFile = juce::File();
+    showEdited = false;
     sendChangeMessage();
 }
 
@@ -1766,19 +2055,10 @@ void RackEngine::saveSettings()
 
 void RackEngine::saveSession()
 {
-    if (auto xml = createSnapshot())
+    if (auto xml = createShow())
     {
-        // Pages belong to the session, not to snapshots
-        auto* pagesXml = xml->createNewChildElement ("PAGES");
-        pagesXml->setAttribute ("current", currentPage);
-        for (auto& p : pages)
-        {
-            auto* e = pagesXml->createNewChildElement ("PAGE");
-            e->setAttribute ("name", p.name);
-            juce::StringArray ids;
-            for (int id : p.rackIds) ids.add (juce::String (id));
-            e->setAttribute ("racks", ids.joinIntoString (","));
-        }
+        xml->setAttribute ("showFile", showFile.getFullPathName());
+        xml->setAttribute ("edited", showEdited);
         xml->writeTo (getSettingsDir().getChildFile ("last-session.liverack"));
     }
 }
@@ -1792,27 +2072,10 @@ bool RackEngine::restoreSession (juce::String& error)
 
     if (auto xml = juce::parseXML (file))
     {
-        const bool ok = loadSnapshot (*xml, error);
-
-        std::vector<RackPage> loaded;
-        int current = -1;
-        if (auto* pagesXml = xml->getChildByName ("PAGES"))
-        {
-            current = pagesXml->getIntAttribute ("current", -1);
-            for (auto* e : pagesXml->getChildWithTagNameIterator ("PAGE"))
-            {
-                RackPage p;
-                p.name = e->getStringAttribute ("name", "Page");
-                juce::StringArray ids;
-                ids.addTokens (e->getStringAttribute ("racks"), ",", "");
-                for (auto& id : ids)
-                    if (id.getIntValue() > 0)
-                        p.rackIds.push_back (id.getIntValue());
-                loaded.push_back (p);
-            }
-        }
-        setPages (loaded);
-        setCurrentPage (current);
+        const bool ok = loadShow (*xml, error);
+        const auto path = xml->getStringAttribute ("showFile");
+        showFile = juce::File::isAbsolutePath (path) ? juce::File (path) : juce::File();
+        showEdited = xml->getBoolAttribute ("edited", false);
         return ok;
     }
 

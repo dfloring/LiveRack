@@ -67,7 +67,7 @@ class MainComponent::RackViewWindow : public juce::DocumentWindow
 {
 public:
     explicit RackViewWindow (std::function<void()> onClose)
-        : DocumentWindow ("LiveRack - Rack View", Theme::background, DocumentWindow::allButtons),
+        : DocumentWindow ("LiveRack - Rack Window", Theme::background, DocumentWindow::allButtons),
           closeCallback (std::move (onClose))
     {
         setUsingNativeTitleBar (true);
@@ -117,11 +117,7 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        auto r = getLocalBounds().toFloat().reduced (0.5f);
-        g.setColour (Theme::raised);
-        g.fillRoundedRectangle (r, 10.0f);
-        g.setColour (Theme::border);
-        g.drawRoundedRectangle (r, 10.0f, 1.0f);
+        auto r = getLocalBounds().toFloat();
 
         // Beat light
         const double beatMs = 60000.0 / engine.getBpm();
@@ -134,7 +130,7 @@ public:
         g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
         g.drawText ("BPM", t.removeFromTop (12.0f).toNearestInt(), juce::Justification::centredLeft);
         g.setColour (Theme::text);
-        g.setFont (juce::FontOptions (21.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
         const double bpm = engine.getBpm();
         g.drawText (juce::String (bpm, std::abs (bpm - std::round (bpm)) < 0.05 ? 0 : 1),
                     t.toNearestInt(), juce::Justification::centredLeft);
@@ -167,7 +163,7 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (juce::Colour (0xff1a1d21));
+        g.fillAll (juce::Colour (0xff0d0f11));
         g.setColour (Theme::border);
         g.fillRect (0, 0, getWidth(), 1);
 
@@ -259,8 +255,11 @@ MainComponent::MainComponent()
     bpmDisplay = std::make_unique<BpmDisplay> (engine);
     statusBar = std::make_unique<StatusBar> (*this);
 
-    for (auto* b : { &devicesButton, &routingButton, &scopeButton, &scanButton, &storeSceneButton,
-                     &addRackButton, &windowModeButton, &stackRowsButton, &saveButton, &loadButton, &tapButton })
+    for (juce::Button* b : { (juce::Button*) &devicesButton, (juce::Button*) &routingButton, (juce::Button*) &scopeButton,
+                             (juce::Button*) &scanButton, (juce::Button*) &storeSceneButton, (juce::Button*) &addRackButton,
+                             (juce::Button*) &windowModeButton, (juce::Button*) &stackRowsButton, (juce::Button*) &saveButton,
+                             (juce::Button*) &loadButton, (juce::Button*) &tapButton, (juce::Button*) &prevSceneButton,
+                             (juce::Button*) &nextSceneButton })
         addAndMakeVisible (b);
 
     addAndMakeVisible (*bpmDisplay);
@@ -279,12 +278,11 @@ MainComponent::MainComponent()
     addRackButton.onClick    = [this] { addRack(); };
     windowModeButton.onClick = [this] { setTwoWindowMode (! isTwoWindowMode()); };
     tapButton.onClick        = [this] { engine.tapTempo(); };
-    tapButton.setColour (juce::TextButton::buttonColourId, Theme::accentDeep);
-
-    devicesButton.setTooltip ("Audio drivers, consoles and controllers");
-    routingButton.setTooltip ("Patch rack inputs and outputs");
-    scopeButton.setTooltip ("What snapshots recall");
-    scanButton.setTooltip ("Scan for plugins");
+    prevSceneButton.onClick  = [this] { stepScene (-1); };
+    nextSceneButton.onClick  = [this] { stepScene (1); };
+    tapButton.setColour (juce::TextButton::buttonColourId, Theme::accent);
+    tapButton.setColour (juce::TextButton::textColourOffId, Theme::background);
+    storeSceneButton.setTooltip ("Store a snapshot of the plugin settings in the show");
 
     const bool stack = AppSettings::get ("stackRows") != "0"; // on by default
     stackRowsButton.setClickingTogglesState (true);
@@ -296,10 +294,8 @@ MainComponent::MainComponent()
         strips.setStackRows (on);
         AppSettings::set ("stackRows", on ? "1" : "0");
     };
-    saveButton.onClick = [this] { saveSnapshot(); };
-    loadButton.onClick = [this] { loadSnapshot(); };
-    saveButton.setTooltip ("Save a snapshot file");
-    loadButton.setTooltip ("Load a snapshot file");
+    saveButton.onClick = [this] { saveShow (false); };
+    loadButton.onClick = [this] { showShowMenu(); };
 
     strips.onSelect    = [this] (int r, int s) { select (r, s); };
     strips.onAddPlugin = [this] (int r) { showAddPluginMenu (r); };
@@ -319,6 +315,7 @@ MainComponent::MainComponent()
     dock.onRemove       = [this] (int r, int s) { removeSlot (r, s); };
     dock.onToggleBypass = [this] (int r, int s) { engine.setSlotBypassed (r, s, ! engine.isSlotBypassed (r, s)); };
     dock.onPreferredHeightChanged = [this] { resized(); };
+    dock.levelFor = [this] (int r, bool out) { return strips.getLevel (r, out); };
     dock.onSlotDropped = [this] (int fr, int fs, int tr, int ti, bool copy) { handleSlotDrop (fr, fs, tr, ti, copy); };
 
     hotBar.onOpen = [this] (int id) { openSlotId (id); };
@@ -371,6 +368,8 @@ MainComponent::MainComponent()
 
     if (error.isNotEmpty())
         showError ("Last session restored with problems", error);
+
+    keysBar.load(); // the show's own keys, if it has them
 
     if (! hadSession && engine.getNumRacks() == 0)
     {
@@ -433,6 +432,8 @@ MainComponent::~MainComponent()
     closeAllEditors(); // editors must die before their plugins
     midi.reset();
 
+    storeWindowLayout(); // the engine keeps the session as it closes
+
     if (rackWindow != nullptr)
     {
         AppSettings::set ("rackWindow", rackWindow->getWindowStateAsString());
@@ -447,40 +448,50 @@ void MainComponent::paint (juce::Graphics& g)
     g.fillAll (Theme::background);
 
     // Toolbar background and logo
-    g.setColour (juce::Colour (0xff1a1d21));
+    g.setColour (Theme::panel);
     g.fillRect (0, 0, getWidth(), 64);
     g.setColour (Theme::border);
     g.fillRect (0, 64, getWidth(), 1);
 
-    auto logo = juce::Rectangle<float> (16.0f, 16.0f, 32.0f, 32.0f);
-    g.setColour (Theme::panel);
-    g.fillRoundedRectangle (logo, 7.0f);
-    g.setColour (juce::Colour (0xff3a4048));
-    g.drawRoundedRectangle (logo, 7.0f, 1.0f);
+    auto logo = juce::Rectangle<float> (16.0f, 18.0f, 28.0f, 28.0f);
+    g.setColour (Theme::accent);
+    g.fillRoundedRectangle (logo, 6.0f);
+    g.setColour (Theme::background);
     for (int i = 0; i < 3; ++i)
-    {
-        g.setColour (i == 1 ? Theme::accent : juce::Colour (0xff3a4048));
-        g.fillRoundedRectangle (logo.getX() + 6.0f, logo.getY() + 6.5f + i * 7.0f, 20.0f, 4.5f, 1.0f);
-    }
-    g.setColour (Theme::amber);
-    g.fillRoundedRectangle (logo.getX() + 18.0f, logo.getY() + 14.0f, 6.0f, 2.0f, 1.0f);
+        g.fillRoundedRectangle (logo.getX() + 7.0f, logo.getY() + 8.0f + i * 5.0f, 14.0f, 2.0f, 1.0f);
 
     g.setColour (Theme::text);
-    g.setFont (juce::FontOptions (19.0f, juce::Font::bold));
-    g.drawText ("LiveRack", 56, 0, 100, 64, juce::Justification::centredLeft);
+    g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
+    g.drawText ("LiveRack", 52, 0, 90, 64, juce::Justification::centredLeft);
 
-    // Scene chip
-    auto chip = juce::Rectangle<float> (158.0f, 18.0f, 210.0f, 28.0f);
-    g.setColour (Theme::raised);
-    g.fillRoundedRectangle (chip, 14.0f);
+    // Button groups sit in sunken wells
+    for (auto& grp : toolbarGroups)
+    {
+        g.setColour (Theme::well);
+        g.fillRoundedRectangle (grp.toFloat(), 8.0f);
+        g.setColour (Theme::border);
+        g.drawRoundedRectangle (grp.toFloat().reduced (0.5f), 8.0f, 1.0f);
+    }
+
+    // Snapshot chip: console light, number, name (click for the list)
+    auto chip = sceneChip.toFloat();
     auto* console = primaryConsole();
     const bool linked = console != nullptr && console->isConnected();
-    Theme::drawLight (g, juce::Rectangle<float> (9.0f, 9.0f).withCentre ({ chip.getX() + 15.0f, chip.getCentreY() }),
-                      linked ? Theme::green : Theme::textDim, linked);
+    Theme::drawLight (g, juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ chip.getX() + 10.0f, chip.getCentreY() }),
+                      linked ? Theme::green : Theme::border, linked);
+
+    auto t = chip.withTrimmedLeft (22.0f).reduced (0.0f, 3.0f);
+    const auto* info = engine.getSnapshotInfo (currentScene);
+    g.setColour (Theme::textDim);
+    g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+    g.drawText (currentScene >= 0 ? "SNAPSHOT " + juce::String (currentScene) : juce::String ("SNAPSHOTS"),
+                t.removeFromTop (t.getHeight() * 0.42f).toNearestInt(), juce::Justification::bottomLeft);
     g.setColour (Theme::text);
-    g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-    g.drawText (currentScene >= 0 ? "Scene " + juce::String (currentScene) : juce::String ("No scene recalled"),
-                chip.withTrimmedLeft (28.0f).toNearestInt(), juce::Justification::centredLeft);
+    g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+    juce::String name = currentScene < 0 ? juce::String ((int) engine.getSnapshots().size()) + " in show"
+                      : info == nullptr ? juce::String ("Not stored")
+                      : info->name.isNotEmpty() ? info->name : juce::String ("Untitled");
+    g.drawFittedText (name, t.toNearestInt(), juce::Justification::topLeft, 1, 0.8f);
 }
 
 void MainComponent::resized()
@@ -488,28 +499,34 @@ void MainComponent::resized()
     auto area = getLocalBounds();
 
     auto bar = area.removeFromTop (64).reduced (12, 10);
-    bar.removeFromLeft (370); // logo + scene chip
+    bar.removeFromLeft (140); // logo and name
+    toolbarGroups.clear();
 
-    tapButton.setBounds (bar.removeFromRight (64));
-    bar.removeFromRight (4);
-    bpmDisplay->setBounds (bar.removeFromRight (92));
-    bar.removeFromRight (16);
-
-    for (auto* b : { &loadButton, &saveButton })
+    // A group of buttons in a well, laid out left to right
+    auto group = [this, &bar] (std::initializer_list<std::pair<juce::Component*, int>> items, bool fromRight = false)
     {
-        b->setBounds (bar.removeFromRight (70));
-        bar.removeFromRight (6);
-    }
-    bar.removeFromRight (10);
-    stackRowsButton.setBounds (bar.removeFromRight (108)); bar.removeFromRight (6);
-    windowModeButton.setBounds (bar.removeFromRight (124)); bar.removeFromRight (6);
-    addRackButton.setBounds (bar.removeFromRight (84));
+        int w = 4;
+        for (auto& it : items) w += it.second + 4;
+        auto grp = fromRight ? bar.removeFromRight (w) : bar.removeFromLeft (w);
+        toolbarGroups.push_back (grp);
+        auto inner = grp.reduced (4);
+        for (auto& it : items)
+        {
+            auto cell = inner.removeFromLeft (it.second);
+            if (it.first != nullptr)
+                it.first->setBounds (cell);
+            else
+                sceneChip = cell;
+            inner.removeFromLeft (4);
+        }
+        if (fromRight) bar.removeFromRight (12); else bar.removeFromLeft (12);
+    };
 
-    for (auto* b : { &devicesButton, &routingButton, &scopeButton, &scanButton, &storeSceneButton })
-    {
-        b->setBounds (bar.removeFromLeft (b == &storeSceneButton ? 112 : 92));
-        bar.removeFromLeft (6);
-    }
+    group ({ { &saveButton, 40 }, { &loadButton, 40 } });
+    group ({ { &prevSceneButton, 34 }, { nullptr, 168 }, { &nextSceneButton, 34 }, { &storeSceneButton, 64 } });
+    group ({ { &devicesButton, 40 }, { &routingButton, 40 }, { &scanButton, 40 }, { &scopeButton, 40 } });
+    group ({ { &addRackButton, 40 }, { &windowModeButton, 40 }, { &stackRowsButton, 40 } });
+    group ({ { bpmDisplay.get(), 84 }, { &tapButton, 60 } }, true);
 
     statusBar->setBounds (area.removeFromBottom (30));
 
@@ -547,6 +564,8 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
     }
     else
     {
+        if (source == &engine && juce::Time::getMillisecondCounter() > ignoreEditsUntil)
+            engine.setShowEdited (true);
         refreshAll();
     }
 }
@@ -554,6 +573,7 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 void MainComponent::timerCallback()
 {
     strips.updateMeters();
+    dock.updateMeters();
     engine.updateDriverStats();
     ++ticks;
 
@@ -568,12 +588,24 @@ void MainComponent::timerCallback()
     if (ticks % 8 == 0)
     {
         statusBar->repaint();
-        repaint (0, 0, 380, 64); // scene chip
+        repaint (sceneChip.expanded (24)); // console light
+        updateWindowTitle();
+    }
+
+    // Keep a copy of an edited show, in case of a crash
+    if (ticks % (30 * 60) == 0 && engine.isShowEdited())
+    {
+        storeWindowLayout();
+        engine.saveSession();
     }
 }
 
 bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component*)
 {
+    if (key == juce::KeyPress ('s', juce::ModifierKeys::commandModifier, 0)) { saveShow (false); return true; }
+    if (key == juce::KeyPress ('s', juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier, 0)) { saveShow (true); return true; }
+    if (key == juce::KeyPress ('o', juce::ModifierKeys::commandModifier, 0)) { openShow(); return true; }
+
     // User Key shortcuts first, then the extra ones
     if (const int k = keysBar.keyForShortcut (key); k >= 0)
     {
@@ -1424,7 +1456,7 @@ void MainComponent::setTwoWindowMode (bool shouldBeTwo)
         }
 
         rackWindow->setVisible (true);
-        windowModeButton.setButtonText ("One Window");
+        windowModeButton.setTooltip ("Back to one window");
     }
     else
     {
@@ -1433,7 +1465,7 @@ void MainComponent::setTwoWindowMode (bool shouldBeTwo)
         rackWindow->clearContentComponent();
         rackWindow.reset();
         addAndMakeVisible (dock);
-        windowModeButton.setButtonText ("Two Windows");
+        windowModeButton.setTooltip ("Rack window: the plugin panel in its own window");
     }
 
     windowModeButton.setToggleState (shouldBeTwo, juce::dontSendNotification);
@@ -1618,46 +1650,156 @@ void MainComponent::showPluginScanner()
     o.launchAsync();
 }
 
-void MainComponent::saveSnapshot()
+//==============================================================================
+// The show file
+juce::String MainComponent::showName() const
 {
-    fileChooser = std::make_unique<juce::FileChooser> ("Save snapshot",
-        juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.liverack");
+    const auto f = engine.getShowFile();
+    return f == juce::File() ? juce::String ("Untitled show") : f.getFileNameWithoutExtension();
+}
 
+void MainComponent::updateWindowTitle()
+{
+    const auto title = "LiveRack - " + showName() + (engine.isShowEdited() ? " (edited)" : "");
+    if (title != shownTitle)
+        if (auto* w = dynamic_cast<juce::DocumentWindow*> (getTopLevelComponent()))
+        {
+            w->setName (title);
+            shownTitle = title;
+        }
+}
+
+// Whether the rack window is open, and where: kept in the show
+void MainComponent::storeWindowLayout()
+{
+    juce::XmlElement x ("WINDOWS");
+    x.setAttribute ("twoWindows", isTwoWindowMode());
+    x.setAttribute ("rackWindow", rackWindow != nullptr ? rackWindow->getWindowStateAsString() : AppSettings::get ("rackWindow"));
+    engine.setShowExtra (x);
+}
+
+void MainComponent::applyWindowLayout (const juce::XmlElement* x)
+{
+    if (x == nullptr)
+        return;
+
+    const auto state = x->getStringAttribute ("rackWindow");
+    if (state.isNotEmpty())
+        AppSettings::set ("rackWindow", state);
+
+    const bool two = x->getBoolAttribute ("twoWindows", false);
+    if (two && rackWindow != nullptr && state.isNotEmpty())
+        rackWindow->restoreWindowStateFromString (state);
+
+    setTwoWindowMode (two);
+}
+
+void MainComponent::saveShow (bool askForFile)
+{
+    auto write = [this] (const juce::File& file)
+    {
+        const auto f = file.withFileExtension ("liverack");
+        storeWindowLayout();
+        auto xml = engine.createShow();
+
+        if (xml == nullptr || ! xml->writeTo (f))
+        {
+            showError ("Couldn't save the show", f.getFullPathName());
+            return;
+        }
+
+        engine.setShowFile (f);
+        engine.setShowEdited (false);
+        engine.saveSession();
+        ignoreEditsUntil = juce::Time::getMillisecondCounter() + 500;
+        consoleNote = "Saved " + f.getFileName();
+        updateWindowTitle();
+        repaint();
+    };
+
+    if (! askForFile && engine.getShowFile() != juce::File())
+    {
+        write (engine.getShowFile());
+        return;
+    }
+
+    const auto start = engine.getShowFile() != juce::File()
+        ? engine.getShowFile()
+        : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Show.liverack");
+
+    fileChooser = std::make_unique<juce::FileChooser> ("Save show", start, "*.liverack");
     fileChooser->launchAsync (juce::FileBrowserComponent::saveMode
                                 | juce::FileBrowserComponent::canSelectFiles
                                 | juce::FileBrowserComponent::warnAboutOverwriting,
-        [this] (const juce::FileChooser& fc)
+        [write] (const juce::FileChooser& fc)
         {
-            auto f = fc.getResult();
-            if (f == juce::File())
-                return;
-
-            if (auto xml = engine.createSnapshot())
-                xml->writeTo (f.withFileExtension ("liverack"));
+            const auto f = fc.getResult();
+            if (f != juce::File())
+                write (f);
         });
 }
 
-void MainComponent::loadSnapshot()
+// Asks to save an edited show first; then does what was asked
+void MainComponent::checkUnsavedThen (std::function<void()> next)
 {
-    fileChooser = std::make_unique<juce::FileChooser> ("Load snapshot",
-        juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.liverack");
+    if (! engine.isShowEdited())
+    {
+        next();
+        return;
+    }
 
-    fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-        [this] (const juce::FileChooser& fc)
+    juce::Component::SafePointer<MainComponent> safe (this);
+    auto options = juce::MessageBoxOptions::makeOptionsYesNoCancel (juce::MessageBoxIconType::QuestionIcon,
+        "Save " + showName() + " first?", "The show has changes that aren't saved.",
+        "Save", "Don't Save", "Cancel", this);
+
+    juce::AlertWindow::showAsync (options, [safe, next] (int result)
+    {
+        if (safe == nullptr || result == 0)
+            return;
+        if (result == 1)
         {
-            auto f = fc.getResult();
-            if (f.existsAsFile())
-                loadSnapshotFile (f);
-        });
+            if (safe->engine.getShowFile() == juce::File())
+            {
+                safe->saveShow (true); // pick a file; the user can carry on after
+                return;
+            }
+            safe->saveShow (false);
+        }
+        next();
+    });
 }
 
-void MainComponent::loadSnapshotFile (const juce::File& f)
+void MainComponent::openShow()
+{
+    juce::Component::SafePointer<MainComponent> safe (this);
+    checkUnsavedThen ([safe]
+    {
+        if (safe == nullptr)
+            return;
+
+        const auto start = safe->engine.getShowFile() != juce::File()
+            ? safe->engine.getShowFile().getParentDirectory()
+            : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+
+        safe->fileChooser = std::make_unique<juce::FileChooser> ("Open show", start, "*.liverack");
+        safe->fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+            [safe] (const juce::FileChooser& fc)
+            {
+                const auto f = fc.getResult();
+                if (safe != nullptr && f.existsAsFile())
+                    safe->openShowFile (f);
+            });
+    });
+}
+
+void MainComponent::openShowFile (const juce::File& f)
 {
     auto xml = juce::parseXML (f);
 
-    if (xml == nullptr)
+    if (xml == nullptr || ! xml->hasTagName ("LIVERACK"))
     {
-        showError ("Couldn't read snapshot", f.getFullPathName());
+        showError ("Couldn't open the show", f.getFullPathName());
         return;
     }
 
@@ -1669,11 +1811,127 @@ void MainComponent::loadSnapshotFile (const juce::File& f)
         closeAllEditors();
 
     juce::String error;
-    if (! engine.loadSnapshot (*xml, error))
-        showError ("Snapshot loaded with problems", error);
+    if (! engine.loadShow (*xml, error))
+        showError ("Show opened with problems", error);
+
+    engine.setShowFile (f);
+    afterShowLoaded();
+    applyWindowLayout (engine.getShowExtra ("WINDOWS"));
 
     if (! inPlace)
         select (0, 0);
+
+    consoleNote = "Opened " + f.getFileName()
+                + (engine.getSnapshots().empty() ? juce::String()
+                                                 : ", " + juce::String ((int) engine.getSnapshots().size()) + " snapshots");
+}
+
+void MainComponent::newShow()
+{
+    juce::Component::SafePointer<MainComponent> safe (this);
+    checkUnsavedThen ([safe]
+    {
+        if (safe == nullptr)
+            return;
+
+        safe->closeAllEditors();
+        safe->engine.newShow();
+        RackConfig first;
+        first.name = "Rack 1";
+        first.stereo = true;
+        safe->engine.addRack (first);
+        safe->afterShowLoaded();
+        safe->select (0, 0);
+        safe->consoleNote = "New show";
+    });
+}
+
+void MainComponent::afterShowLoaded()
+{
+    engine.setShowEdited (false);
+    ignoreEditsUntil = juce::Time::getMillisecondCounter() + 500;
+    currentScene = -1;
+    keysBar.load();
+    refreshAll();
+    updateWindowTitle();
+    repaint();
+}
+
+void MainComponent::showShowMenu()
+{
+    juce::PopupMenu m;
+    m.addSectionHeader (showName());
+    m.addItem (1, "Save", true);
+    m.addItem (2, "Save As...");
+    m.addItem (3, "Open...");
+    m.addSeparator();
+    m.addItem (4, "New Show");
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&loadButton), [safe] (int r)
+    {
+        if (safe == nullptr) return;
+        if (r == 1) safe->saveShow (false);
+        if (r == 2) safe->saveShow (true);
+        if (r == 3) safe->openShow();
+        if (r == 4) safe->newShow();
+    });
+}
+
+// Snapshots: click the scene chip
+void MainComponent::showSnapshotMenu()
+{
+    juce::PopupMenu m;
+    const auto& list = engine.getSnapshots();
+
+    if (list.empty())
+        m.addItem (-1, "No snapshots in this show yet", false);
+
+    for (auto& s : list)
+        m.addItem (1000 + s.number, juce::String (s.number) + (s.name.isNotEmpty() ? "   " + s.name : juce::String()),
+                   true, s.number == currentScene);
+
+    m.addSeparator();
+    m.addItem (1, "Store Snapshot...");
+    const bool has = engine.getSnapshotInfo (currentScene) != nullptr;
+    const auto num = has ? " " + juce::String (currentScene) : juce::String();
+    m.addItem (2, "Rename Snapshot" + num + "...", has);
+    m.addItem (3, "Delete Snapshot" + num, has);
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (sceneChip)),
+        [safe] (int r)
+        {
+            if (safe == nullptr || r == 0) return;
+            if (r >= 1000) { safe->recallScene (r - 1000); return; }
+            if (r == 1) safe->showStoreSceneDialog();
+            if (r == 3)
+            {
+                safe->engine.deleteSnapshot (safe->currentScene);
+                safe->consoleNote = "Deleted snapshot " + juce::String (safe->currentScene);
+            }
+            if (r == 2)
+            {
+                auto* w = new juce::AlertWindow ("Rename Snapshot " + juce::String (safe->currentScene), {}, juce::MessageBoxIconType::NoIcon);
+                if (auto* info = safe->engine.getSnapshotInfo (safe->currentScene))
+                    w->addTextEditor ("name", info->name, "Name");
+                w->addButton ("Rename", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                const int number = safe->currentScene;
+                w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, w, number] (int res)
+                {
+                    if (safe != nullptr && res == 1)
+                        safe->engine.renameSnapshot (number, w->getTextEditorContents ("name"));
+                }), true);
+            }
+            safe->repaint();
+        });
+}
+
+void MainComponent::mouseUp (const juce::MouseEvent& e)
+{
+    if (sceneChip.contains (e.getPosition()))
+        showSnapshotMenu();
 }
 
 void MainComponent::showError (const juce::String& title, const juce::String& message)
@@ -1792,18 +2050,19 @@ juce::String MainComponent::slotLabelFor (int driver, int channel) const
 void MainComponent::showStoreSceneDialog()
 {
     auto* console = primaryConsole();
-    if (console == nullptr || ! console->getSettings().sceneFolder.isDirectory())
-    {
-        showError ("No scene folder", "Choose a scene folder in Devices > console Settings first.");
-        return;
-    }
+    const int suggested = juce::jmax (0, console != nullptr && console->getCurrentScene() >= 0 ? console->getCurrentScene()
+                                                                                              : currentScene);
+    juce::String name;
+    if (auto* info = engine.getSnapshotInfo (suggested))
+        name = info->name;
 
-    sceneDialog = std::make_unique<juce::AlertWindow> ("Store Scene",
-        "Saves the current racks and plugin settings (with the current scope) for a console scene number. "
-        "When the console recalls that scene, LiveRack recalls this.",
+    sceneDialog = std::make_unique<juce::AlertWindow> ("Store Snapshot",
+        "Stores the current plugin settings and bypass in the show. When the console recalls this scene "
+        "number, LiveRack recalls them. Racks and plugins stay as they are.",
         juce::MessageBoxIconType::NoIcon);
 
-    sceneDialog->addTextEditor ("scene", juce::String (juce::jmax (0, console->getCurrentScene() >= 0 ? console->getCurrentScene() : currentScene)), "Scene number");
+    sceneDialog->addTextEditor ("scene", juce::String (suggested), "Scene number");
+    sceneDialog->addTextEditor ("name", name, "Name (optional)");
     sceneDialog->addButton ("Store", 1, juce::KeyPress (juce::KeyPress::returnKey));
     sceneDialog->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
 
@@ -1818,71 +2077,79 @@ void MainComponent::showStoreSceneDialog()
 void MainComponent::finishStoreScene (int result)
 {
     if (sceneDialog != nullptr && result == 1)
-        storeScene (juce::jmax (0, sceneDialog->getTextEditorContents ("scene").getIntValue()));
+        storeScene (juce::jmax (0, sceneDialog->getTextEditorContents ("scene").getIntValue()),
+                    sceneDialog->getTextEditorContents ("name"));
 
     juce::Component::SafePointer<MainComponent> safe (this);
     juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->sceneDialog.reset(); });
 }
 
-void MainComponent::storeScene (int scene)
+void MainComponent::storeScene (int scene, const juce::String& name)
 {
-    auto* console = primaryConsole();
-    if (console == nullptr || ! console->getSettings().sceneFolder.isDirectory())
-    {
-        consoleNote = "Can't store: no scene folder set";
-        return;
-    }
-
-    const auto file = console->newFileForScene (scene);
-    auto xml = engine.createSnapshot();
-
-    if (xml != nullptr && xml->writeTo (file))
-    {
-        consoleNote = "Stored scene " + juce::String (scene) + " as " + file.getFileName();
-        currentScene = scene;
-    }
-    else
-    {
-        showError ("Couldn't store scene", file.getFullPathName());
-    }
+    engine.storeSnapshot (scene, name);
+    currentScene = scene;
+    auto* info = engine.getSnapshotInfo (scene);
+    consoleNote = "Stored snapshot " + juce::String (scene)
+                + (info != nullptr && info->name.isNotEmpty() ? " (" + info->name + ")" : juce::String());
+    repaint();
 }
 
 void MainComponent::recallScene (int scene)
 {
-    auto* console = primaryConsole();
-    if (console == nullptr)
-        return;
-
     currentScene = scene;
-    const auto file = console->fileForScene (scene);
+    juce::String note;
 
-    if (! file.existsAsFile())
+    if (engine.getSnapshotInfo (scene) == nullptr)
     {
-        consoleNote = "Scene " + juce::String (scene) + ": no snapshot stored, racks unchanged";
-        repaint();
-        return;
+        // A scene file from before 0.13 in the console's scene folder becomes
+        // a snapshot in the show the first time it's recalled
+        auto* console = primaryConsole();
+        const auto file = console != nullptr ? console->fileForScene (scene) : juce::File();
+        auto xml = file.existsAsFile() ? juce::parseXML (file) : nullptr;
+
+        juce::String error;
+        if (xml == nullptr)
+        {
+            consoleNote = "Scene " + juce::String (scene) + ": no snapshot stored, racks unchanged";
+            repaint();
+            return;
+        }
+
+        auto name = file.getFileNameWithoutExtension().trimCharactersAtStart ("0123456789").trim();
+        if (! engine.importSceneFile (*xml, scene, name, error))
+        {
+            consoleNote = "Scene " + juce::String (scene) + ": " + file.getFileName() + " not imported, " + error;
+            repaint();
+            return;
+        }
+        note = "imported from " + file.getFileName();
     }
 
-    loadSnapshotFile (file);
-    consoleNote = "Scene " + juce::String (scene) + ": recalled " + file.getFileName();
+    juce::String missing;
+    engine.recallSnapshot (scene, missing);
+
+    auto* info = engine.getSnapshotInfo (scene);
+    consoleNote = "Snapshot " + juce::String (scene)
+                + (info != nullptr && info->name.isNotEmpty() ? " (" + info->name + ")" : juce::String()) + " recalled";
+    if (note.isNotEmpty())    consoleNote << ", " << note;
+    if (missing.isNotEmpty()) consoleNote << ". " << missing;
     repaint();
 }
 
-// Next / previous stored scene in the scene folder
+// Next / previous snapshot in the show (or, until imported, in the scene folder)
 void MainComponent::stepScene (int direction)
 {
-    auto* console = primaryConsole();
-    if (console == nullptr || ! console->getSettings().sceneFolder.isDirectory())
-        return;
-
     juce::Array<int> numbers;
-    for (auto& f : console->getSettings().sceneFolder.findChildFiles (juce::File::findFiles, false, "*.liverack"))
-    {
-        const auto name = f.getFileNameWithoutExtension();
-        const auto digits = name.initialSectionContainingOnly ("0123456789");
-        if (digits.isNotEmpty())
-            numbers.addIfNotAlreadyThere (digits.getIntValue());
-    }
+    for (auto& s : engine.getSnapshots())
+        numbers.addIfNotAlreadyThere (s.number);
+
+    if (auto* console = primaryConsole(); console != nullptr && console->getSettings().sceneFolder.isDirectory())
+        for (auto& f : console->getSettings().sceneFolder.findChildFiles (juce::File::findFiles, false, "*.liverack"))
+        {
+            const auto digits = f.getFileNameWithoutExtension().initialSectionContainingOnly ("0123456789");
+            if (digits.isNotEmpty())
+                numbers.addIfNotAlreadyThere (digits.getIntValue());
+        }
     numbers.sort();
 
     if (numbers.isEmpty())
@@ -1897,6 +2164,7 @@ void MainComponent::stepScene (int direction)
 
     recallScene (target);
 }
+
 
 void MainComponent::selectRackForChannel (int console, int channel)
 {
@@ -2169,6 +2437,9 @@ juce::String MainComponent::buildWebState (const juce::String& query)
     auto* r = root.getDynamicObject();
 
     r->setProperty ("scene", currentScene);
+    if (auto* info = engine.getSnapshotInfo (currentScene))
+        r->setProperty ("sceneName", info->name);
+    r->setProperty ("show", showName());
     r->setProperty ("bpm", engine.getBpm());
     r->setProperty ("page", engine.getCurrentPage());
     r->setProperty ("selected", selectedRack);

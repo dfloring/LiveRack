@@ -5,17 +5,20 @@
 // sized for touch screens
 namespace Theme
 {
-    const juce::Colour background { 0xff16191c };
-    const juce::Colour panel      { 0xff1d2126 };
-    const juce::Colour raised     { 0xff262a30 };
-    const juce::Colour border     { 0xff2f353c };
-    const juce::Colour text       { 0xffe6e8eb };
+    // Calm greys; colour only where it means something: accent = selected /
+    // on, amber = bypass, red = clip, green = healthy
+    const juce::Colour background { 0xff101215 };
+    const juce::Colour panel      { 0xff181b1f };
+    const juce::Colour raised     { 0xff23272c };
+    const juce::Colour well       { 0xff121417 };   // sunken group behind toolbar buttons
+    const juce::Colour border     { 0xff2a2f35 };
+    const juce::Colour text       { 0xffe8eaed };
     const juce::Colour textDim    { 0xff9aa3ad };
-    const juce::Colour accent     { 0xff4a90d9 };
-    const juce::Colour accentDeep { 0xff24364c };
+    const juce::Colour accent     { 0xff4fb3d9 };
+    const juce::Colour accentDeep { 0xff1f3a48 };
     const juce::Colour amber      { 0xffe0a030 };
     const juce::Colour green      { 0xff3fb950 };
-    const juce::Colour red        { 0xffd95454 };
+    const juce::Colour red        { 0xffe5534b };
 
     // Latency group letters A-H
     inline juce::Colour groupColour (int g)
@@ -35,6 +38,68 @@ namespace Theme
         g.setColour (c);
         g.fillEllipse (r);
     }
+
+    // Toolbar icons, drawn in an 18 x 18 box with a 1.6 px stroke
+    inline juce::Path icon (const juce::String& name)
+    {
+        juce::Path p;
+        auto svg = [&p] (const char* d) { p.addPath (juce::Drawable::parseSVGPath (d)); };
+
+        if (name == "save")      { svg ("M3 3h9l3 3v9H3z"); svg ("M6 3v4h5V3M6 15v-5h6v5"); }
+        else if (name == "show") { svg ("M2 5h5l1.5 2H16v8H2z"); }
+        else if (name == "prev") { svg ("M11 3L5 9l6 6"); }
+        else if (name == "next") { svg ("M7 3l6 6-6 6"); }
+        else if (name == "devices")
+        {
+            p.addRoundedRectangle (2.0f, 4.0f, 14.0f, 10.0f, 2.0f);
+            for (float x : { 6.0f, 9.0f, 12.0f })
+                p.addEllipse (x - 0.6f, 8.4f, 1.2f, 1.2f);
+        }
+        else if (name == "routing") { svg ("M4 3v12M9 3v12M14 3v12M2 6.5h14M2 11.5h14"); }
+        else if (name == "plugins")
+        {
+            for (float x : { 2.5f, 10.0f })
+                for (float y : { 2.5f, 10.0f })
+                    p.addRoundedRectangle (x, y, 5.5f, 5.5f, 1.0f);
+        }
+        else if (name == "scope")   { svg ("M3 9.5l4 4 8-9"); p.addRoundedRectangle (1.5f, 1.5f, 15.0f, 15.0f, 3.0f); }
+        else if (name == "addrack") { p.addRoundedRectangle (2.0f, 2.0f, 6.0f, 14.0f, 1.5f); svg ("M13 5v8M9 9h8"); }
+        else if (name == "windows") { p.addRoundedRectangle (1.5f, 3.0f, 8.0f, 12.0f, 1.5f); p.addRoundedRectangle (11.0f, 3.0f, 5.5f, 12.0f, 1.5f); }
+        else if (name == "stack")   { p.addRoundedRectangle (2.0f, 2.0f, 14.0f, 6.0f, 1.5f); p.addRoundedRectangle (2.0f, 10.0f, 14.0f, 6.0f, 1.5f); }
+        return p;
+    }
+
+    // A square toolbar button with an icon; lit with the accent when toggled on
+    class IconButton : public juce::Button
+    {
+    public:
+        IconButton (const juce::String& name, const juce::String& iconName, const juce::String& tip)
+            : juce::Button (name), path (icon (iconName))
+        {
+            setTooltip (tip);
+            setTitle (tip);
+        }
+
+        void paintButton (juce::Graphics& g, bool over, bool down) override
+        {
+            auto r = getLocalBounds().toFloat();
+            const bool on = getToggleState();
+
+            if (on || over || down)
+            {
+                g.setColour (on ? accentDeep : raised.withAlpha (down ? 1.0f : 0.7f));
+                g.fillRoundedRectangle (r, 6.0f);
+            }
+
+            const auto box = juce::Rectangle<float> (18.0f, 18.0f).withCentre (r.getCentre());
+            g.setColour (on ? accent : (isEnabled() ? juce::Colour (0xffc3c9d0) : textDim.withAlpha (0.5f)));
+            g.strokePath (path, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded),
+                          juce::AffineTransform::translation (box.getX(), box.getY()));
+        }
+
+    private:
+        juce::Path path;
+    };
 
     class LookAndFeel : public juce::LookAndFeel_V4
     {
