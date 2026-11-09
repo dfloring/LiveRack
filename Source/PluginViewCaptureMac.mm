@@ -464,7 +464,6 @@ private:
         config.pixelFormat = kCVPixelFormatType_32BGRA;
         config.showsCursor = NO;
         config.queueDepth = 5;
-        config.backgroundColor = CGColorGetConstantColor (kCGColorBlack);
         return config;
     }
 
