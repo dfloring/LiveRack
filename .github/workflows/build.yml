@@ -32,10 +32,44 @@ jobs:
         run: cmake --build build --config Release -- -quiet
 
       - name: Package
+        env:
+          # A self-signed certificate (repo secrets). Signing every release with
+          # the same one lets macOS keep the permissions it has given LiveRack
+          # (Screen Recording, Microphone...) across updates. Without the
+          # secrets, e.g. in a fork, the app gets an ad-hoc signature instead.
+          MAC_SIGN_P12: ${{ secrets.MAC_SIGN_P12 }}
+          MAC_SIGN_PASSWORD: ${{ secrets.MAC_SIGN_PASSWORD }}
         run: |
           APP=$(find build -name LiveRack.app -maxdepth 5 -type d | head -1)
           echo "Built: $APP"
-          codesign --force --deep --sign - "$APP"   # ad-hoc signature so Apple silicon will run it
+          SIGNED=no
+          if [ -n "$MAC_SIGN_P12" ]; then
+            KEYCHAIN="$RUNNER_TEMP/liverack-sign.keychain-db"
+            KPASS=$(uuidgen)
+            echo "$MAC_SIGN_P12" | base64 --decode > "$RUNNER_TEMP/sign.p12"
+            security create-keychain -p "$KPASS" "$KEYCHAIN"
+            security set-keychain-settings -lut 21600 "$KEYCHAIN"
+            security unlock-keychain -p "$KPASS" "$KEYCHAIN"
+            security import "$RUNNER_TEMP/sign.p12" -P "$MAC_SIGN_PASSWORD" -A -f pkcs12 -k "$KEYCHAIN"
+            security set-key-partition-list -S apple-tool:,apple: -k "$KPASS" "$KEYCHAIN" >/dev/null
+            security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+            rm -f "$RUNNER_TEMP/sign.p12"
+            IDENTITY=$(security find-identity "$KEYCHAIN" | grep -m1 -oE '[0-9A-F]{40}' || true)
+            echo "Signing identity: $IDENTITY"
+            if [ -n "$IDENTITY" ] && codesign --force --deep --keychain "$KEYCHAIN" --sign "$IDENTITY" "$APP"; then
+              SIGNED=yes
+            else
+              echo "::warning::Signing with the certificate failed, using an ad-hoc signature"
+            fi
+          else
+            echo "::notice::No signing certificate (MAC_SIGN_P12), using an ad-hoc signature"
+          fi
+          if [ "$SIGNED" = no ]; then
+            codesign --force --deep --sign - "$APP"   # ad-hoc signature so Apple silicon will run it
+          fi
+          codesign --verify --deep --strict "$APP"
+          codesign -d -r- "$APP" 2>&1 | grep designated   # what macOS ties permissions to
+          echo "::notice::Mac app signed with the certificate: $SIGNED"
           VERSION=$(grep -m1 'project(LiveRack VERSION' CMakeLists.txt | sed -E 's/.*VERSION ([0-9.]+).*/\1/')
           ditto -c -k --keepParent "$APP" "LiveRack-$VERSION-mac-arm64.zip"
           ls -la *.zip
