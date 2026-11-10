@@ -2,6 +2,7 @@
 #include "MainComponent.h"
 #include "AppSettings.h"
 #include "PluginScanning.h"
+#include "IsolatedPlugin.h"
 #include "Theme.h"
 
 class LiveRackApplication : public juce::JUCEApplication
@@ -12,11 +13,22 @@ public:
     // Only the hidden plugin-scanner copy may run alongside the main app
     bool moreThanOneInstanceAllowed() override
     {
-        return getCommandLineParameters().contains (PluginScanning::workerUID);
+        return getCommandLineParameters().contains (PluginScanning::workerUID)
+            || getCommandLineParameters().contains (Isolation::workerUID);
     }
 
     void initialise (const juce::String& commandLine) override
     {
+        // A helper process that runs one isolated plugin
+        if ((pluginHelper = Isolation::startWorkerIfRequested (commandLine)) != nullptr)
+        {
+           #if JUCE_MAC
+            juce::Process::setDockIconVisible (false);
+           #endif
+            juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+            return;
+        }
+
         auto worker = std::make_unique<PluginScanning::Worker>();
 
         if (worker->initialiseFromCommandLine (commandLine, PluginScanning::workerUID))
@@ -36,6 +48,7 @@ public:
     {
         mainWindow = nullptr;
         scannerWorker = nullptr;
+        pluginHelper = nullptr;
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     }
     void systemRequestedQuit() override            { quit(); }
@@ -70,6 +83,7 @@ private:
     Theme::LookAndFeel lookAndFeel;
     std::unique_ptr<MainWindow> mainWindow;
     std::unique_ptr<PluginScanning::Worker> scannerWorker;
+    std::unique_ptr<Isolation::Worker> pluginHelper;
 };
 
 START_JUCE_APPLICATION (LiveRackApplication)

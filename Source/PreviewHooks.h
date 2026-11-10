@@ -1,4 +1,5 @@
 #pragma once
+#include "IsolatedPlugin.h"
 // Only compiled into Linux preview builds (LIVERACK_PREVIEW_HOOKS=1), used to
 // set up a sample session, feed a test signal through it, and open dialogs
 // for UI screenshots. Never part of the Mac app.
@@ -171,6 +172,119 @@ struct PreviewHooks
                 m.storeWindowLayout();
                 auto* w = m.engine.getShowExtra ("WINDOWS");
                 std::cerr << "SHOWFILE windows extra two=" << (w != nullptr ? w->getBoolAttribute ("twoWindows") : -1) << std::endl;
+                });
+            });
+
+        if (open == "isolate")
+            juce::Timer::callAfterDelay (800, [&m]
+            {
+                auto& e = m.engine;
+                auto iso = [&e] { return dynamic_cast<IsolatedPlugin*> (e.getPlugin (0, 1)); };
+                std::cerr << "ISO before: peaks " << e.consumeSlotOutputPeak (0, 0) << " " << e.consumeSlotOutputPeak (0, 1) << " " << e.consumeSlotOutputPeak (0, 2) << std::endl;
+                juce::String error;
+                const auto t0 = juce::Time::getMillisecondCounterHiRes();
+                const bool ok = e.setSlotIsolated (0, 1, true, error);
+                std::cerr << "ISO isolate ok " << ok << " '" << error << "' in " << (int) (juce::Time::getMillisecondCounterHiRes() - t0) << " ms, isolated "
+                          << e.isSlotIsolated (0, 1) << " params " << e.getPlugin (0, 1)->getParameters().size()
+                          << " p0 " << e.getPlugin (0, 1)->getParameters()[0]->getValue() << std::endl;
+                m.refreshAll();
+                m.select (0, 1);
+
+                juce::Timer::callAfterDelay (1500, [&m, iso]
+                {
+                    auto& e = m.engine;
+                    auto* p = iso();
+                    std::cerr << "ISO running: processed " << p->getBlocksProcessed() << " missed " << p->getBlocksMissed()
+                              << " peaks " << e.consumeSlotOutputPeak (0, 0) << " " << e.consumeSlotOutputPeak (0, 1) << " " << e.consumeSlotOutputPeak (0, 2)
+                              << " status " << p->getStatusText() << " name " << p->getParameters()[0]->getName (40)
+                              << " text '" << p->getParameters()[0]->getCurrentValueAsText() << "' latency " << p->getLatencySamples() << std::endl;
+                    // snapshot recall through the helper
+                    p->getParameters()[0]->setValueNotifyingHost (0.37f);
+                    juce::Timer::callAfterDelay (300, [&m, iso] { m.storeScene (30, "Iso"); });
+                    juce::Timer::callAfterDelay (600, [iso] { iso()->getParameters()[0]->setValueNotifyingHost (0.8f); });
+                    juce::Timer::callAfterDelay (900, [&m, iso]
+                    {
+                        m.recallScene (30);
+                        std::cerr << "ISO right after recall p0 " << iso()->getParameters()[0]->getValue() << " (want 0.37)" << std::endl;
+                        m.engine.setSlotBypassed (0, 1, true);
+                    });
+                    juce::Timer::callAfterDelay (1300, [&m, iso]
+                    {
+                        auto* p = iso();
+                        std::cerr << "ISO after recall p0 " << p->getParameters()[0]->getValue() << " (want 0.37), bypassed " << m.engine.isSlotBypassed (0, 1) << std::endl;
+                        m.engine.setSlotBypassed (0, 1, false);
+                        p->getParameters()[0]->setValueNotifyingHost (0.61f);
+
+                        // Audio through a helper, compared with the same plugin inside LiveRack
+                        for (auto& d : m.engine.getKnownPlugins().getTypes())
+                            if (d.name.containsIgnoreCase ("gain"))
+                            {
+                                juce::String err;
+                                auto run = [] (juce::AudioPluginInstance& g)
+                                {
+                                    Isolation::requestLayout (g, 2, 2);
+                                    g.prepareToPlay (48000.0, 256);
+                                    g.getParameters()[0]->setValueNotifyingHost (0.25f);
+                                    juce::AudioBuffer<float> b (2, 256);
+                                    juce::MidiBuffer midi;
+                                    float last = 0.0f;
+                                    for (int i = 0; i < 40; ++i)
+                                    {
+                                        for (int c = 0; c < 2; ++c)
+                                            for (int k = 0; k < 256; ++k)
+                                                b.setSample (c, k, c == 0 ? 0.5f : -0.25f);
+                                        g.processBlock (b, midi);
+                                        last = b.getSample (0, 255) * 1000.0f + b.getSample (1, 255);
+                                        juce::Thread::sleep (2);
+                                    }
+                                    g.releaseResources();
+                                    return last;
+                                };
+                                auto inside = m.engine.getFormatManager().createPluginInstance (d, 48000.0, 256, err);
+                                auto outside = IsolatedPlugin::create (d, 48000.0, 256, err);
+                                if (inside != nullptr && outside != nullptr)
+                                {
+                                    const float a = run (*inside), b = run (*outside);
+                                    std::cerr << "ISO audio check (" << d.name << "): inside " << a << " helper " << b << " same " << (std::abs (a - b) < 0.01f)
+                                              << " missed " << outside->getBlocksMissed() << " of 40" << std::endl;
+                                }
+                                else std::cerr << "ISO audio check couldn't load: " << err << std::endl;
+                                break;
+                            }
+                    });
+                    juce::Timer::callAfterDelay (3200, [&m, iso]
+                    {
+                        const int before = iso()->getBlocksProcessed();
+                        m.engine.crashIsolatedSlot (0, 1);
+                        std::cerr << "ISO crash sent at processed " << before << std::endl;
+                    });
+                    juce::Timer::callAfterDelay (5500, [&m, iso]
+                    {
+                        auto& e = m.engine;
+                        auto* p = iso();
+                        const int a = p->getBlocksProcessed();
+                        std::cerr << "ISO after crash: running " << p->isRunning() << " restarts " << p->getRestartCount() << " p0 " << p->getParameters()[0]->getValue()
+                                  << " (want 0.61) missed " << p->getBlocksMissed() << " note: " << m.consoleNote << std::endl;
+                        juce::Timer::callAfterDelay (500, [&m, iso, a]
+                        {
+                            auto& e = m.engine;
+                            std::cerr << "ISO processing again: +" << iso()->getBlocksProcessed() - a << " blocks, racks " << e.getNumRacks() << std::endl;
+                            auto f = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("Iso Test.liverack");
+                            f.deleteFile();
+                            e.setShowFile (f);
+                            m.saveShow (false);
+                            m.newShow();
+                            m.openShowFile (f);
+                            std::cerr << "ISO reopened: isolated " << e.isSlotIsolated (0, 1) << " others " << e.isSlotIsolated (0, 0)
+                                      << " p0 " << e.getPlugin (0, 1)->getParameters()[0]->getValue() << std::endl;
+                            juce::String err;
+                            e.setSlotIsolated (0, 1, false, err);
+                            std::cerr << "ISO back inside: isolated " << e.isSlotIsolated (0, 1) << " p0 " << e.getPlugin (0, 1)->getParameters()[0]->getValue() << std::endl;
+                            e.setSlotIsolated (0, 1, true, err);
+                            m.refreshAll();
+                            m.select (0, 1);
+                        });
+                    });
                 });
             });
 

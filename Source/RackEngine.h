@@ -120,7 +120,7 @@ public:
 
     //==============================================================================
     // Plugins inside a rack (message thread only)
-    bool addPlugin (int rack, const juce::PluginDescription&, juce::String& error, int slotId = 0);
+    bool addPlugin (int rack, const juce::PluginDescription&, juce::String& error, int slotId = 0, bool isolated = false);
     void removePlugin (int rack, int slot);
     void moveSlot (int rack, int from, int to);             // swap neighbours
     void moveSlotTo (int rack, int from, int toIndex);      // drag-and-drop reorder
@@ -137,7 +137,14 @@ public:
     void setStereoPoint (int rack, int slot);  // for plugins that can change layout
     int  getSlotOutputChannels (int rack, int slot) const;
     // Swap a plugin for another version of itself (e.g. Mono -> Stereo), keeping its settings
-    bool replacePlugin (int rack, int slot, const juce::PluginDescription&, juce::String& error);
+    // isolate: -1 = as it is now, 0 = inside LiveRack, 1 = in its own helper process
+    bool replacePlugin (int rack, int slot, const juce::PluginDescription&, juce::String& error, int isolate = -1);
+
+    // Isolation (experimental): the plugin runs in a helper process, so a
+    // crash only takes out that plugin. See IsolatedPlugin.h.
+    bool isSlotIsolated (int rack, int slot) const;
+    bool setSlotIsolated (int rack, int slot, bool isolated, juce::String& error);
+    void crashIsolatedSlot (int rack, int slot); // test: makes the helper crash
 
     // Each loaded plugin has an id that stays the same while it is moved
     // around (used by Hot Plugins, User Keys and controller mappings)

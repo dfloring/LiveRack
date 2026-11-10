@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(LiveRack VERSION 0.13.3)
+project(LiveRack VERSION 0.14.0)
 if(APPLE)
     enable_language(OBJCXX)
 endif()
@@ -34,6 +34,7 @@ target_sources(LiveRack PRIVATE
     Source/Main.cpp
     Source/MainComponent.cpp
     Source/RackEngine.cpp
+    Source/IsolatedPlugin.cpp
     Source/ConsoleLink.cpp
     Source/ConsoleLinkPanel.cpp
     Source/RackStripsView.cpp

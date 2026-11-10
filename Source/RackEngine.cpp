@@ -1,4 +1,5 @@
 #include "RackEngine.h"
+#include "IsolatedPlugin.h"
 #include "PluginScanning.h"
 #include <atomic>
 #include <cmath>
@@ -354,29 +355,20 @@ struct RackEngine::Driver : public juce::AudioIODeviceCallback,
 };
 
 //==============================================================================
-// Ask a plugin for ins -> outs channels (1 or 2), falling back sensibly
 static void requestLayout (juce::AudioPluginInstance& plugin, int ins, int outs)
 {
-    auto set = [] (int n) { return n == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo(); };
+    Isolation::requestLayout (plugin, ins, outs);
+}
 
-    auto tryLayout = [&plugin] (const juce::AudioChannelSet& in, const juce::AudioChannelSet& out)
-    {
-        auto layout = plugin.getBusesLayout();
-        if (! layout.inputBuses.isEmpty())  layout.inputBuses.getReference (0)  = in;
-        if (! layout.outputBuses.isEmpty()) layout.outputBuses.getReference (0) = out;
-        for (int i = 1; i < layout.inputBuses.size(); ++i)
-            layout.inputBuses.getReference (i) = juce::AudioChannelSet::disabled(); // no sidechains
+// A plugin inside LiveRack, or (isolated) in a helper process of its own
+static std::unique_ptr<juce::AudioPluginInstance> createInstance (juce::AudioPluginFormatManager& formats,
+                                                                  const juce::PluginDescription& desc, bool isolated,
+                                                                  double sampleRate, int blockSize, juce::String& error)
+{
+    if (isolated)
+        return IsolatedPlugin::create (desc, sampleRate, blockSize, error);
 
-        if (! plugin.checkBusesLayoutSupported (layout))
-            return false;
-
-        return plugin.setBusesLayout (layout);
-    };
-
-    if (tryLayout (set (ins), set (outs)))                  return;
-    if (ins != outs && tryLayout (set (ins), set (ins)))    return; // can't split here: stays as it was
-    if (tryLayout (set (ins), set (ins)))                   return;
-    tryLayout (juce::AudioChannelSet::stereo(), juce::AudioChannelSet::stereo());
+    return formats.createPluginInstance (desc, sampleRate, blockSize, error);
 }
 
 static bool isMonoToStereoVersion (const juce::String& pluginName)
@@ -1010,7 +1002,26 @@ void RackEngine::setStereoPoint (int index, int slot)
     sendChangeMessage();
 }
 
-bool RackEngine::replacePlugin (int index, int slot, const juce::PluginDescription& desc, juce::String& error)
+bool RackEngine::isSlotIsolated (int rack, int slot) const
+{
+    return dynamic_cast<IsolatedPlugin*> (getPlugin (rack, slot)) != nullptr;
+}
+
+bool RackEngine::setSlotIsolated (int rack, int slot, bool isolated, juce::String& error)
+{
+    if (getPlugin (rack, slot) == nullptr || isSlotIsolated (rack, slot) == isolated)
+        return true;
+
+    return replacePlugin (rack, slot, getSlotDescription (rack, slot), error, isolated ? 1 : 0);
+}
+
+void RackEngine::crashIsolatedSlot (int rack, int slot)
+{
+    if (auto* p = dynamic_cast<IsolatedPlugin*> (getPlugin (rack, slot)))
+        p->crashHelper();
+}
+
+bool RackEngine::replacePlugin (int index, int slot, const juce::PluginDescription& desc, juce::String& error, int isolate)
 {
     auto* r = getRack (index);
     auto* old = getPlugin (index, slot);
@@ -1020,7 +1031,8 @@ bool RackEngine::replacePlugin (int index, int slot, const juce::PluginDescripti
         return false;
     }
 
-    auto instance = formatManager.createPluginInstance (desc, r->sampleRate, r->blockSize, error);
+    const bool isolated = isolate < 0 ? isSlotIsolated (index, slot) : isolate > 0;
+    auto instance = createInstance (formatManager, desc, isolated, r->sampleRate, r->blockSize, error);
     if (instance == nullptr)
     {
         if (error.isEmpty()) error = "Couldn't load " + desc.name;
@@ -1095,7 +1107,7 @@ int RackEngine::attachSlotId (juce::AudioProcessorGraph::Node& node, int preferr
     return id;
 }
 
-bool RackEngine::addPlugin (int index, const juce::PluginDescription& desc, juce::String& error, int slotId)
+bool RackEngine::addPlugin (int index, const juce::PluginDescription& desc, juce::String& error, int slotId, bool isolated)
 {
     auto* r = getRack (index);
 
@@ -1105,7 +1117,7 @@ bool RackEngine::addPlugin (int index, const juce::PluginDescription& desc, juce
         return false;
     }
 
-    auto instance = formatManager.createPluginInstance (desc, r->sampleRate, r->blockSize, error);
+    auto instance = createInstance (formatManager, desc, isolated, r->sampleRate, r->blockSize, error);
 
     if (instance == nullptr)
     {
@@ -1442,6 +1454,8 @@ std::unique_ptr<juce::XmlElement> RackEngine::createSnapshot() const
             slotXml->setAttribute ("id", getSlotId (rackIndex, i));
             if ((bool) s->properties["stereoPoint"])
                 slotXml->setAttribute ("stereoPoint", true);
+            if (isSlotIsolated (rackIndex, i))
+                slotXml->setAttribute ("isolated", true);
             slotXml->addChildElement (getSlotDescription (rackIndex, i).createXml().release());
 
             juce::MemoryBlock state;
@@ -1561,7 +1575,7 @@ bool RackEngine::loadRig (const juce::XmlElement& xml, juce::String& error)
             }
 
             juce::String err;
-            if (! addPlugin (rackIndex, desc, err, slotXml->getIntAttribute ("id", 0)))
+            if (! addPlugin (rackIndex, desc, err, slotXml->getIntAttribute ("id", 0), slotXml->getBoolAttribute ("isolated", false)))
             {
                 failures.add (desc.name + ": " + err);
                 continue;
@@ -1646,7 +1660,8 @@ bool RackEngine::snapshotMatchesCurrentLayout (const juce::XmlElement& xml, bool
 
             if (descXml == nullptr || ! desc.loadFromXml (*descXml)
                 || getSlotDescription (rackIndex - 1, slot).createIdentifierString() != desc.createIdentifierString()
-                || (checkIds && slotXml->getIntAttribute ("id", 0) != getSlotId (rackIndex - 1, slot)))
+                || (checkIds && slotXml->getIntAttribute ("id", 0) != getSlotId (rackIndex - 1, slot))
+                || (checkIds && slotXml->getBoolAttribute ("isolated", false) != isSlotIsolated (rackIndex - 1, slot)))
                 return false;
 
             ++slot;

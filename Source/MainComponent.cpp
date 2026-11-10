@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "IsolatedPlugin.h"
 #include "ConsoleLinkPanel.h"
 #include "AppSettings.h"
 #include "PluginPicker.h"
@@ -252,6 +253,16 @@ private:
 //==============================================================================
 MainComponent::MainComponent()
 {
+    {
+        juce::Component::SafePointer<MainComponent> safe (this);
+        IsolatedPlugin::onEvent = [safe] (const juce::String& text)
+        {
+            if (safe == nullptr) return;
+            safe->consoleNote = text;
+            safe->repaint();
+        };
+    }
+
     bpmDisplay = std::make_unique<BpmDisplay> (engine);
     statusBar = std::make_unique<StatusBar> (*this);
 
@@ -399,6 +410,7 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    IsolatedPlugin::onEvent = nullptr;
     stopTimer();
     removeKeyListener (this);
     engine.getKnownPlugins().removeChangeListener (this);
@@ -1231,6 +1243,11 @@ void MainComponent::showSlotMenu (int rack, int slot, juce::Rectangle<int> scree
     const bool estimating = library.getShowEstimatedGR (key, library.categoryFor (desc));
     m.addItem (7, "Estimate GR when not reported", true, estimating);
     m.addSeparator();
+    const bool isolated = engine.isSlotIsolated (rack, slot);
+    m.addItem (12, "Run in its own process (experimental)", true, isolated);
+    if (isolated && juce::ModifierKeys::currentModifiers.isAltDown())
+        m.addItem (13, "Crash this plugin (test)");
+    m.addSeparator();
     m.addItem (5, "Remove");
 
     auto options = screenArea.isEmpty() ? juce::PopupMenu::Options()
@@ -1261,6 +1278,23 @@ void MainComponent::showSlotMenu (int rack, int slot, juce::Rectangle<int> scree
                 safe->fixStereoVersions (rack);
                 safe->refreshAll();
                 break;
+            case 12:
+            {
+                const bool wanted = ! e.isSlotIsolated (rack, slot);
+                const auto name = e.getPlugin (rack, slot) != nullptr ? e.getPlugin (rack, slot)->getName() : juce::String();
+                safe->dock.releaseEditor();
+                safe->closeEditorFor (e.getPlugin (rack, slot));
+                juce::String error;
+                if (! e.setSlotIsolated (rack, slot, wanted, error))
+                    safe->consoleNote = "Couldn't move " + name + (wanted ? " to its own process: " : " back into LiveRack: ") + error;
+                else
+                    safe->consoleNote = name + (wanted ? " now runs in its own process" : " now runs inside LiveRack");
+                safe->strips.forgetMeters();
+                safe->refreshAll();
+                safe->select (rack, slot);
+                break;
+            }
+            case 13: e.crashIsolatedSlot (rack, slot); break;
             case 7:
                 if (e.getPlugin (rack, slot) != nullptr)
                 {
