@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "IsolatedPlugin.h"
+#include "ServerMode.h"
 #include "ConsoleLinkPanel.h"
 #include "AppSettings.h"
 #include "PluginPicker.h"
@@ -198,7 +199,9 @@ public:
             const auto s = e.getDriverStatus (d);
             if (! s.open)
             {
-                chip (Theme::red, "Driver " + juce::String (d + 1), "no device: open Devices", false);
+                chip (Theme::red, "Driver " + juce::String (d + 1),
+                      e.getDriverWaitingFor (d).isNotEmpty() ? "waiting for " + e.getDriverWaitingFor (d)
+                                                                    : juce::String ("no device: open Devices"), false);
                 continue;
             }
 
@@ -379,6 +382,9 @@ MainComponent::MainComponent()
 
     if (error.isNotEmpty())
         showError ("Last session restored with problems", error);
+
+    if (ServerMode::wasRestartedAfterCrash())
+        consoleNote = "LiveRack quit unexpectedly and was restarted";
 
     keysBar.load(); // the show's own keys, if it has them
 

@@ -238,12 +238,59 @@ struct RackEngine::Driver : public juce::AudioIODeviceCallback,
         deviceManager.closeAudioDevice();
     }
 
+    static juce::String deviceNameIn (const juce::XmlElement& state)
+    {
+        const auto out = state.getStringAttribute ("audioOutputDeviceName");
+        return out.isNotEmpty() ? out : state.getStringAttribute ("audioInputDeviceName");
+    }
+
     void start (const juce::XmlElement* state, bool useDefaultDevice)
     {
-        deviceManager.initialise (64, 64, state, useDefaultDevice);
+        // A driver that was set to a particular device waits for that device
+        // (it may not be there yet when the computer has just started) rather
+        // than quietly moving to the built-in audio.
+        const bool named = state != nullptr && deviceNameIn (*state).isNotEmpty();
+        deviceManager.initialise (64, 64, state, useDefaultDevice && ! named);
+
+        if (named && deviceManager.getCurrentAudioDevice() == nullptr)
+            wanted = std::make_unique<juce::XmlElement> (*state);
+
         deviceManager.addAudioCallback (this);
         deviceManager.addChangeListener (this);
     }
+
+    // Called a few times a second on the message thread
+    bool retryIfWaiting()
+    {
+        if (wanted == nullptr)
+            return false;
+
+        if (deviceManager.getCurrentAudioDevice() != nullptr) // a device was picked by hand meanwhile
+        {
+            wanted.reset();
+            return true;
+        }
+
+        const auto now = juce::Time::getMillisecondCounter();
+        if (now - lastTryMs < 5000)
+            return false;
+
+        lastTryMs = now;
+        for (auto* type : deviceManager.getAvailableDeviceTypes())
+            type->scanForDevices();
+
+        const juce::XmlElement state (*wanted);
+        deviceManager.initialise (64, 64, &state, false);
+
+        if (deviceManager.getCurrentAudioDevice() == nullptr)
+            return false;
+
+        wanted.reset();
+        return true;
+    }
+
+    std::unique_ptr<juce::XmlElement> wanted; // the device this driver is waiting for
+    juce::uint32 lastTryMs = 0;
 
     void audioDeviceIOCallbackWithContext (const float* const* inputs, int numInputs,
                                            float* const* outputs, int numOutputs, int numSamples,
@@ -591,9 +638,22 @@ void RackEngine::configureRack (Rack& r, bool updateLists)
 
 //==============================================================================
 // Latency groups: every rack in a group is padded to the slowest one
+juce::String RackEngine::getDriverWaitingFor (int driver) const
+{
+    if (juce::isPositiveAndBelow (driver, (int) drivers.size()))
+        if (auto& w = drivers[(size_t) driver]->wanted)
+            return Driver::deviceNameIn (*w);
+    return {};
+}
+
 void RackEngine::timerCallback()
 {
     bool changed = false;
+
+    for (auto& d : drivers)
+        if (d->retryIfWaiting())
+            changed = true;
+
     double groupMs[9] {};
 
     for (auto& r : racks)
@@ -2142,7 +2202,9 @@ void RackEngine::saveSettings()
     for (auto& d : drivers)
     {
         auto* e = all.createNewChildElement ("DRIVER");
-        if (auto state = d->deviceManager.createStateXml())
+        if (d->wanted != nullptr)
+            e->addChildElement (new juce::XmlElement (*d->wanted)); // still waiting for its device
+        else if (auto state = d->deviceManager.createStateXml())
             e->addChildElement (state.release());
     }
     all.writeTo (dir.getChildFile ("audio-drivers.xml"));

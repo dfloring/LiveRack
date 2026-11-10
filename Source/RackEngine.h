@@ -89,7 +89,8 @@ public:
     juce::AudioDeviceManager& getDeviceManager (int driver = 0);
     DriverStatus getDriverStatus (int driver) const;
     juce::String getDriverLabel (int driver) const; // short: device name or "Driver 2"
-    void updateDriverStats();         // call regularly from the UI (tracks peaks and dropouts)
+    void updateDriverStats();
+    juce::String getDriverWaitingFor (int driver) const; // device name while it isn't available, or empty         // call regularly from the UI (tracks peaks and dropouts)
 
     juce::AudioPluginFormatManager& getFormatManager()  { return formatManager; }
     juce::KnownPluginList&          getKnownPlugins()   { return knownPlugins; }

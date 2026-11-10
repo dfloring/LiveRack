@@ -27,7 +27,7 @@ Get the latest build from [Releases](../../releases): the Mac app (Apple silicon
 - **Mac:** unzip, then right-click `LiveRack.app` > **Open** the first time (it isn't notarised).
 - **Windows:** unzip and run `LiveRack.exe`. If Windows warns about an unknown publisher: **More info > Run anyway**. Pick your ASIO driver (Dante Virtual Soundcard, SoundGrid) in Devices > driver Settings.
 
-# User guide (v0.14)
+# User guide (v0.15)
 
 Any number of independent racks of VST3/AU plugins on one or more audio drivers at once (Dante Virtual Soundcard, a Dante interface, the Waves SoundGrid Driver). Everything lives in one **show file** (`.liverack`) with its snapshots inside it, and the open show comes back automatically on launch.
 
@@ -64,6 +64,17 @@ App: `build/LiveRack_artefacts/Release/LiveRack.app`
   - Two drivers aren't clock-locked to each other inside the Mac. That's fine as long as each rack stays on one driver.
 - **Consoles:** one panel per console (+ Add console for more). Each shows its card slots: click a slot to say what's in it (Dante, Waves SoundGrid, stage box...) and which driver channels it arrives on. Routing uses this to label its channel blocks, e.g. "MY Slot 1". Live tiles show the last scene, the selected channel and its rack, and when the console last sent anything. **Settings** opens the connection settings (console type, IP, scene folder, X32 follow and Learn, and the log).
 - **Controllers:** starts with no MIDI devices: **+ Add MIDI device** lists what's plugged in. Only added devices are used; an unplugged one stays listed as "not connected" and reconnects on its own. Right-click a device to remove it (with or without its mappings). Also here: MIDI mappings, Keyboard shortcuts and the OSC remote. Lights flash as messages arrive.
+
+
+### Server mode (running unattended)
+
+For a computer that only runs LiveRack, wherever it lives. In **Devices**, click the **Server mode** card:
+
+- **Start LiveRack when this computer starts.** Also set the computer to log in automatically (Mac: System Settings > Users & Groups; Windows: `netplwiz`). On the Mac, LiveRack must be in the Applications folder first.
+- **Restart LiveRack if it quits unexpectedly.** A small hidden watcher runs alongside and starts LiveRack again after a crash, with the show it had. Quitting normally doesn't restart it. After three restarts in five minutes it stops trying.
+- An audio driver that was set to a particular device now **waits for that device** instead of moving to the built-in audio. The status bar shows "waiting for ..." and the driver connects by itself when the device appears, e.g. when Dante Virtual Soundcard starts after LiveRack does.
+
+Control it from the iPad / web remote, OSC or Companion as usual.
 
 ## Routing
 
@@ -191,6 +202,7 @@ Settings live in `~/Library/Application Support/LiveRack`: `audio-drivers.xml`, 
 - `Source/PluginViewCapture*`: plugin windows on the web remote (ScreenCaptureKit on the Mac)
 - `companion-module-liverack-host/`: the Companion module
 - `Source/ConsoleLink*`: console following
+- `Source/ServerMode.*`: start at login and the watcher that restarts LiveRack after a crash
 - `Source/IsolatedPlugin.*`: a plugin in its own helper process (both sides: the stand-in inside the rack and the helper)
 
 ## Next steps

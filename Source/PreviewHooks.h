@@ -1,5 +1,6 @@
 #pragma once
 #include "IsolatedPlugin.h"
+#include "ServerMode.h"
 // Only compiled into Linux preview builds (LIVERACK_PREVIEW_HOOKS=1), used to
 // set up a sample session, feed a test signal through it, and open dialogs
 // for UI screenshots. Never part of the Mac app.
@@ -287,6 +288,18 @@ struct PreviewHooks
                     });
                 });
             });
+
+        if (open == "servertest")
+        {
+            std::cerr << "SERVER restarted-after-crash " << ServerMode::wasRestartedAfterCrash() << " note '" << m.consoleNote
+                      << "' waiting for '" << m.engine.getDriverWaitingFor (0) << "'" << std::endl;
+            juce::Timer::callAfterDelay (4000, [&m]
+            {
+                m.engine.saveSettings();
+                std::cerr << "SERVER quitting properly" << std::endl;
+                juce::JUCEApplicationBase::quit();
+            });
+        }
 
         if (open == "dm7")
             juce::Timer::callAfterDelay (600, [&m]

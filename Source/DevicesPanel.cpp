@@ -1,4 +1,5 @@
 #include "DevicesPanel.h"
+#include "ServerMode.h"
 #include "RackStripsView.h"
 #include "Theme.h"
 
@@ -439,7 +440,7 @@ public:
 class DevicesPanel::ControllerCard : public juce::Component
 {
 public:
-    enum Kind { midiDevice, osc, mappings, addMidi, shortcuts, web };
+    enum Kind { midiDevice, osc, mappings, addMidi, shortcuts, web, server };
 
     ControllerCard (Host& h, Kind k, juce::String id = {}) : host (h), kind (k), identifier (std::move (id)) {}
 
@@ -487,6 +488,16 @@ public:
             light = ! host.web.isEnabled() ? Theme::textDim.withAlpha (0.3f)
                   : ! host.web.isListening() ? Theme::red
                   : recent (host.web.getLastActivityMs(), 400) ? Theme::green : Theme::green.withAlpha (0.35f);
+        }
+        else if (kind == server)
+        {
+            const bool login = ServerMode::startsAtLogin(), restart = ServerMode::restartsAfterCrash();
+            title = "Server mode";
+            sub = login && restart ? "Starts with the computer, restarts after a crash"
+                : login            ? "Starts with the computer"
+                : restart          ? "Restarts after a crash"
+                                   : "Off: click to run LiveRack unattended";
+            light = login || restart ? Theme::green.withAlpha (0.6f) : Theme::textDim.withAlpha (0.3f);
         }
         else if (kind == shortcuts)
         {
@@ -552,6 +563,26 @@ public:
         {
             if (host.openShortcuts != nullptr)
                 host.openShortcuts();
+        }
+        else if (kind == server)
+        {
+            const auto problem = ServerMode::startAtLoginProblem();
+            juce::PopupMenu m;
+            m.addSectionHeader ("For a computer nobody sits at");
+            m.addItem (1, "Start LiveRack when this computer starts", problem.isEmpty(), ServerMode::startsAtLogin());
+            if (problem.isNotEmpty())
+                m.addItem (-1, problem, false);
+            m.addItem (2, "Restart LiveRack if it quits unexpectedly", true, ServerMode::restartsAfterCrash());
+            m.addSeparator();
+            m.addItem (-1, "Set the computer to log in automatically too", false);
+
+            juce::Component::SafePointer<juce::Component> safe (this);
+            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safe] (int r)
+            {
+                if (r == 1) ServerMode::setStartAtLogin (! ServerMode::startsAtLogin());
+                if (r == 2) ServerMode::setRestartAfterCrash (! ServerMode::restartsAfterCrash());
+                if (safe != nullptr) safe->repaint();
+            });
         }
         else if (kind == web)
         {
@@ -666,6 +697,7 @@ public:
         addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::shortcuts)));
         addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::web)));
         addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::osc)));
+        addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::server)));
 
         addDriver.setEnabled (host.engine.getNumDrivers() < RackEngine::maxDrivers);
         layout();
@@ -788,7 +820,7 @@ void DevicesPanel::timerCallback()
     // Devices plugged in or removed
     if ((int) content->drivers.size() != host.engine.getNumDrivers()
         || (int) content->consoles.size() != (int) host.consoles.size()
-        || (int) content->controllers.size() != (int) host.midi.getDevices().size() + 5)
+        || (int) content->controllers.size() != (int) host.midi.getDevices().size() + 6)
         refresh();
 
     content->update();

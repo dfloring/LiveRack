@@ -3,6 +3,7 @@
 #include "AppSettings.h"
 #include "PluginScanning.h"
 #include "IsolatedPlugin.h"
+#include "ServerMode.h"
 #include "Theme.h"
 
 class LiveRackApplication : public juce::JUCEApplication
@@ -14,7 +15,8 @@ public:
     bool moreThanOneInstanceAllowed() override
     {
         return getCommandLineParameters().contains (PluginScanning::workerUID)
-            || getCommandLineParameters().contains (Isolation::workerUID);
+            || getCommandLineParameters().contains (Isolation::workerUID)
+            || getCommandLineParameters().contains (ServerMode::watcherUID);
     }
 
     void initialise (const juce::String& commandLine) override
@@ -26,6 +28,15 @@ public:
             juce::Process::setDockIconVisible (false);
            #endif
             juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+            return;
+        }
+
+        // The watcher that restarts LiveRack after a crash
+        if ((watcher = ServerMode::startWatcherIfRequested (commandLine)) != nullptr)
+        {
+           #if JUCE_MAC
+            juce::Process::setDockIconVisible (false);
+           #endif
             return;
         }
 
@@ -42,11 +53,15 @@ public:
 
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         mainWindow = std::make_unique<MainWindow> (getApplicationName());
+        ServerMode::appStarted();
     }
 
     void shutdown() override
     {
+        if (mainWindow != nullptr)
+            ServerMode::appQuitting();
         mainWindow = nullptr;
+        watcher = nullptr;
         scannerWorker = nullptr;
         pluginHelper = nullptr;
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
@@ -84,6 +99,7 @@ private:
     std::unique_ptr<MainWindow> mainWindow;
     std::unique_ptr<PluginScanning::Worker> scannerWorker;
     std::unique_ptr<Isolation::Worker> pluginHelper;
+    std::unique_ptr<ServerMode::Watcher> watcher;
 };
 
 START_JUCE_APPLICATION (LiveRackApplication)
