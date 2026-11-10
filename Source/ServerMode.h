@@ -6,12 +6,13 @@
 //  - Start at login: LiveRack starts when the computer has logged in (set the
 //    computer itself to log in automatically).
 //  - Restart after a crash: a small hidden "watcher" copy of LiveRack runs
-//    alongside. If LiveRack disappears without quitting properly, the watcher
+//    alongside, on its own (not as LiveRack's child process, so ending
+//    LiveRack with everything it started doesn't take the watcher too). If LiveRack disappears without quitting properly, the watcher
 //    starts it again (it gives up after three crashes in five minutes), and
 //    LiveRack comes back with the show it had.
 namespace ServerMode
 {
-    constexpr const char* watcherUID = "liverackwatcher";
+    constexpr const char* watcherUID = "--liverackwatcher";
 
     // Empty if start-at-login can be used, otherwise why not
     juce::String startAtLoginProblem();

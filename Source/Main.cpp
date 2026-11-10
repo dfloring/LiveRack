@@ -16,7 +16,7 @@ public:
     {
         return getCommandLineParameters().contains (PluginScanning::workerUID)
             || getCommandLineParameters().contains (Isolation::workerUID)
-            || getCommandLineParameters().contains (ServerMode::watcherUID);
+            || getCommandLineParameters().contains ("--liverackwatcher");
     }
 
     void initialise (const juce::String& commandLine) override

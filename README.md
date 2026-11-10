@@ -71,7 +71,7 @@ App: `build/LiveRack_artefacts/Release/LiveRack.app`
 For a computer that only runs LiveRack, wherever it lives. In **Devices**, click the **Server mode** card:
 
 - **Start LiveRack when this computer starts.** Also set the computer to log in automatically (Mac: System Settings > Users & Groups; Windows: `netplwiz`). On the Mac, LiveRack must be in the Applications folder first.
-- **Restart LiveRack if it quits unexpectedly.** A small hidden watcher runs alongside and starts LiveRack again after a crash, with the show it had. Quitting normally doesn't restart it. After three restarts in five minutes it stops trying.
+- **Restart LiveRack if it quits unexpectedly.** A small hidden watcher runs alongside (on its own, so ending LiveRack in Task Manager doesn't take the watcher with it) and starts LiveRack again after a crash, with the show it had. Quitting normally doesn't restart it. After three restarts in five minutes it stops trying.
 - An audio driver that was set to a particular device now **waits for that device** instead of moving to the built-in audio. The status bar shows "waiting for ..." and the driver connects by itself when the device appears, e.g. when Dante Virtual Soundcard starts after LiveRack does.
 
 Control it from the iPad / web remote, OSC or Companion as usual.

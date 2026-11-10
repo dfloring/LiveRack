@@ -1,6 +1,20 @@
 #include "ServerMode.h"
 #include "AppSettings.h"
 
+#if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+ #endif
+ #include <windows.h>
+#else
+ #include <csignal>
+ #include <cerrno>
+ #include <unistd.h>
+#endif
+
 namespace
 {
     juce::File appFile()
@@ -44,72 +58,133 @@ namespace
    #endif
 
     //==========================================================================
-    struct WatcherLink final : public juce::ChildProcessCoordinator
+    // Is a process still running? (Not a child of ours, so it is checked by id.)
+    bool isProcessAlive (juce::uint32 pid)
     {
-        void handleMessageFromWorker (const juce::MemoryBlock&) override {}
+        if (pid == 0)
+            return false;
 
-        void handleConnectionLost() override
-        {
-            // The watcher went away (not us quitting): start another
-            if (! quitting)
-                juce::MessageManager::callAsync ([] { ServerMode::setRestartAfterCrash (ServerMode::restartsAfterCrash()); });
-        }
+       #if JUCE_WINDOWS
+        auto h = OpenProcess (SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD) pid);
+        if (h == nullptr)
+            return false;
+        const bool running = WaitForSingleObject (h, 0) == WAIT_TIMEOUT;
+        CloseHandle (h);
+        return running;
+       #else
+        if (kill ((pid_t) pid, 0) != 0 && errno != EPERM)
+            return false;
+        #if JUCE_LINUX
+        // A finished process nobody has collected yet still answers
+        const auto stat = juce::File ("/proc/" + juce::String (pid) + "/stat").loadFileAsString();
+        if (stat.fromLastOccurrenceOf (")", false, false).trimStart().startsWithChar ('Z'))
+            return false;
+        #endif
+        return true;
+       #endif
+    }
 
-        std::atomic<bool> quitting { false };
-    };
+    juce::uint32 thisProcessId()
+    {
+       #if JUCE_WINDOWS
+        return (juce::uint32) GetCurrentProcessId();
+       #else
+        return (juce::uint32) getpid();
+       #endif
+    }
 
-    std::unique_ptr<WatcherLink> watcherLink;
+    // The watcher runs on its own, not as a child of LiveRack: when Windows
+    // ends LiveRack together with everything it started, the watcher stays.
+    // LiveRack starts a short-lived "spawner", which starts the watcher and
+    // quits at once. The files below are how the two talk.
+    juce::File tokenFile()      { return RackEngine::getSettingsDir().getChildFile ("watcher-token"); }   // the current watcher
+    juce::File watcherPidFile() { return RackEngine::getSettingsDir().getChildFile ("watcher-pid"); }
+    juce::File cleanQuitFile()  { return RackEngine::getSettingsDir().getChildFile ("clean-quit"); }      // pid of a proper quit
+
+    constexpr const char* spawnFlag = "--liverackwatcherspawn";
+    juce::String currentToken;
     int restartSetting = -1; // not read yet
+    std::unique_ptr<juce::ChildProcess> spawner;
+
+    void launchHidden (const juce::StringArray& args, std::unique_ptr<juce::ChildProcess>& holder)
+    {
+        juce::StringArray command;
+        command.add (juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName());
+        command.addArray (args);
+        holder = std::make_unique<juce::ChildProcess>();
+        holder->start (command, 0);
+    }
 
     void startWatcher()
     {
-        if (watcherLink != nullptr)
-        {
-            watcherLink->quitting = true;
-            watcherLink.reset();
-        }
-
-        auto link = std::make_unique<WatcherLink>();
-        if (link->launchWorkerProcess (juce::File::getSpecialLocation (juce::File::currentExecutableFile),
-                                       ServerMode::watcherUID, 0, 0))
-            watcherLink = std::move (link);
+        currentToken = juce::String::toHexString (juce::Random::getSystemRandom().nextInt64());
+        tokenFile().replaceWithText (currentToken);
+        watcherPidFile().deleteFile();
+        launchHidden ({ spawnFlag, currentToken, juce::String (thisProcessId()) }, spawner);
     }
 
     void stopWatcher()
     {
-        if (watcherLink == nullptr)
-            return;
-
-        watcherLink->quitting = true;
-        watcherLink->sendMessageToWorker (juce::MemoryBlock ("bye", 3));
-        juce::Thread::sleep (150); // let it hear that before it is stopped
-        watcherLink.reset();
+        currentToken = {};
+        tokenFile().deleteFile(); // the watcher sees this and quits
     }
+
+    // LiveRack checks now and then that its watcher is still there
+    struct WatcherCheck final : private juce::Timer
+    {
+        WatcherCheck() { startTimer (5000); }
+
+        void timerCallback() override
+        {
+            if (spawner != nullptr && ! spawner->isRunning()) // collects the finished spawner
+                spawner.reset();
+
+            if (currentToken.isEmpty() || ++ticks < 2)
+                return;
+
+            const auto pid = (juce::uint32) watcherPidFile().loadFileAsString().getLargeIntValue();
+            if (! isProcessAlive (pid))
+                startWatcher();
+        }
+
+        int ticks = 0;
+    };
+
+    std::unique_ptr<WatcherCheck> watcherCheck;
 
     //==========================================================================
     class WatcherProcess final : public ServerMode::Watcher,
-                                 private juce::ChildProcessWorker
+                                 private juce::Timer
     {
     public:
-        using juce::ChildProcessWorker::initialiseFromCommandLine;
-
-    private:
-        void handleMessageFromCoordinator (const juce::MemoryBlock& mb) override
+        WatcherProcess (juce::String t, juce::uint32 app) : token (std::move (t)), appPid (app)
         {
-            if (mb.toString() == "bye")
-                properQuit = true;
+            watcherPidFile().replaceWithText (juce::String (thisProcessId()));
+            startTimer (500);
         }
 
-        void handleConnectionLost() override
+    private:
+        void timerCallback() override
         {
-            const bool crashed = ! properQuit.load();
-            juce::MessageManager::callAsync ([crashed]
-            {
-                if (crashed)
-                    juce::Timer::callAfterDelay (1500, [] { relaunch(); juce::JUCEApplicationBase::quit(); });
-                else
-                    juce::JUCEApplicationBase::quit();
-            });
+            // Turned off, or a newer watcher took over
+            if (tokenFile().loadFileAsString().trim() != token)
+                return finish();
+
+            if (isProcessAlive (appPid))
+                return;
+
+            stopTimer();
+
+            if ((juce::uint32) cleanQuitFile().loadFileAsString().getLargeIntValue() == appPid)
+                return finish();
+
+            juce::Timer::callAfterDelay (1500, [] { relaunch(); juce::JUCEApplicationBase::quit(); });
+        }
+
+        void finish()
+        {
+            stopTimer();
+            juce::JUCEApplicationBase::quit();
         }
 
         static void relaunch()
@@ -132,7 +207,20 @@ namespace
             appFile().startAsProcess();
         }
 
-        std::atomic<bool> properQuit { false };
+        const juce::String token;
+        const juce::uint32 appPid;
+    };
+
+    // Starts the watcher and quits
+    struct Spawner final : public ServerMode::Watcher
+    {
+        Spawner (const juce::String& token, const juce::String& pid)
+        {
+            launchHidden ({ ServerMode::watcherUID, token, pid }, child);
+            juce::MessageManager::callAsync ([] { juce::JUCEApplicationBase::quit(); });
+        }
+
+        std::unique_ptr<juce::ChildProcess> child;
     };
 }
 
@@ -188,8 +276,22 @@ void ServerMode::setRestartAfterCrash (bool on)
 
     restartSetting = on ? 1 : 0;
 
-    if (on) startWatcher();
-    else    stopWatcher();
+    if (on)
+    {
+       #if JUCE_WINDOWS
+        // Let a crash end LiveRack at once, instead of waiting behind a
+        // "LiveRack has stopped working" box that nobody is there to close
+        SetErrorMode (GetErrorMode() | SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+       #endif
+        startWatcher();
+        if (watcherCheck == nullptr)
+            watcherCheck = std::make_unique<WatcherCheck>();
+    }
+    else
+    {
+        stopWatcher();
+        watcherCheck.reset();
+    }
 }
 
 void ServerMode::appStarted()
@@ -200,11 +302,20 @@ void ServerMode::appStarted()
     if (startsAtLogin() && startAtLoginProblem().isEmpty())
         setStartAtLogin (true);
 
+    cleanQuitFile().deleteFile();
+
     if (restartsAfterCrash())
-        startWatcher();
+        setRestartAfterCrash (true);
 }
 
-void ServerMode::appQuitting() { stopWatcher(); }
+void ServerMode::appQuitting()
+{
+    watcherCheck.reset();
+    cleanQuitFile().replaceWithText (juce::String (thisProcessId()));
+    if (currentToken.isNotEmpty())
+        tokenFile().deleteFile();
+    currentToken = {};
+}
 
 bool ServerMode::wasRestartedAfterCrash()
 {
@@ -214,10 +325,17 @@ bool ServerMode::wasRestartedAfterCrash()
 
 std::unique_ptr<ServerMode::Watcher> ServerMode::startWatcherIfRequested (const juce::String& commandLine)
 {
-    auto watcher = std::make_unique<WatcherProcess>();
+    juce::StringArray args;
+    args.addTokens (commandLine, true);
+    args.removeEmptyStrings();
 
-    if (watcher->initialiseFromCommandLine (commandLine, ServerMode::watcherUID))
-        return watcher;
+    const int spawn = args.indexOf (spawnFlag), watch = args.indexOf (ServerMode::watcherUID);
+
+    if (spawn >= 0 && args.size() > spawn + 2)
+        return std::make_unique<Spawner> (args[spawn + 1], args[spawn + 2]);
+
+    if (watch >= 0 && args.size() > watch + 2)
+        return std::make_unique<WatcherProcess> (args[watch + 1], (juce::uint32) args[watch + 2].getLargeIntValue());
 
     return nullptr;
 }
