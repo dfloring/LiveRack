@@ -3238,6 +3238,18 @@ std::shared_ptr<PluginViewCapture> MainComponent::openRemoteView (const juce::St
         return nullptr;
     }
 
+    // A plugin in its own process: its helper owns the window and captures it
+    if (auto* isolated = dynamic_cast<IsolatedPlugin*> (plugin))
+    {
+        const auto s = param ("scale"), q = param ("q");
+        auto capture = isolated->openRemoteView (s.isNotEmpty() ? juce::jlimit (0.5f, 3.0f, s.getFloatValue()) : 2.0f,
+                                                 q.isNotEmpty() ? juce::jlimit (0.2f, 0.95f, q.getFloatValue()) : 0.7f,
+                                                 error);
+        if (capture != nullptr)
+            remoteViews.push_back ({ capture, plugin, false });
+        return capture;
+    }
+
     auto findWindow = [this, plugin]() -> PluginWindow*
     {
         for (auto& w : editorWindows)

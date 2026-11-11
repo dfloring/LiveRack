@@ -193,7 +193,8 @@ Right-click a plugin > **Run in its own process**. The plugin then runs in a hid
 
 - It is per plugin, off by default, and saved in the show. Tick it again to bring the plugin back inside LiveRack; settings carry over both ways.
 - Audio goes to the helper and back within the same block, so no latency is added. The panel shows how long the hand-off takes.
-- Limits for now: the plugin's window is a separate window owned by the helper (not inside the panel, and not on the iPad), MIDI isn't passed to the plugin, and gain reduction from the PreSonus VST3 extension isn't read (a parameter or the estimate still work).
+- The plugin's own window works on the web remote like any other: the helper captures it and plays taps back into it. If the plugin restarts while a device is showing it, the device says so; tap **Try again**.
+- Limits for now: the plugin's window is a separate window owned by the helper (not inside the panel), MIDI isn't passed to the plugin, and gain reduction from the PreSonus VST3 extension isn't read (a parameter or the estimate still work).
 - To try it: hold **Option** while right-clicking an isolated plugin for **Crash this plugin (test)**.
 
 ## Testing with the CL5
@@ -220,7 +221,7 @@ Settings live in `~/Library/Application Support/LiveRack`: `audio-drivers.xml`, 
 
 ## Next steps
 
-- Plugin isolation, next stages: the plugin's window inside the panel and on the iPad, MIDI, and making it the default once it has proved itself
+- Plugin isolation, next stages: the plugin's window inside the panel, MIDI, and making it the default once it has proved itself
 - Split engine and UI over the network for a separate DSP server
 
 ## Licence

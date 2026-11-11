@@ -181,6 +181,84 @@ struct PreviewHooks
                 });
             });
 
+        if (open == "isoview")
+            juce::Timer::callAfterDelay (800, [&m]
+            {
+                auto& e = m.engine;
+                juce::String error;
+                e.setSlotIsolated (0, 1, true, error);
+                m.select (0, 0);
+                m.refreshAll();
+                auto* p = dynamic_cast<IsolatedPlugin*> (e.getPlugin (0, 1));
+                std::cerr << "ISOVIEW isolated " << (p != nullptr) << " " << error << std::endl;
+
+                struct T { std::shared_ptr<PluginViewCapture> a, b; int framesA = 0, framesB = 0; juce::String msgs; };
+                auto t = std::make_shared<T>();
+                juce::String err;
+                t->a = m.openRemoteView ("view=0:1&scale=1", err);
+                std::cerr << "ISOVIEW open a " << (t->a != nullptr) << " '" << err << "'" << std::endl;
+
+                auto poll = [t]
+                {
+                    juce::MemoryBlock f; juce::String s;
+                    if (t->a) { while (t->a->takeFrame (f)) { ++t->framesA; if (t->framesA == 1) std::cerr << "ISOVIEW first frame " << f.getSize() << " bytes" << std::endl; }
+                                while (t->a->takeMessage (s)) t->msgs << "A:" << s << " "; }
+                    if (t->b) { while (t->b->takeFrame (f)) ++t->framesB;
+                                while (t->b->takeMessage (s)) t->msgs << "B:" << s << " "; }
+                };
+                for (int i = 1; i <= 60; ++i)
+                    juce::Timer::callAfterDelay (i * 100, poll);
+
+                juce::Timer::callAfterDelay (2000, [&m, t]
+                {
+                    auto* p = m.engine.getPlugin (0, 1);
+                    juce::String before;
+                    for (auto* q : p->getParameters()) before << q->getValue() << " ";
+                    std::cerr << "ISOVIEW frames a " << t->framesA << " params before " << before << std::endl;
+                    for (float y : { 0.14f, 0.43f })
+                    {
+                        auto ev = [y] (const char* type)
+                        {
+                            auto* o = new juce::DynamicObject();
+                            o->setProperty ("t", type); o->setProperty ("x", 0.42); o->setProperty ("y", y);
+                            o->setProperty ("b", "l"); o->setProperty ("n", 1);
+                            return juce::var (o);
+                        };
+                        t->a->input (ev ("down"));
+                        t->a->input (ev ("up"));
+                    }
+                    juce::String err;
+                    t->b = m.openRemoteView ("view=0:1", err); // a second device
+                });
+
+                juce::Timer::callAfterDelay (3500, [&m, t]
+                {
+                    auto* p = m.engine.getPlugin (0, 1);
+                    juce::String after;
+                    for (auto* q : p->getParameters()) after << q->getValue() << " ";
+                    std::cerr << "ISOVIEW params after clicks " << after << " frames a " << t->framesA << " b " << t->framesB << std::endl;
+                    m.engine.crashIsolatedSlot (0, 1);
+                });
+
+                juce::Timer::callAfterDelay (5500, [&m, t]
+                {
+                    std::cerr << "ISOVIEW after crash: ended a " << t->a->hasEnded() << " b " << t->b->hasEnded() << " msgs " << t->msgs << std::endl;
+                    m.closeRemoteView (t->a);
+                    m.closeRemoteView (t->b);
+                    t->a = t->b = nullptr;
+                    juce::String err;
+                    t->a = m.openRemoteView ("view=0:1&scale=1", err);
+                    std::cerr << "ISOVIEW reopen after restart " << (t->a != nullptr) << " '" << err << "'" << std::endl;
+                });
+
+                juce::Timer::callAfterDelay (6900, [&m, t]
+                {
+                    std::cerr << "ISOVIEW reopened frames " << t->framesA << " msgs " << t->msgs << std::endl;
+                    m.closeRemoteView (t->a);
+                    t->a = nullptr;
+                });
+            });
+
         if (open == "isolate")
             juce::Timer::callAfterDelay (800, [&m]
             {

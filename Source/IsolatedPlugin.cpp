@@ -1,4 +1,5 @@
 #include "IsolatedPlugin.h"
+#include "PluginViewCapture.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #if JUCE_WINDOWS
@@ -34,7 +35,9 @@ namespace
     {
         msgLoad = 1, msgLayout, msgPrepare, msgRelease, msgGetState, msgSetState,
         msgSetParam, msgShowEditor, msgCrash,
-        msgReply = 100, evParams, evLatency, evState, evEditorClosed
+        msgViewOpen, msgViewInput, msgViewClose, msgViewFrameAck,
+        msgReply = 100, evParams, evLatency, evState, evEditorClosed,
+        evViewFrame, evViewMessage, evViewEnded
     };
 
     juce::MemoryBlock pack (int type, int id, const juce::MemoryBlock& payload)
@@ -192,6 +195,151 @@ private:
     juce::TextButton button { "Show Plugin Window" };
 };
 
+// The plugin's window on the web remote. The helper owns the window, so it
+// captures it and plays the remote's taps back into it; this end passes the
+// frames and events across.
+class IsolatedPlugin::RemoteView final : public PluginViewCapture
+{
+public:
+    explicit RemoteView (IsolatedPlugin& o) : owner (o), token (o.lifeToken) {}
+
+    // Message thread
+    void input (const juce::var& event) override
+    {
+        if (token->load() && ! ended.load())
+        {
+            juce::MemoryOutputStream o;
+            o.writeString (juce::JSON::toString (event, true));
+            owner.send (msgViewInput, o.getMemoryBlock());
+        }
+    }
+
+    void stop() override
+    {
+        if (! stopped.exchange (true) && token->load())
+            owner.detachView (this);
+    }
+
+    // Any thread
+    bool takeFrame (juce::MemoryBlock& jpeg) override
+    {
+        const juce::ScopedLock sl (frameLock);
+        if (! fresh)
+            return false;
+        jpeg = frame;
+        fresh = false;
+        return true;
+    }
+
+    // Connection thread
+    void setFrame (const juce::MemoryBlock& jpeg)
+    {
+        const juce::ScopedLock sl (frameLock);
+        frame = jpeg;
+        fresh = true;
+    }
+
+    void messageFromHelper (const juce::String& json)
+    {
+        const auto v = juce::JSON::parse (json);
+        postMessage (v);
+        const auto t = v["t"].toString();
+        if (t == "error" || t == "closed")
+            ended = true;
+    }
+
+    void endedByHelper()                    { ended = true; }
+    void error (const juce::String& message) { postError (message); }
+
+private:
+    IsolatedPlugin& owner;
+    std::shared_ptr<std::atomic<bool>> token;
+    std::atomic<bool> stopped { false };
+    juce::CriticalSection frameLock;
+    juce::MemoryBlock frame;
+    bool fresh = false;
+};
+
+std::vector<std::shared_ptr<IsolatedPlugin::RemoteView>> IsolatedPlugin::liveViews()
+{
+    std::vector<std::shared_ptr<RemoteView>> list;
+    const juce::ScopedLock sl (viewLock);
+    for (auto& w : views)
+        if (auto v = w.lock())
+            list.push_back (v);
+    return list;
+}
+
+std::shared_ptr<PluginViewCapture> IsolatedPlugin::openRemoteView (float scale, float quality, juce::String& error)
+{
+    if (gaveUp)
+    {
+        error = "This plugin stopped after repeated crashes.";
+        return nullptr;
+    }
+
+    if (restarting || ! alive)
+    {
+        error = "The plugin is restarting. Try again in a moment.";
+        return nullptr;
+    }
+
+    auto view = std::make_shared<RemoteView> (*this);
+    bool first;
+    {
+        const juce::ScopedLock sl (viewLock);
+        views.erase (std::remove_if (views.begin(), views.end(), [] (auto& w) { return w.expired(); }), views.end());
+        first = views.empty();
+        views.push_back (view);
+        if (! first && lastViewFrame.getSize() > 0)
+            view->setFrame (lastViewFrame); // the picture only changes when the plugin does
+    }
+
+    // One capture in the helper serves every device showing the plugin
+    if (first)
+    {
+        {
+            const juce::ScopedLock sl (viewLock);
+            lastViewFrame.reset();
+        }
+        juce::MemoryOutputStream o;
+        o.writeFloat (scale);
+        o.writeFloat (quality);
+        send (msgViewOpen, o.getMemoryBlock());
+    }
+
+    return view;
+}
+
+void IsolatedPlugin::detachView (RemoteView* view)
+{
+    bool none;
+    {
+        const juce::ScopedLock sl (viewLock);
+        views.erase (std::remove_if (views.begin(), views.end(), [view] (auto& w)
+        {
+            auto v = w.lock();
+            return v == nullptr || v.get() == view;
+        }), views.end());
+        none = views.empty();
+    }
+
+    if (none)
+        send (msgViewClose, {});
+}
+
+// The helper is going away: devices showing it are told why
+void IsolatedPlugin::endViews (const juce::String& why)
+{
+    auto list = liveViews();
+    {
+        const juce::ScopedLock sl (viewLock);
+        views.clear();
+    }
+    for (auto& v : list)
+        v->windowClosed (why);
+}
+
 //==============================================================================
 IsolatedPlugin::IsolatedPlugin (const juce::PluginDescription& d)
     : juce::AudioPluginInstance (BusesProperties().withInput ("Input", juce::AudioChannelSet::stereo(), true)
@@ -204,6 +352,7 @@ IsolatedPlugin::~IsolatedPlugin()
 {
     stopTimer();
     lifeToken->store (false);
+    endViews ("The plugin was removed.");
 
     if (restartThread.joinable())
     {
@@ -398,6 +547,8 @@ void IsolatedPlugin::restart (const juce::String& reason)
 {
     if (gaveUp || restarting)
         return;
+
+    endViews ("The plugin " + reason + " and is being restarted. Try again in a moment.");
 
     stop();
 
@@ -646,6 +797,37 @@ void IsolatedPlugin::messageFromHelper (const juce::MemoryBlock& mb)
             gotReply = true;
             replyEvent.signal();
         }
+        return;
+    }
+
+    // Plugin window frames go straight to the web remote, not via the message thread
+    if (type == evViewFrame)
+    {
+        {
+            const juce::ScopedLock sl (viewLock);
+            lastViewFrame = payload;
+        }
+        for (auto& v : liveViews())
+            v->setFrame (payload);
+        send (msgViewFrameAck, {}); // ready for the next one
+        return;
+    }
+
+    if (type == evViewMessage)
+    {
+        juce::MemoryInputStream in (payload, false);
+        const auto json = in.readString();
+        for (auto& v : liveViews())
+            v->messageFromHelper (json);
+        return;
+    }
+
+    if (type == evViewEnded)
+    {
+        for (auto& v : liveViews())
+            v->endedByHelper();
+        const juce::ScopedLock sl (viewLock);
+        views.clear();
         return;
     }
 
@@ -943,6 +1125,8 @@ public:
     ~HelperProcess() override
     {
         stopTimer();
+        viewPump.stopTimer();
+        view.reset();
         stopAudioThread();
         window.reset();
         plugin.reset();
@@ -1055,6 +1239,22 @@ private:
             }
 
             case msgShowEditor: showWindow (in.readBool()); break;
+
+            case msgViewOpen:
+            {
+                const float scale = in.readFloat();
+                const float quality = in.readFloat();
+                openView (scale, quality);
+                break;
+            }
+
+            case msgViewInput:
+                if (view != nullptr)
+                    view->input (juce::JSON::parse (in.readString()));
+                break;
+
+            case msgViewClose:    closeView(); break;
+            case msgViewFrameAck: frameSentMs = 0; break;
 
             case msgCrash:
             {
@@ -1232,9 +1432,25 @@ private:
         HelperProcess& owner;
     };
 
+    // LiveRack asks for the window (its panel shows the plugin, or "Show Plugin
+    // Window"); the web remote also needs it while it shows the plugin
     void showWindow (bool shouldShow)
     {
-        if (! shouldShow || plugin == nullptr)
+        wantedByLiveRack = shouldShow;
+        updateWindow();
+
+        if (shouldShow && window != nullptr)
+        {
+            juce::Process::makeForegroundProcess();
+            window->toFront (true);
+        }
+    }
+
+    void updateWindow()
+    {
+        const bool wanted = plugin != nullptr && (wantedByLiveRack || view != nullptr || viewOpening);
+
+        if (! wanted)
         {
             if (window != nullptr)
             {
@@ -1248,6 +1464,11 @@ private:
         if (window == nullptr)
         {
             auto* editor = plugin->hasEditor() ? plugin->createEditorIfNeeded() : nullptr;
+           #if LIVERACK_PREVIEW_HOOKS
+            // Previews: JUCE-drawn editors, so window capture can be tested
+            if (juce::SystemStats::getEnvironmentVariable ("LIVERACK_PREVIEW_GENERIC", {}).isNotEmpty())
+                editor = new juce::GenericAudioProcessorEditor (*plugin);
+           #endif
             if (editor == nullptr)
                 return;
 
@@ -1262,15 +1483,108 @@ private:
 
             window->setVisible (true);
         }
-
-        juce::Process::makeForegroundProcess();
-        window->toFront (true);
     }
 
     void windowClosedByUser()
     {
+        if (view != nullptr)
+        {
+            view->windowClosed ("The plugin window was closed on the LiveRack computer.");
+            pumpView(); // passes the message on and ends the view
+        }
+
         showWindow (false);
         event (evEditorClosed, {});
+    }
+
+    //==========================================================================
+    // The plugin's window on the web remote: captured here, where the window is
+    void openView (float scale, float quality)
+    {
+        if (view != nullptr)
+            return; // already showing: another device joins it
+
+        if (plugin == nullptr)
+            return viewError ("The plugin isn't loaded.");
+
+        viewOpening = true;
+        updateWindow();
+        viewOpening = false;
+
+        if (window == nullptr)
+            return viewError ("This plugin has no window.");
+
+        PluginViewCapture::Options options;
+        options.scale = scale;
+        options.quality = quality;
+        juce::String error;
+
+        if (auto capture = PluginViewCapture::create (*window, options, error))
+        {
+            view = std::move (capture);
+            frameSentMs = 0;
+            viewPump.startTimerHz (60);
+        }
+        else
+        {
+            updateWindow();
+            viewError (error.isNotEmpty() ? error : "Couldn't show the plugin window.");
+        }
+    }
+
+    void viewError (const juce::String& message)
+    {
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("t", "error");
+        o->setProperty ("msg", message);
+        juce::MemoryOutputStream out;
+        out.writeString (juce::JSON::toString (juce::var (o), true));
+        event (evViewMessage, out.getMemoryBlock());
+        event (evViewEnded, {});
+    }
+
+    void closeView()
+    {
+        viewPump.stopTimer();
+        if (view != nullptr)
+        {
+            view->stop();
+            view.reset();
+        }
+        updateWindow();
+    }
+
+    void pumpView()
+    {
+        if (view == nullptr)
+            return;
+
+        juce::String json;
+        while (view->takeMessage (json))
+        {
+            juce::MemoryOutputStream o;
+            o.writeString (json);
+            event (evViewMessage, o.getMemoryBlock());
+        }
+
+        if (view->hasEnded())
+        {
+            event (evViewEnded, {});
+            closeView();
+            return;
+        }
+
+        // One frame on its way at a time; LiveRack says when it's arrived
+        const auto now = juce::Time::getMillisecondCounter();
+        if (frameSentMs != 0 && now - frameSentMs < 1000)
+            return;
+
+        juce::MemoryBlock jpeg;
+        if (view->takeFrame (jpeg))
+        {
+            frameSentMs = juce::jmax ((juce::uint32) 1, now);
+            event (evViewFrame, jpeg);
+        }
     }
 
     //==========================================================================
@@ -1375,6 +1689,11 @@ private:
     juce::uint32 stateDirtySince = 0;
     std::unique_ptr<Window> window;
     juce::Point<int> windowPos { -1, -1 };
+    bool wantedByLiveRack = false, viewOpening = false;
+
+    std::shared_ptr<PluginViewCapture> view;
+    juce::uint32 frameSentMs = 0;
+    juce::TimedCallback viewPump { [this] { pumpView(); } };
 };
 }
 

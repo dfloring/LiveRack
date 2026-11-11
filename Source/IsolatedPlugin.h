@@ -2,6 +2,9 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_events/juce_events.h>
 #include <thread>
+#include <memory>
+
+class PluginViewCapture;
 
 // Plugin isolation (experimental, per plugin, off by default).
 //
@@ -16,9 +19,10 @@
 // audio passes through it unprocessed while a fresh helper is started and the
 // last known settings are put back.
 //
-// Limits of this first stage: the plugin's window is a separate window owned
-// by the helper (it can't be shown inside the LiveRack panel or on the iPad),
-// MIDI isn't passed, and VST3 gain-reduction metering isn't available.
+// Limits of this stage: the plugin's window is a separate window owned by the
+// helper (it can't be shown inside the LiveRack panel; the web remote shows it
+// by capturing it in the helper), MIDI isn't passed, and VST3 gain-reduction
+// metering isn't available.
 namespace Isolation
 {
     constexpr const char* workerUID = "liverackpluginhost";
@@ -57,6 +61,9 @@ public:
     juce::String getStatusText() const;
     void showHelperWindow (bool shouldShow);
 
+    // The plugin's own window on the web remote (message thread)
+    std::shared_ptr<PluginViewCapture> openRemoteView (float scale, float quality, juce::String& error);
+
     //==========================================================================
     const juce::String getName() const override                    { return description.name; }
     void prepareToPlay (double sampleRate, int blockSize) override;
@@ -84,7 +91,9 @@ private:
     class Link;
     class Param;
     class Placeholder;
+    class RemoteView;
     friend class Link;
+    friend class RemoteView;
     friend class Param;
     friend class Placeholder;
 
@@ -141,6 +150,14 @@ private:
     int restarts = 0;
     juce::Array<juce::uint32> restartTimes;
     juce::Array<Param*> params;
+
+    // Web remote views of the plugin's window
+    juce::CriticalSection viewLock;
+    std::vector<std::weak_ptr<RemoteView>> views;
+    juce::MemoryBlock lastViewFrame;
+    std::vector<std::shared_ptr<RemoteView>> liveViews();
+    void detachView (RemoteView*);
+    void endViews (const juce::String& why);
 
     // Restarts run on a thread of their own, so LiveRack's window doesn't wait
     // for the helper to load the plugin again
