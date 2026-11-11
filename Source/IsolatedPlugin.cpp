@@ -1,6 +1,16 @@
 #include "IsolatedPlugin.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+ #endif
+ #include <windows.h>
+#endif
+
 std::function<void (const juce::String&)> IsolatedPlugin::onEvent;
 
 //==============================================================================
@@ -194,6 +204,14 @@ IsolatedPlugin::~IsolatedPlugin()
 {
     stopTimer();
     lifeToken->store (false);
+
+    if (restartThread.joinable())
+    {
+        alive = false;
+        replyEvent.signal(); // ends a request the restart is waiting on
+        restartThread.join();
+    }
+
     stop();
 }
 
@@ -212,6 +230,16 @@ std::unique_ptr<IsolatedPlugin> IsolatedPlugin::create (const juce::PluginDescri
 }
 
 bool IsolatedPlugin::start (juce::String& error)
+{
+    juce::MemoryBlock reply;
+    if (! launch (error, reply))
+        return false;
+
+    applyLoadReply (reply);
+    return true;
+}
+
+bool IsolatedPlugin::launch (juce::String& error, juce::MemoryBlock& reply)
 {
     std::unique_ptr<juce::MemoryMappedFile> newMapping;
     Shared* newShared = nullptr;
@@ -285,7 +313,6 @@ bool IsolatedPlugin::start (juce::String& error)
     o.writeString (sharedFile.getFullPathName());
     o.writeString (pipeName);
 
-    juce::MemoryBlock reply;
     if (! request (msgLoad, o.getMemoryBlock(), reply, 180000))
     {
         stop();
@@ -302,6 +329,13 @@ bool IsolatedPlugin::start (juce::String& error)
         return false;
     }
 
+    return true;
+}
+
+void IsolatedPlugin::applyLoadReply (const juce::MemoryBlock& reply)
+{
+    juce::MemoryInputStream in (reply, false);
+    in.readBool();
     in.readString(); // error text (empty)
     const int ins = in.readInt(), outs = in.readInt();
     setLatencySamples (in.readInt());
@@ -339,8 +373,6 @@ bool IsolatedPlugin::start (juce::String& error)
         l.outputBuses.add (setFor (wantedOuts));
         setBusesLayout (l);
     }
-
-    return true;
 }
 
 void IsolatedPlugin::stop()
@@ -364,16 +396,10 @@ void IsolatedPlugin::stop()
 
 void IsolatedPlugin::restart (const juce::String& reason)
 {
-    if (gaveUp)
+    if (gaveUp || restarting)
         return;
 
     stop();
-
-    auto tell = [this] (const juce::String& text)
-    {
-        if (onEvent != nullptr)
-            onEvent (description.name + " " + text);
-    };
 
     const auto now = juce::Time::getMillisecondCounter();
     for (int i = restartTimes.size(); --i >= 0;)
@@ -383,35 +409,138 @@ void IsolatedPlugin::restart (const juce::String& reason)
     if (restartTimes.size() >= 3)
     {
         gaveUp = true;
-        tell (reason + " repeatedly and is stopped: audio passes through it unprocessed");
+        if (onEvent != nullptr)
+            onEvent (description.name + " " + reason + " repeatedly and is stopped: audio passes through it unprocessed");
         return;
     }
 
     restartTimes.add (now);
     ++restarts;
 
-    juce::String error;
-    if (! start (error))
+    if (restartThread.joinable())
+        restartThread.join();
+
+    // What the new helper is set up with. Anything that changes meanwhile is
+    // caught up with when the restart finishes.
+    juce::MemoryBlock state;
     {
+        const juce::ScopedLock sl (stateLock);
+        state = lastState;
+        usedStateGeneration = hasState ? stateGeneration : -1;
+    }
+    usedIns = wantedIns; usedOuts = wantedOuts;
+    usedPrepared = wantPrepared; usedRate = preparedRate; usedBlock = preparedBlock;
+    restarting = true;
+
+    auto token = lifeToken;
+    restartThread = std::thread ([this, token, reason, state]
+    {
+        restartThreadId = std::this_thread::get_id();
+        juce::String error;
+        restartLoadReply.reset();
+        restartStateReply.reset();
+        restartLatency = -1;
+
+        bool ok = launch (error, restartLoadReply);
+
+        if (ok)
+        {
+            juce::MemoryOutputStream layout;
+            layout.writeInt (usedIns);
+            layout.writeInt (usedOuts);
+            juce::MemoryBlock reply;
+            request (msgLayout, layout.getMemoryBlock(), reply, 10000);
+
+            if (usedStateGeneration >= 0)
+                request (msgSetState, state, restartStateReply, 20000);
+
+            if (usedPrepared)
+            {
+                juce::MemoryOutputStream prep;
+                prep.writeDouble (usedRate);
+                prep.writeInt (usedBlock);
+                if (request (msgPrepare, prep.getMemoryBlock(), reply, 30000))
+                {
+                    juce::MemoryInputStream in (reply, false);
+                    restartLatency = in.readInt();
+                    helperPrepared = true; // audio goes to the new helper from here
+                }
+            }
+
+            ok = alive.load(); // it may have crashed again while loading
+        }
+
+        juce::MessageManager::callAsync ([this, token, ok, error, reason]
+        {
+            if (token->load())
+                finishRestart (ok, error, reason);
+        });
+    });
+}
+
+void IsolatedPlugin::finishRestart (bool ok, const juce::String& error, const juce::String& reason)
+{
+    if (restartThread.joinable())
+        restartThread.join();
+
+    restarting = false;
+
+    auto tell = [this] (const juce::String& text)
+    {
+        if (onEvent != nullptr)
+            onEvent (description.name + " " + text);
+    };
+
+    if (! ok)
+    {
+        stop();
         gaveUp = true;
-        tell (reason + " and couldn't be restarted (" + error + "): audio passes through it unprocessed");
+        tell (reason + " and couldn't be restarted" + (error.isNotEmpty() ? " (" + error + ")" : juce::String())
+              + ": audio passes through it unprocessed");
         return;
     }
 
-    requestLayout (wantedIns, wantedOuts);
+    // The latest each parameter was set to, including while the helper was loading
+    valuesBeforeRestart.clear();
+    for (auto* prm : params)
+        valuesBeforeRestart.push_back (prm->getValue());
 
-    if (hasState)
+    applyLoadReply (restartLoadReply);
+
+    if (! restartStateReply.isEmpty())
     {
-        juce::MemoryBlock reply;
-        if (request (msgSetState, lastState, reply, 8000))
-        {
-            juce::MemoryInputStream in (reply, false);
-            applyParamChanges (in);
-        }
+        juce::MemoryInputStream in (restartStateReply, false);
+        applyParamChanges (in);
     }
 
-    if (wantPrepared)
+    if (restartLatency >= 0)
+        setLatencySamples (restartLatency);
+
+    // Parameter changes the helper hadn't reported back as settings yet
+    for (int i = 0; i < params.size() && i < (int) valuesBeforeRestart.size(); ++i)
+        if (std::abs (params[i]->getValue() - valuesBeforeRestart[(size_t) i]) > 1.0e-6f)
+            params[i]->setValueNotifyingHost (valuesBeforeRestart[(size_t) i]);
+
+    // Catch up with anything that changed while the helper was loading
+    if (wantedIns != usedIns || wantedOuts != usedOuts)
+        requestLayout (wantedIns, wantedOuts);
+
+    {
+        bool newer;
+        juce::MemoryBlock state;
+        {
+            const juce::ScopedLock sl (stateLock);
+            newer = hasState && stateGeneration != usedStateGeneration;
+            state = lastState;
+        }
+        if (newer)
+            setStateInformation (state.getData(), (int) state.getSize());
+    }
+
+    if (wantPrepared && (! usedPrepared || preparedRate != usedRate || preparedBlock != usedBlock))
         prepareToPlay (preparedRate, preparedBlock);
+    else if (! wantPrepared && usedPrepared)
+        releaseResources();
 
     if (wantWindow)
         showHelperWindow (true);
@@ -422,7 +551,7 @@ void IsolatedPlugin::restart (const juce::String& reason)
 juce::String IsolatedPlugin::getStatusText() const
 {
     if (gaveUp)       return "Stopped after repeated crashes. Audio passes through unprocessed.";
-    if (! alive)      return "Restarting...";
+    if (restarting || ! alive) return "Restarting...";
     const auto timing = ", hand-off " + juce::String (avgRoundTripUs.load() / 1000.0, 2) + " ms (longest "
                       + juce::String (maxRoundTripUs.load() / 1000.0, 1) + ")";
     if (restarts > 0) return "Running, restarted " + juce::String (restarts) + (restarts == 1 ? " time" : " times") + timing;
@@ -430,8 +559,18 @@ juce::String IsolatedPlugin::getStatusText() const
 }
 
 //==============================================================================
+// While a restart is under way only the restart itself talks to the helper:
+// anyone else gets an immediate "no" instead of waiting for the plugin to load
+bool IsolatedPlugin::mayRequest() const
+{
+    return ! restarting.load() || std::this_thread::get_id() == restartThreadId;
+}
+
 bool IsolatedPlugin::request (int type, const juce::MemoryBlock& payload, juce::MemoryBlock& reply, int timeoutMs)
 {
+    if (! mayRequest())
+        return false;
+
     const juce::ScopedLock oneAtATime (requestLock);
 
     if (! alive || link == nullptr)
@@ -478,7 +617,7 @@ bool IsolatedPlugin::request (int type, const juce::MemoryBlock& payload, juce::
 
 void IsolatedPlugin::send (int type, const juce::MemoryBlock& payload)
 {
-    if (alive && link != nullptr)
+    if (! restarting && alive && link != nullptr)
         link->sendMessageToWorker (pack (type, 0, payload));
 }
 
@@ -548,6 +687,7 @@ void IsolatedPlugin::handleEvent (int type, const juce::MemoryBlock& payload)
     }
     else if (type == evState)
     {
+        const juce::ScopedLock sl (stateLock);
         lastState = payload;
         hasState = true;
     }
@@ -561,7 +701,7 @@ void IsolatedPlugin::timerCallback()
 {
     const auto since = stallStartMs.load();
 
-    if (alive && since != 0 && juce::Time::getMillisecondCounter() - since > 3000)
+    if (! restarting && alive && since != 0 && juce::Time::getMillisecondCounter() - since > 3000)
         restart ("stopped responding");
 }
 
@@ -628,7 +768,10 @@ void IsolatedPlugin::releaseResources()
 void IsolatedPlugin::getStateInformation (juce::MemoryBlock& dest)
 {
     juce::MemoryBlock reply;
-    if (request (msgGetState, {}, reply, 6000))
+    const bool fresh = request (msgGetState, {}, reply, 6000);
+
+    const juce::ScopedLock sl (stateLock);
+    if (fresh)
     {
         lastState = reply;
         hasState = true;
@@ -639,12 +782,17 @@ void IsolatedPlugin::getStateInformation (juce::MemoryBlock& dest)
 
 void IsolatedPlugin::setStateInformation (const void* data, int size)
 {
-    lastState.replaceAll (data, (size_t) juce::jmax (0, size));
-    hasState = true;
+    juce::MemoryBlock state (data, (size_t) juce::jmax (0, size));
+    {
+        const juce::ScopedLock sl (stateLock);
+        lastState = state;
+        hasState = true;
+        ++stateGeneration;
+    }
     juce::MemoryBlock reply;
 
     // The reply carries the parameter values the settings brought with them
-    if (request (msgSetState, lastState, reply, 8000))
+    if (request (msgSetState, state, reply, 8000))
     {
         juce::MemoryInputStream in (reply, false);
         applyParamChanges (in);
@@ -782,7 +930,15 @@ class HelperProcess final : public Isolation::Worker,
                             private juce::AudioPlayHead
 {
 public:
-    HelperProcess() : juce::Thread ("LiveRack plugin audio") { formatManager.addDefaultFormats(); }
+    HelperProcess() : juce::Thread ("LiveRack plugin audio")
+    {
+       #if JUCE_WINDOWS
+        // A crash ends the helper at once, so LiveRack notices straight away,
+        // instead of Windows holding it open to collect a crash report
+        SetErrorMode (GetErrorMode() | SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+       #endif
+        formatManager.addDefaultFormats();
+    }
 
     ~HelperProcess() override
     {
@@ -931,7 +1087,14 @@ private:
         else if (! pipe.openExisting (pipeName))
             error = "Couldn't open the audio wake-up pipe";
         else
+        {
+           #if LIVERACK_PREVIEW_HOOKS
+            // Test builds: pretend to be a plugin that takes a while to load
+            if (const int ms = juce::SystemStats::getEnvironmentVariable ("LIVERACK_TEST_SLOW_LOAD", "0").getIntValue(); ms > 0)
+                juce::Thread::sleep (ms);
+           #endif
             plugin = formatManager.createPluginInstance (desc, rate, block, error);
+        }
 
         if (plugin == nullptr)
         {

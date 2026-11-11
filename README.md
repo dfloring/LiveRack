@@ -188,7 +188,7 @@ Feedback: `/liverack/racks`, `/selected`, `/scene`, `/bpm`, `/page` (0 = All), `
 
 ### Running a plugin in its own process (experimental)
 
-Right-click a plugin > **Run in its own process**. The plugin then runs in a hidden helper copy of LiveRack, so if it crashes or stops responding only that plugin is affected: audio passes through it unprocessed for a moment while a fresh helper starts and its last settings are put back. The status bar says when that happened. After three crashes in a minute the plugin is left stopped (audio still passes through).
+Right-click a plugin > **Run in its own process**. The plugin then runs in a hidden helper copy of LiveRack, so if it crashes or stops responding only that plugin is affected: audio passes through it unprocessed for a moment while a fresh helper starts in the background and its last settings are put back. LiveRack stays usable meanwhile. The status bar says when that happened. After three crashes in a minute the plugin is left stopped (audio still passes through).
 
 - It is per plugin, off by default, and saved in the show. Tick it again to bring the plugin back inside LiveRack; settings carry over both ways.
 - Audio goes to the helper and back within the same block, so no latency is added. The panel shows how long the hand-off takes.

@@ -256,10 +256,25 @@ struct PreviewHooks
                     juce::Timer::callAfterDelay (3200, [&m, iso]
                     {
                         const int before = iso()->getBlocksProcessed();
+                        setenv ("LIVERACK_TEST_SLOW_LOAD", "3000", 1); // the next helper loads slowly
                         m.engine.crashIsolatedSlot (0, 1);
                         std::cerr << "ISO crash sent at processed " << before << std::endl;
+
+                        // How long does LiveRack's window go without a chance to run while it restarts?
+                        struct GapMeter : juce::Timer
+                        {
+                            juce::uint32 last = juce::Time::getMillisecondCounter(), worst = 0; int ticks = 0;
+                            void timerCallback() override
+                            {
+                                const auto now = juce::Time::getMillisecondCounter();
+                                worst = juce::jmax (worst, now - last); last = now;
+                                if (++ticks == 200) { std::cerr << "ISO longest main-thread pause during restart: " << worst << " ms" << std::endl; stopTimer(); }
+                            }
+                        };
+                        static GapMeter gap;
+                        gap.startTimer (20);
                     });
-                    juce::Timer::callAfterDelay (5500, [&m, iso]
+                    juce::Timer::callAfterDelay (8500, [&m, iso]
                     {
                         auto& e = m.engine;
                         auto* p = iso();

@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_events/juce_events.h>
+#include <thread>
 
 // Plugin isolation (experimental, per plugin, off by default).
 //
@@ -89,7 +90,11 @@ private:
 
     explicit IsolatedPlugin (const juce::PluginDescription&);
 
-    bool start (juce::String& error);                   // launch + load
+    bool start (juce::String& error);                   // launch + load (message thread, blocks)
+    bool launch (juce::String& error, juce::MemoryBlock& loadReply); // any thread
+    void applyLoadReply (const juce::MemoryBlock&);     // message thread
+    void finishRestart (bool ok, const juce::String& error, const juce::String& reason);
+    bool mayRequest() const;
     void stop();                                        // kill the helper
     void restart (const juce::String& reason);
     bool request (int type, const juce::MemoryBlock& payload, juce::MemoryBlock& reply, int timeoutMs);
@@ -136,6 +141,19 @@ private:
     int restarts = 0;
     juce::Array<juce::uint32> restartTimes;
     juce::Array<Param*> params;
+
+    // Restarts run on a thread of their own, so LiveRack's window doesn't wait
+    // for the helper to load the plugin again
+    std::thread restartThread;
+    std::atomic<bool> restarting { false };
+    std::thread::id restartThreadId;
+    juce::MemoryBlock restartLoadReply, restartStateReply;
+    int restartLatency = -1, usedIns = 0, usedOuts = 0, usedBlock = 0;
+    double usedRate = 0.0;
+    bool usedPrepared = false;
+    std::vector<float> valuesBeforeRestart;            // the latest each parameter was set to
+    int stateGeneration = 0, usedStateGeneration = 0;
+    juce::CriticalSection stateLock;                    // lastState
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (IsolatedPlugin)
 };
