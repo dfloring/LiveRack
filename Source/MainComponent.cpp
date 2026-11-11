@@ -1712,7 +1712,7 @@ juce::String MainComponent::showName() const
 
 void MainComponent::updateWindowTitle()
 {
-    const auto title = "LiveRack - " + showName() + (engine.isShowEdited() ? " (edited)" : "");
+    const auto title = "LiveRack " + juce::String (JUCE_APPLICATION_VERSION_STRING) + " - " + showName() + (engine.isShowEdited() ? " (edited)" : "");
     if (title != shownTitle)
         if (auto* w = dynamic_cast<juce::DocumentWindow*> (getTopLevelComponent()))
         {
@@ -1950,6 +1950,8 @@ void MainComponent::showShowMenu()
     m.addItem (3, "Open...");
     m.addSeparator();
     m.addItem (4, "New Show");
+    m.addSeparator();
+    m.addItem (-1, "LiveRack " + juce::String (JUCE_APPLICATION_VERSION_STRING), false);
 
     juce::Component::SafePointer<MainComponent> safe (this);
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&loadButton), [safe] (int r)
@@ -2559,6 +2561,7 @@ juce::String MainComponent::buildWebState (const juce::String& query)
     if (auto* info = engine.getSnapshotInfo (currentScene))
         r->setProperty ("sceneName", info->name);
     r->setProperty ("show", showName());
+    r->setProperty ("version", juce::String (JUCE_APPLICATION_VERSION_STRING));
     r->setProperty ("bpm", engine.getBpm());
     r->setProperty ("page", engine.getCurrentPage());
     r->setProperty ("selected", selectedRack);

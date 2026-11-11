@@ -828,7 +828,8 @@ async function showSheet() {
       <button data-sh="new">New show</button>
       <label style="margin-top:6px">Open</label>
       ${shows.length ? shows.map((x, i) => `<div class="mitem" data-open-show="${i}"><span class="ck">${x.current ? '\u2713' : ''}</span><span style="flex:1">${esc(x.name)}</span></div>`).join('')
-                     : '<div class="hint">No shows saved yet. Shows are saved in Documents/LiveRack Shows on the LiveRack computer.</div>'}`;
+                     : '<div class="hint">No shows saved yet. Shows are saved in Documents/LiveRack Shows on the LiveRack computer.</div>'}
+      ${state.version ? `<div class="hint" style="margin-top:10px;text-align:center">LiveRack ${esc(state.version)}</div>` : ''}`;
   };
 
   const run = (action, save) => {
