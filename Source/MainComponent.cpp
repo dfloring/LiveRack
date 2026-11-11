@@ -1538,7 +1538,7 @@ void MainComponent::closeEditorFor (juce::AudioProcessor* p)
         if (it->plugin == p)
         {
             if (auto c = it->capture.lock())
-                c->windowClosed ("The plugin window was closed on the Mac.");
+                c->windowClosed ("The plugin window was closed on the LiveRack computer.");
             it = remoteViews.erase (it);
         }
         else

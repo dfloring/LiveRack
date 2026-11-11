@@ -10,7 +10,8 @@
 // the plugin's own interface works from an iPad.
 //
 // Mac: ScreenCaptureKit (needs Screen Recording permission) and AppKit events.
-// Elsewhere: JUCE drawing only (fine for JUCE-drawn editors; used by previews).
+// Windows: copies the window's part of the screen, real mouse and key input.
+// Linux previews: JUCE drawing only (JUCE-drawn editors).
 class PluginViewCapture : public std::enable_shared_from_this<PluginViewCapture>
 {
 public:

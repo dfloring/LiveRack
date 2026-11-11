@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(LiveRack VERSION 0.16.1)
+project(LiveRack VERSION 0.16.2)
 if(APPLE)
     enable_language(OBJCXX)
 endif()
@@ -53,7 +53,8 @@ target_sources(LiveRack PRIVATE
     Source/DevicesPanel.cpp
     Source/Shortcuts.cpp
     Source/WebRemote.cpp
-    Source/PluginViewCapture.cpp)
+    Source/PluginViewCapture.cpp
+    Source/PluginViewCaptureWindows.cpp)
 
 # Plugin windows on the web remote: ScreenCaptureKit capture on the Mac
 if(APPLE)

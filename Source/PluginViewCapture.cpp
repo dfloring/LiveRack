@@ -54,7 +54,8 @@ int PluginViewCapture::modifierFlagsFrom (const juce::String& mods)
 //==============================================================================
 // JUCE-only capture: draws the window's components into an image and sends
 // events through its peer. It can't see native plugin views (those draw
-// outside JUCE), so on Windows it's only used for JUCE-drawn editors.
+// outside JUCE), so it's only used by Linux preview builds. Windows has its
+// own in PluginViewCaptureWindows.cpp.
 namespace
 {
 class JuceViewCapture : public PluginViewCapture,
@@ -230,23 +231,22 @@ private:
 };
 } // namespace
 
+#if JUCE_WINDOWS
+std::shared_ptr<PluginViewCapture> createWindowsViewCapture (juce::DocumentWindow&, PluginViewCapture::Options, juce::String&);
+#endif
+
 bool PluginViewCapture::isSupported()
 {
-   #if JUCE_WINDOWS
-    return false;
-   #else
     return true;
-   #endif
 }
 
 std::shared_ptr<PluginViewCapture> PluginViewCapture::create (juce::DocumentWindow& window, Options options, juce::String& error)
 {
-    if (! isSupported())
-    {
-        error = "Plugin windows on the iPad are Mac-only for now. Use the sliders.";
-        return nullptr;
-    }
-
+   #if JUCE_WINDOWS
+    return createWindowsViewCapture (window, options, error);
+   #else
+    juce::ignoreUnused (error);
     return std::make_shared<JuceViewCapture> (window, options);
+   #endif
 }
 #endif
