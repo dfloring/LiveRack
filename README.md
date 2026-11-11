@@ -27,7 +27,7 @@ Get the latest build from [Releases](../../releases): the Mac app (Apple silicon
 - **Mac:** unzip, then right-click `LiveRack.app` > **Open** the first time (it isn't notarised).
 - **Windows:** unzip and run `LiveRack.exe`. If Windows warns about an unknown publisher: **More info > Run anyway**. Pick your ASIO driver (Dante Virtual Soundcard, SoundGrid) in Devices > driver Settings.
 
-# User guide (v0.17)
+# User guide (v0.18)
 
 Any number of independent racks of VST3/AU plugins on one or more audio drivers at once (Dante Virtual Soundcard, a Dante interface, the Waves SoundGrid Driver). Everything lives in one **show file** (`.liverack`) with its snapshots inside it, and the open show comes back automatically on launch.
 
@@ -44,8 +44,8 @@ App: `build/LiveRack_artefacts/Release/LiveRack.app`
 
 ## The main window
 
-- **Top bar,** in groups: **Show** (save; open, save as, new), **Snapshots** (previous / next, the current snapshot: click it for the list, rename and delete; **STORE**), **Setup** (Devices, Routing, Plugins, Scope), **View** (add rack, Rack, rack window, stack rows), and **BPM** with **TAP**. Buttons are labelled when the window is wide enough; hover one for more. Click the BPM number to type a tempo. The window title shows the LiveRack version.
-- **Setup screens** (Devices, Routing, Plugins, Scope, Keyboard shortcuts) open in the main window in place of the racks, so everything works on one screen. **‹ Racks**, Esc or the toolbar button again goes back. **Pop Out** moves a screen into its own window (for a second screen), and **Show in Main Window** brings it back; LiveRack remembers which way you like each one.
+- **Top bar,** in groups: **Show** (save; open, save as, new), **Snapshots** (previous / next, the current snapshot: click it for the list, rename and delete; **STORE**), **Views** (Rack, Devices, Routing, Plugins, Snapshots: what the main window shows), **Rack controls** (add rack, rack window, stack rows), and **BPM** with **TAP**. Buttons are labelled when the window is wide enough; hover one for more. Click the BPM number to type a tempo. The window title shows the LiveRack version.
+- **Setup screens** (Devices, Routing, Plugins, Snapshots, Keyboard shortcuts) open in the main window in place of the racks, so everything works on one screen. **‹ Racks**, Esc or the toolbar button again goes back. **Pop Out** moves a screen into its own window (for a second screen), and **Show in Main Window** brings it back; LiveRack remembers which way you like each one.
 - **Pages** (tabs above the strips): **All** shows every rack; **+ Page** makes a page (starting with the selected rack). Put racks on pages from a rack's right-click menu > **Pages** (a rack can be on several), or right-click a page tab > Add. New racks join the page you're on. Selecting a rack (from the console, a key, MIDI or OSC) switches to a page that has it. Pages are saved in the show, not in snapshots.
 - **Hot Plugins** (under the top bar): up to 12 pinned plugins. Right-click a plugin on a strip > **Pin to Hot Plugins**. Click a tile to open that plugin; drag tiles to reorder; right-click to unpin. Hot Plugins are saved in the show.
 - **Strips:** each rack's header shows its name and console channel (**CH**, click to set). Double-click the name to rename in place. The badges under it are buttons:
@@ -85,8 +85,8 @@ Control it from the iPad / web remote, OSC or Companion as usual.
 The web remote's server also speaks a fuller protocol for apps that control LiveRack over the network (the coming LiveRack Client, Companion, your own scripts). Everything is JSON over one WebSocket at `ws://<computer>:<port>/live`:
 
 - On connect the server sends `{"t":"hello", "protocol":1, "version":..., "server":<computer name>}`, then `{"t":"state", "data":...}` whenever anything changes (the same JSON as `/state`; ask for `live=1` to get drivers with their status, consoles, snapshots, Hot Plugins, latency, isolation and server settings), and `{"t":"meters", "data":...}` about 20 times a second (rack in / out levels, gain reduction per plugin, each rack's processing time, each driver's DSP and longest block).
-- The client sends `{"t":"query", "q":"live=1&view=2:0"}` to choose what the state includes (`view` adds every parameter of one plugin), `{"t":"cmd", ...}` for any command, `{"t":"get", "what":"library"|"shows"|"devices", "id":n}` (answered with a `reply`), and `{"t":"ping"}` every few seconds.
-- Commands, besides everything the web remote already does: `rackStep` (dir), `sceneStore` / `sceneRename` / `sceneDelete`, `hot` (rack, slot, on), `latencyGroup`, `isolate` (rack, slot, on), `server` (multiCore, startAtLogin, restartAfterCrash), and the audio drivers: `driverSet` (driver, type, device, rate, buffer), `driverAdd`, `driverRemove`. `get devices` lists each driver's device types, devices, sample rates and buffer sizes.
+- The client sends `{"t":"query", "q":"live=1&view=2:0"}` to choose what the state includes (`view` adds every parameter of one plugin), `{"t":"cmd", ...}` for any command, `{"t":"get", "what":"library"|"shows"|"devices"|"snapshot", "number":n, "id":n}` (answered with a `reply`; `snapshot` gives its differences from now and what it recalls), and `{"t":"ping"}` every few seconds.
+- Commands, besides everything the web remote already does: `rackStep` (dir), `sceneStore` (number, name, and optionally `slots` [[rack, slot]…] / `racks` [rack…] to store over only those), `sceneRename` / `sceneDelete` / `sceneDuplicate` (to) / `sceneRenumber` (to), `sceneScope` (number; rack, slot, in; and the four switches), `midiSnapshots` (follow, input, channel, first, send, output, outChannel), `hot` (rack, slot, on), `latencyGroup`, `isolate` (rack, slot, on), `server` (multiCore, startAtLogin, restartAfterCrash), and the audio drivers: `driverSet` (driver, type, device, rate, buffer), `driverAdd`, `driverRemove`. `get devices` lists each driver's device types, devices, sample rates and buffer sizes.
 - **Finding servers:** while the web remote is on, LiveRack announces itself every 2 s with a UDP broadcast on port 47810 (`{"liverack":1, "name", "port", "version"}`), so clients can list the LiveRack computers on the network by name.
 
 The iPad / web remote page now uses this connection too, so changes show up straight away; it falls back to polling where WebSockets aren't available.
@@ -115,7 +115,23 @@ Give racks a group letter (A–H) with the badge on the strip. Every rack in a g
 - The **show** holds everything: racks, plugins and their settings, routing, latency groups, pages, Hot Plugins, User Keys, BPM, scope, the rack window, and all the snapshots. **Save** (Cmd+S) writes it; the folder button has **Save As**, **Open** (Cmd+O) and **New Show**. The window title shows the show's name and "(edited)" when it has unsaved changes; opening another show asks first. An edited show is also kept automatically every minute and on quit, and comes back on launch. Each save first copies the previous version into a "<Show> Backups" folder next to the show file (the newest 20 are kept). Storing over an existing snapshot from the Store dialog, and deleting one, ask first.
 - A **snapshot** is a numbered (and optionally named) set of plugin settings stored in the show. **STORE** stores one; console scene numbers map to snapshot numbers.
 - Recalling a snapshot **never adds, removes or moves plugins or racks**. It sets the settings and bypass of the plugins already in the show, and (if in scope) rack bypass and BPM. A plugin added after the snapshot was stored is left as it is (the status bar says how many); a plugin that was deleted is skipped.
-- **Scope:** each snapshot has its own: what its recall changes (plugin settings, plugin bypass, rack bypass, BPM) and which plugins it touches. The Scope window edits any snapshot's scope (pick it at the top right), or the "New snapshots" scope that a newly stored snapshot starts with. Click a plugin, or a rack's name for the whole rack, to include it or leave it alone. Also from the snapshot list (**Scope of Snapshot**) and a plugin's right-click menu (**Recalled by new snapshots / by snapshot N**). With plugin bypass out of scope, a recall keeps the plugin's current bypass even if its saved settings include a bypass switch.
+- **Scope:** each snapshot has its own: what its recall changes (plugin settings, plugin bypass, rack bypass, BPM) and which plugins it touches. Edit it on the Snapshots screen (below), or from a plugin's right-click menu (**Recalled by new snapshots / by snapshot N**). With plugin bypass out of scope, a recall keeps the plugin's current bypass even if its saved settings include a bypass switch.
+
+### The Snapshots screen
+
+**Snapshots** in the top bar (or the snapshot chip's menu) opens it in the main window:
+
+- **The list** (left): every snapshot with its number, name, and what triggers it (the console scene, a MIDI program change or learned control). CURRENT marks the one recalled last; an amber dot means its plugins have changed since it was stored. Click one to work on it, double-click to recall it. Store a new one from the row at the top. **Scope for new snapshots** edits what newly stored snapshots recall.
+- **The snapshot picked** (right): rename it, **Recall**, **Store over**, **Duplicate** (to the next free number), **Renumber**, **Delete**. The line under it shows its console scene, when it was stored, how many plugins it recalls, its MIDI trigger and its OSC address.
+- **Store over** offers: **Everything it recalls**; **Only the ticked changes** (see below); or **Pick racks or plugins…**: click the plugins (or a rack's name for all of it, including its bypass) and press Store. Storing over always keeps what the snapshot recalls (its scope); only its settings are updated.
+- **What it recalls:** the four switches (plugin settings, plugin bypass, rack bypass, BPM), then a row per rack with a chip per plugin: filled = recalled, dashed = left alone. Click to change; a rack's name does the whole rack.
+- **Differs from now:** what recalling it would change, plugin by plugin, with the first few settings ("Threshold -20 dB → -24 dB"), plugin bypass and rack bypass. Untick what you don't want and **Store over with the ticked** updates just those. (Snapshots stored before 0.18 only say "settings differ" until they're stored again.)
+
+### Snapshots from MIDI and OSC
+
+- **Program changes** (Snapshots screen, bottom left): turn on **Program changes recall snapshots**, pick the MIDI device (or any) and channel (or any), and which snapshot program 1 recalls (1 by default; 0 for a device that counts from 0, or any offset). A program change learned for something else still does that instead.
+- **Send a program change on recall:** pick a MIDI output and channel, and every recall sends the matching program change (lighting, playback or another rack can follow). One that came in by MIDI isn't sent straight back.
+- **OSC:** `/liverack/scene/recall` takes a number or a **name** (`/liverack/scene/recall "Worship Set"`, any case), so a Companion button keeps working after renumbering. Feedback adds `/liverack/scene/name` (the current one's), `/liverack/scenes` (how many) and `/liverack/scene/<n>/name` for each.
 - **Recall Safe** racks are never touched by recalls.
 - Old files: opening a pre-0.13 `.liverack` file opens it as a show. Scene files in a console's scene folder are imported into the show the first time their scene is recalled (if they have the same racks and plugins).
 
@@ -225,7 +241,7 @@ Settings live in `~/Library/Application Support/LiveRack`: `audio-drivers.xml`, 
 
 - `Source/RackEngine.*`: audio engine, drivers, latency groups, snapshots (no GUI code: this is the part that moves to a DSP server later)
 - `Source/MainComponent.*`: main window; `RackStripsView`, `PluginDock`, `ControlBars` (Hot Plugins, User Keys)
-- `Source/RoutingMatrix.*`, `ScopeEditor.*`, `DevicesPanel.*`: the tool windows
+- `Source/RoutingMatrix.*`, `SnapshotsPanel.*`, `DevicesPanel.*`: the setup screens
 - `Source/Actions.*`, `MidiControl.*`, `OscRemote.*`, `Shortcuts.*`, `WebRemote.*`: control from keys, MIDI, OSC and the web remote (`Resources/web/remote.html`)
 - `Source/PluginViewCapture*`: plugin windows on the web remote (ScreenCaptureKit on the Mac)
 - `companion-module-liverack-host/`: the Companion module

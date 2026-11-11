@@ -59,10 +59,32 @@ public:
 
     std::function<void()> onChanged;   // learned, devices changed
 
+    // Snapshots and program changes: program changes coming in recall
+    // snapshots, and recalling a snapshot sends one out
+    struct SnapshotLink
+    {
+        bool follow = false;
+        juce::String input;            // an added device, empty = any
+        int channel = 0;               // 0 = any
+        int firstSnapshot = 1;         // what program 1 (the first) recalls
+        bool send = false;
+        juce::String output;           // a MIDI output by name
+        int outChannel = 1;
+    };
+    const SnapshotLink& getSnapshotLink() const { return link; }
+    void setSnapshotLink (const SnapshotLink&);
+    static juce::StringArray getOutputNames();
+    juce::StringArray getInputNames() const;   // the devices added
+    void snapshotRecalled (int number);        // sends the program change if set to
+    juce::String describeTriggerFor (int snapshot) const; // "Program 3 (ch 1)" etc., empty if none
+
     void save() const;
     void load();
 
 private:
+   #if LIVERACK_PREVIEW_HOOKS
+    friend struct PreviewHooks;
+   #endif
     struct Device
     {
         juce::String name;
@@ -90,6 +112,12 @@ private:
     juce::StringArray addedDevices;
     std::vector<MidiMapping> mappings;
     std::map<int, bool> lastFeedback; // mapping index -> lit
+
+    SnapshotLink link;
+    std::unique_ptr<juce::MidiOutput> snapshotOut;
+    juce::String snapshotOutName;
+    bool recallFromMidi = false;      // don't echo a program change straight back
+    void openSnapshotOutput();
 
     bool learning = false;
     MidiMapping learnTemplate;

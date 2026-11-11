@@ -58,6 +58,23 @@ struct ShowSnapshot
     std::shared_ptr<juce::XmlElement> data;
 };
 
+// What storing over a snapshot updates: everything, or only some plugins
+// (by slot id) and some racks' bypass (by rack id)
+struct SnapshotStoreFilter
+{
+    bool everything = true;
+    std::vector<int> slotIds, rackIds;
+};
+
+// One thing recalling a snapshot would change
+struct SnapshotDifference
+{
+    int rack = -1, slot = -1;          // slot -1: the rack's bypass
+    int changedSettings = 0;           // parameters that differ (-1: settings differ, count unknown)
+    bool bypassDiffers = false;
+    juce::StringArray details;         // "Threshold -20 dB -> -24 dB", the first few
+};
+
 // Live figures for one audio driver, for the status bar and device panel
 struct DriverStatus
 {
@@ -230,7 +247,14 @@ public:
     // BPM, following the scope; racks marked recall safe are left alone.
     const std::vector<ShowSnapshot>& getSnapshots() const { return snapshots; }
     const ShowSnapshot* getSnapshotInfo (int number) const;
-    void storeSnapshot (int number, const juce::String& name = {});
+    // Storing over an existing snapshot keeps its own scope (what it recalls)
+    void storeSnapshot (int number, const juce::String& name = {}, const SnapshotStoreFilter& = {});
+    bool duplicateSnapshot (int from, int to);              // false if 'to' is taken
+    bool renumberSnapshot (int from, int to);               // false if 'to' is taken
+    int  nextFreeSnapshotNumber (int after) const;
+    juce::Time getSnapshotStoredTime (int number) const;    // invalid for snapshots from before 0.17
+    // What recalling it would change now (in scope, not Recall Safe)
+    std::vector<SnapshotDifference> differencesFromNow (int number) const;
     bool recallSnapshot (int number, juce::String& note);   // false = no such snapshot
     void renameSnapshot (int number, const juce::String& name);
     void deleteSnapshot (int number);

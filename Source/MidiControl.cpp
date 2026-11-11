@@ -281,10 +281,93 @@ void MidiControl::handle (const Incoming& in)
         return;
     }
 
+    bool mapped = false;
     for (auto& mapping : mappings)
         if ((mapping.device.isEmpty() || mapping.device == control.device)
             && mapping.kind == control.kind && mapping.channel == control.channel && mapping.number == control.number)
+        {
             apply (mapping, m);
+            mapped = true;
+        }
+
+    // Program changes recall snapshots (a learned mapping for one wins)
+    if (! mapped && m.isProgramChange() && link.follow
+        && (link.input.isEmpty() || link.input == in.device)
+        && (link.channel == 0 || link.channel == m.getChannel()))
+    {
+        Action a;
+        a.type = Action::recallScene;
+        a.number = m.getProgramChangeNumber() + link.firstSnapshot;
+        recallFromMidi = true;
+        host.performAction (a, -1);
+        recallFromMidi = false;
+    }
+}
+
+//==============================================================================
+void MidiControl::setSnapshotLink (const SnapshotLink& l)
+{
+    link = l;
+    link.channel = juce::jlimit (0, 16, link.channel);
+    link.outChannel = juce::jlimit (1, 16, link.outChannel);
+    openSnapshotOutput();
+    save();
+    if (onChanged != nullptr) onChanged();
+}
+
+juce::StringArray MidiControl::getOutputNames()
+{
+    juce::StringArray names;
+    for (auto& o : juce::MidiOutput::getAvailableDevices())
+        names.add (o.name);
+    return names;
+}
+
+juce::StringArray MidiControl::getInputNames() const { return addedDevices; }
+
+void MidiControl::openSnapshotOutput()
+{
+    const auto want = link.send ? link.output : juce::String();
+    if (want == snapshotOutName && (snapshotOut != nullptr || want.isEmpty()))
+        return;
+
+    snapshotOut.reset();
+    snapshotOutName = want;
+    if (want.isEmpty())
+        return;
+
+    for (auto& o : juce::MidiOutput::getAvailableDevices())
+        if (o.name == want)
+        {
+            snapshotOut = juce::MidiOutput::openDevice (o.identifier);
+            break;
+        }
+}
+
+void MidiControl::snapshotRecalled (int number)
+{
+    if (! link.send || recallFromMidi)
+        return;
+
+    openSnapshotOutput(); // the device may have come back
+    const int program = number - link.firstSnapshot;
+    if (snapshotOut != nullptr && juce::isPositiveAndBelow (program, 128))
+        snapshotOut->sendMessageNow (juce::MidiMessage::programChange (link.outChannel, program));
+}
+
+juce::String MidiControl::describeTriggerFor (int snapshot) const
+{
+    juce::StringArray parts;
+
+    for (auto& m : mappings)
+        if (! m.isParameter && m.action.type == Action::recallScene && m.action.number == snapshot)
+            parts.add (m.describeControl());
+
+    const int program = snapshot - link.firstSnapshot;
+    if (link.follow && juce::isPositiveAndBelow (program, 128))
+        parts.add ("Program " + juce::String (program + 1) + (link.channel > 0 ? " ch " + juce::String (link.channel) : juce::String()));
+
+    return parts.joinIntoString (", ");
 }
 
 void MidiControl::apply (const MidiMapping& mapping, const juce::MidiMessage& m)
@@ -372,6 +455,15 @@ void MidiControl::save() const
         m.action.writeTo (*e);
     }
 
+    auto* sl = xml.createNewChildElement ("SNAPSHOTS");
+    sl->setAttribute ("follow", link.follow);
+    sl->setAttribute ("input", link.input);
+    sl->setAttribute ("channel", link.channel);
+    sl->setAttribute ("first", link.firstSnapshot);
+    sl->setAttribute ("send", link.send);
+    sl->setAttribute ("output", link.output);
+    sl->setAttribute ("outChannel", link.outChannel);
+
     xml.writeTo (RackEngine::getSettingsDir().getChildFile ("midi-control.xml"));
 }
 
@@ -400,4 +492,16 @@ void MidiControl::load()
         m.action = Action::readFrom (*e);
         mappings.push_back (m);
     }
+
+    if (auto* sl = xml->getChildByName ("SNAPSHOTS"))
+    {
+        link.follow = sl->getBoolAttribute ("follow");
+        link.input = sl->getStringAttribute ("input");
+        link.channel = juce::jlimit (0, 16, sl->getIntAttribute ("channel", 0));
+        link.firstSnapshot = sl->getIntAttribute ("first", 1);
+        link.send = sl->getBoolAttribute ("send");
+        link.output = sl->getStringAttribute ("output");
+        link.outChannel = juce::jlimit (1, 16, sl->getIntAttribute ("outChannel", 1));
+    }
+    openSnapshotOutput();
 }

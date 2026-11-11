@@ -28,7 +28,7 @@ class PluginViewCapture;
 //   client -> server
 //     {"t":"query", "q":"live=1&view=2:0"}   what the state should include
 //     {"t":"cmd", "cmd":"...", ...}          any /cmd command (an "id" is echoed in a reply)
-//     {"t":"get", "what":"library"|"shows"|"devices", "id":n}
+//     {"t":"get", "what":"library"|"shows"|"devices"|"snapshot", "number":n, "id":n}
 //     {"t":"ping"}                           (a connection quiet for 15 s is closed)
 class WebRemote : private juce::Thread
 {

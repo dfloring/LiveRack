@@ -6,7 +6,7 @@
 #include "PluginPicker.h"
 #include "ParameterInspector.h"
 #include "RoutingMatrix.h"
-#include "ScopeEditor.h"
+#include "SnapshotsPanel.h"
 #include "DevicesPanel.h"
 #include "GainReduction.h"
 #include <algorithm>
@@ -202,7 +202,7 @@ private:
 
     private:
         ToolWindow& tool;
-        juce::TextButton moveButton, closeButton { juce::String::fromUTF8 ("\u2039 Racks") };
+        juce::TextButton moveButton, closeButton { juce::String::fromUTF8 ("\xe2\x80\xb9" " Racks") };
     };
 
     class Window : public juce::DocumentWindow
@@ -435,7 +435,7 @@ MainComponent::MainComponent()
     devicesButton.setLabel ("Devices");
     routingButton.setLabel ("Routing");
     scanButton.setLabel ("Plugins");
-    scopeButton.setLabel ("Scope");
+    scopeButton.setLabel ("Snapshots");
     addRackButton.setLabel ("Add Rack");
     rackViewButton.setLabel ("Rack");
     windowModeButton.setLabel ("Rack Window");
@@ -448,7 +448,21 @@ MainComponent::MainComponent()
     storeSceneButton.onClick = [this] { showStoreSceneDialog(); };
     addRackButton.onClick    = [this] { addRack(); };
     windowModeButton.onClick = [this] { setTwoWindowMode (! isTwoWindowMode()); };
-    rackViewButton.onClick   = [this] { setFullView (! isFullView()); };
+    rackViewButton.onClick   = [this]
+    {
+        // The views share the main window: Rack closes a setup screen showing there
+        if (! tools.empty())
+        {
+            const auto shown = tools;
+            for (auto* t : shown)
+                t->close();
+            setFullView (true);
+        }
+        else
+        {
+            setFullView (! isFullView());
+        }
+    };
     tapButton.onClick        = [this] { engine.tapTempo(); };
     prevSceneButton.onClick  = [this] { stepScene (-1); };
     nextSceneButton.onClick  = [this] { stepScene (1); };
@@ -717,8 +731,10 @@ void MainComponent::resized()
 
     group ({ { &saveButton, w (saveButton) }, { &loadButton, w (loadButton) } });
     group ({ { &prevSceneButton, 34 }, { nullptr, 168 }, { &nextSceneButton, 34 }, { &storeSceneButton, 64 } });
-    group ({ { &devicesButton, w (devicesButton) }, { &routingButton, w (routingButton) }, { &scanButton, w (scanButton) }, { &scopeButton, w (scopeButton) } });
-    group ({ { &addRackButton, w (addRackButton) }, { &rackViewButton, w (rackViewButton) }, { &windowModeButton, w (windowModeButton) }, { &stackRowsButton, w (stackRowsButton) } });
+    // Views: what the main window shows. Then the rack controls.
+    group ({ { &rackViewButton, w (rackViewButton) }, { &devicesButton, w (devicesButton) }, { &routingButton, w (routingButton) },
+             { &scanButton, w (scanButton) }, { &scopeButton, w (scopeButton) } });
+    group ({ { &addRackButton, w (addRackButton) }, { &windowModeButton, w (windowModeButton) }, { &stackRowsButton, w (stackRowsButton) } });
     group ({ { bpmDisplay.get(), 84 }, { &tapButton, 60 } }, true);
 
     statusBar->setBounds (area.removeFromBottom (30));
@@ -987,7 +1003,27 @@ void MainComponent::handleOsc (const juce::String& address, const juce::Array<ju
         performAction (make (Action::hotPlugin, -1, 0, p[2].getIntValue()), -1);
     else if (p[1] == "scene" && p.size() >= 3)
     {
-        if (p[2] == "recall") recallScene (argInt);
+        if (p[2] == "recall")
+        {
+            // A number, or a name (so a Companion button survives renumbering)
+            if (! args.isEmpty() && args[0].isString() && args[0].toString().trim().getIntValue() == 0
+                && ! args[0].toString().trim().startsWith ("0"))
+            {
+                const auto wanted = args[0].toString().trim();
+                const ShowSnapshot* found = nullptr;
+                for (auto& sn : engine.getSnapshots())
+                    if (sn.name.equalsIgnoreCase (wanted))
+                        found = &sn;
+                if (found != nullptr)
+                    recallScene (found->number);
+                else
+                    consoleNote = "OSC: no snapshot called \"" + wanted + "\"";
+            }
+            else
+            {
+                recallScene (args.isEmpty() ? 0 : args[0].toString().getIntValue());
+            }
+        }
         if (p[2] == "next")   stepScene (1);
         if (p[2] == "prev")   stepScene (-1);
         if (p[2] == "store")  storeScene (args.isEmpty() ? juce::jmax (0, currentScene) : argInt);
@@ -1017,6 +1053,13 @@ void MainComponent::sendFeedback()
     osc.send ("/liverack/racks", engine.getNumRacks());
     osc.send ("/liverack/selected", selectedRack + 1);
     osc.send ("/liverack/scene", currentScene);
+    if (auto* info = engine.getSnapshotInfo (currentScene))
+        osc.send ("/liverack/scene/name", info->name);
+    else
+        osc.send ("/liverack/scene/name", juce::String());
+    osc.send ("/liverack/scenes", (int) engine.getSnapshots().size());
+    for (auto& sn : engine.getSnapshots())
+        osc.send ("/liverack/scene/" + juce::String (sn.number) + "/name", sn.name);
     osc.send ("/liverack/bpm", engine.getBpm());
     osc.send ("/liverack/page", engine.getCurrentPage() + 1); // 0 = All
     osc.send ("/liverack/pages", (int) engine.getPages().size());
@@ -1696,7 +1739,7 @@ void MainComponent::setFullView (bool shouldBeFull)
 {
     fullView = shouldBeFull && ! isTwoWindowMode();
     dock.setFullView (fullView, ! isTwoWindowMode());
-    rackViewButton.setToggleState (fullView, juce::dontSendNotification);
+    rackViewButton.setToggleState (fullView && tools.empty(), juce::dontSendNotification);
     resized();
     repaint();
 }
@@ -1758,6 +1801,7 @@ void MainComponent::updateToolButtons()
     routingButton.setToggleState (front (routingWindow), juce::dontSendNotification);
     scopeButton.setToggleState (front (scopeWindow), juce::dontSendNotification);
     scanButton.setToggleState (front (pluginsWindow), juce::dontSendNotification);
+    rackViewButton.setToggleState (isFullView() && tools.empty(), juce::dontSendNotification);
 }
 
 // A toolbar button opens its screen, or goes back to the racks if it's already in front
@@ -1985,8 +2029,28 @@ void MainComponent::showScope()
     }
 
     juce::Component::SafePointer<MainComponent> safe (this);
-    scopeEditor = new ScopeEditor (engine, engine.getSnapshotInfo (currentScene) != nullptr ? currentScene : -1);
-    scopeWindow = std::make_unique<ToolWindow> (*this, "Snapshot Scope", scopeEditor, "scopeWindow", [safe]
+
+    SnapshotsPanel::Host h { engine, *midi,
+        [safe] { return safe != nullptr ? safe->currentScene : -1; },
+        [safe] (int n) { if (safe != nullptr) safe->recallScene (n); },
+        [safe] (int n, const juce::String& name, const SnapshotStoreFilter& filter) { if (safe != nullptr) safe->storeScene (n, name, filter); },
+        [safe] (const juce::String& t, const juce::String& m, const juce::String& ok, std::function<void()> onOk)
+        {
+            if (safe != nullptr) safe->confirm (t, m, ok, std::move (onOk));
+        },
+        [safe] (int n) -> juce::String
+        {
+            if (safe == nullptr) return {};
+            juce::StringArray parts;
+            for (auto& c : safe->consoles)
+                if (c->getSettings().type != ConsoleLink::Type::off && c->getSettings().recallScenes)
+                    parts.add (c->getSettings().name + " scene " + juce::String (n));
+            return parts.joinIntoString (", ");
+        },
+        [safe] (const juce::String& text) { if (safe != nullptr) { safe->consoleNote = text; safe->repaint(); } } };
+
+    scopeEditor = new SnapshotsPanel (std::move (h));
+    scopeWindow = std::make_unique<ToolWindow> (*this, "Snapshots", scopeEditor, "snapshotsWindow", [safe]
     {
         juce::MessageManager::callAsync ([safe]
         {
@@ -2300,7 +2364,7 @@ void MainComponent::showSnapshotMenu()
     const auto num = has ? " " + juce::String (currentScene) : juce::String();
     m.addItem (2, "Rename Snapshot" + num + "...", has);
     m.addItem (3, "Delete Snapshot" + num, has);
-    m.addItem (4, "Scope of Snapshot" + num + "...", has);
+    m.addItem (4, juce::String::fromUTF8 ("Snapshots" "\xe2\x80\xa6"));
 
     juce::Component::SafePointer<MainComponent> safe (this);
     m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (sceneChip)),
@@ -2309,7 +2373,7 @@ void MainComponent::showSnapshotMenu()
             if (safe == nullptr || r == 0) return;
             if (r >= 1000) { safe->recallScene (r - 1000); return; }
             if (r == 1) safe->showStoreSceneDialog();
-            if (r == 4) { safe->scopeWindow.reset(); safe->scopeEditor = nullptr; safe->showScope(); }
+            if (r == 4) { safe->showScope(); if (safe->scopeEditor != nullptr) safe->scopeEditor->select (safe->currentScene); }
             if (r == 3)
             {
                 const int number = safe->currentScene;
@@ -2522,13 +2586,14 @@ void MainComponent::finishStoreScene (int result)
     juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->sceneDialog.reset(); });
 }
 
-void MainComponent::storeScene (int scene, const juce::String& name)
+void MainComponent::storeScene (int scene, const juce::String& name, const SnapshotStoreFilter& filter)
 {
-    engine.storeSnapshot (scene, name);
+    engine.storeSnapshot (scene, name, filter);
     currentScene = scene;
     auto* info = engine.getSnapshotInfo (scene);
     consoleNote = "Stored snapshot " + juce::String (scene)
-                + (info != nullptr && info->name.isNotEmpty() ? " (" + info->name + ")" : juce::String());
+                + (info != nullptr && info->name.isNotEmpty() ? " (" + info->name + ")" : juce::String())
+                + (filter.everything ? juce::String() : ": " + juce::String ((int) filter.slotIds.size()) + " plugins updated");
     repaint();
 }
 
@@ -2571,6 +2636,7 @@ void MainComponent::recallScene (int scene)
                 + (info != nullptr && info->name.isNotEmpty() ? " (" + info->name + ")" : juce::String()) + " recalled";
     if (note.isNotEmpty())    consoleNote << ", " << note;
     if (missing.isNotEmpty()) consoleNote << ". " << missing;
+    midi->snapshotRecalled (scene);
     repaint();
 }
 
@@ -3056,6 +3122,9 @@ void MainComponent::addLiveState (juce::DynamicObject& r)
         auto sv = obj();
         sv.getDynamicObject()->setProperty ("number", sn.number);
         sv.getDynamicObject()->setProperty ("name", sn.name);
+        const auto stored = engine.getSnapshotStoredTime (sn.number);
+        sv.getDynamicObject()->setProperty ("stored", stored.toMilliseconds() > 0 ? stored.toISO8601 (true) : juce::String());
+        sv.getDynamicObject()->setProperty ("midi", midi->describeTriggerFor (sn.number));
         snaps.add (sv);
     }
     r.setProperty ("snapshots", snaps);
@@ -3096,6 +3165,24 @@ void MainComponent::addLiveState (juce::DynamicObject& r)
     so->setProperty ("restartAfterCrash", ServerMode::restartsAfterCrash());
     so->setProperty ("restartedAfterCrash", ServerMode::wasRestartedAfterCrash());
     r.setProperty ("server", server);
+
+    // Program changes and snapshots
+    const auto& link = midi->getSnapshotLink();
+    auto mv = obj();
+    auto* mo = mv.getDynamicObject();
+    mo->setProperty ("follow", link.follow);
+    mo->setProperty ("input", link.input);
+    mo->setProperty ("channel", link.channel);
+    mo->setProperty ("first", link.firstSnapshot);
+    mo->setProperty ("send", link.send);
+    mo->setProperty ("output", link.output);
+    mo->setProperty ("outChannel", link.outChannel);
+    juce::Array<juce::var> ins, outs;
+    for (auto& n : midi->getInputNames()) ins.add (n);
+    for (auto& n : MidiControl::getOutputNames()) outs.add (n);
+    mo->setProperty ("inputs", ins);
+    mo->setProperty ("outputs", outs);
+    r.setProperty ("midiSnapshots", mv);
 }
 
 // Device choices for each driver, so a server can be set up from a client
@@ -3208,6 +3295,51 @@ void MainComponent::addWebEditState (juce::DynamicObject& r, const juce::String&
     if (has ("devices"))
         r.setProperty ("devices", buildDeviceOptions());
 
+    // One snapshot in detail: what recalling it would change, and what it recalls
+    for (auto& part : juce::StringArray::fromTokens (query, "&", ""))
+        if (part.startsWith ("snapshot="))
+        {
+            const int number = part.fromFirstOccurrenceOf ("=", false, false).getIntValue();
+            auto sv = obj();
+            auto* o = sv.getDynamicObject();
+            o->setProperty ("number", number);
+            o->setProperty ("exists", engine.getSnapshotInfo (number) != nullptr);
+
+            juce::Array<juce::var> diffs;
+            for (auto& d : engine.differencesFromNow (number))
+            {
+                auto dv = obj();
+                dv.getDynamicObject()->setProperty ("rack", d.rack);
+                dv.getDynamicObject()->setProperty ("slot", d.slot);
+                dv.getDynamicObject()->setProperty ("settings", d.changedSettings);
+                dv.getDynamicObject()->setProperty ("bypass", d.bypassDiffers);
+                juce::Array<juce::var> details;
+                for (auto& t : d.details) details.add (t);
+                dv.getDynamicObject()->setProperty ("details", details);
+                diffs.add (dv);
+            }
+            o->setProperty ("differences", diffs);
+
+            const auto sc = engine.getScopeFor (number);
+            auto scv = obj();
+            scv.getDynamicObject()->setProperty ("pluginSettings", sc.pluginSettings);
+            scv.getDynamicObject()->setProperty ("pluginBypass", sc.pluginBypass);
+            scv.getDynamicObject()->setProperty ("rackBypass", sc.rackBypass);
+            scv.getDynamicObject()->setProperty ("bpm", sc.bpm);
+            o->setProperty ("scope", scv);
+
+            juce::Array<juce::var> inScope;   // per rack, per slot: 1 in, 0 out, -1 not stored
+            for (int ri = 0; ri < engine.getNumRacks(); ++ri)
+            {
+                juce::Array<juce::var> slots;
+                for (int si = 0; si < engine.getNumSlots (ri); ++si)
+                    slots.add (! engine.snapshotHasSlot (number, ri, si) ? -1 : engine.isSlotInScopeFor (number, ri, si) ? 1 : 0);
+                inScope.add (slots);
+            }
+            o->setProperty ("inScope", inScope);
+            r.setProperty ("snapshot", sv);
+        }
+
     if (has ("edit") || has ("shows"))
     {
         juce::Array<juce::var> drivers;
@@ -3279,7 +3411,58 @@ bool MainComponent::handleServerCommand (const juce::String& cmd, const juce::va
 
     if (cmd == "sceneStore")
     {
-        storeScene ((int) c["number"], c["name"].toString());
+        // Optionally only some plugins ("slots": [[rack, slot], ...]) and racks' bypass ("racks": [rack, ...])
+        SnapshotStoreFilter filter;
+        if (c.hasProperty ("slots") || c.hasProperty ("racks"))
+        {
+            filter.everything = false;
+            if (auto* list = c["slots"].getArray())
+                for (auto& pair : *list)
+                    if (engine.getPlugin ((int) pair[0], (int) pair[1]) != nullptr)
+                        filter.slotIds.push_back (engine.getSlotId ((int) pair[0], (int) pair[1]));
+            if (auto* list = c["racks"].getArray())
+                for (auto& rk : *list)
+                    if (juce::isPositiveAndBelow ((int) rk, engine.getNumRacks()))
+                        filter.rackIds.push_back (engine.getRackConfig ((int) rk).id);
+        }
+        storeScene ((int) c["number"], c["name"].toString(), filter);
+    }
+    else if (cmd == "sceneDuplicate")
+    {
+        const int from = (int) c["number"];
+        const int to = c.hasProperty ("to") ? (int) c["to"] : engine.nextFreeSnapshotNumber (from);
+        consoleNote = engine.duplicateSnapshot (from, to) ? "Duplicated snapshot " + juce::String (from) + " as " + juce::String (to)
+                                                          : "Couldn't duplicate: snapshot " + juce::String (to) + " exists";
+    }
+    else if (cmd == "sceneRenumber")
+    {
+        const int from = (int) c["number"], to = (int) c["to"];
+        consoleNote = engine.renumberSnapshot (from, to) ? "Snapshot " + juce::String (from) + " is now " + juce::String (to)
+                                                         : "Couldn't renumber: snapshot " + juce::String (to) + " exists";
+    }
+    else if (cmd == "sceneScope" && engine.getSnapshotInfo ((int) c["number"]) != nullptr)
+    {
+        const int number = (int) c["number"];
+        if (c.hasProperty ("rack") && c.hasProperty ("slot"))
+            engine.setSlotInScopeFor (number, rack, slot, (bool) c["in"]);
+        auto sc = engine.getScopeFor (number);
+        if (c.hasProperty ("pluginSettings")) sc.pluginSettings = (bool) c["pluginSettings"];
+        if (c.hasProperty ("pluginBypass"))   sc.pluginBypass = (bool) c["pluginBypass"];
+        if (c.hasProperty ("rackBypass"))     sc.rackBypass = (bool) c["rackBypass"];
+        if (c.hasProperty ("bpm"))            sc.bpm = (bool) c["bpm"];
+        engine.setScopeFor (number, sc);
+    }
+    else if (cmd == "midiSnapshots")
+    {
+        auto link = midi->getSnapshotLink();
+        if (c.hasProperty ("follow"))     link.follow = (bool) c["follow"];
+        if (c.hasProperty ("input"))      link.input = c["input"].toString();
+        if (c.hasProperty ("channel"))    link.channel = (int) c["channel"];
+        if (c.hasProperty ("first"))      link.firstSnapshot = (int) c["first"];
+        if (c.hasProperty ("send"))       link.send = (bool) c["send"];
+        if (c.hasProperty ("output"))     link.output = c["output"].toString();
+        if (c.hasProperty ("outChannel")) link.outChannel = (int) c["outChannel"];
+        midi->setSnapshotLink (link);
     }
     else if (cmd == "sceneRename")
     {

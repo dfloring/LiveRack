@@ -2,6 +2,7 @@
 #include "IsolatedPlugin.h"
 #include "PluginScanning.h"
 #include "AppSettings.h"
+#include "GainReduction.h"
 #include <atomic>
 #include <cmath>
 #include <thread>
@@ -2005,6 +2006,7 @@ std::unique_ptr<juce::XmlElement> RackEngine::captureSnapshotData() const
 {
     auto x = std::make_unique<juce::XmlElement> ("SNAPSHOT");
     x->setAttribute ("bpm", bpm.load());
+    x->setAttribute ("stored", juce::Time::getCurrentTime().toISO8601 (true));
     writeScope (*x->createNewChildElement ("SCOPE"), scope);
 
     for (int ri = 0; ri < (int) racks.size(); ++ri)
@@ -2029,6 +2031,13 @@ std::unique_ptr<juce::XmlElement> RackEngine::captureSnapshotData() const
             juce::MemoryBlock state;
             plugin->getStateInformation (state);
             sx->createNewChildElement ("STATE")->addTextElement (state.toBase64Encoding());
+
+            // Parameter values too, so "differs from now" can say what changed
+            juce::String values;
+            const auto& params = plugin->getParameters();
+            for (int i = 0; i < juce::jmin (params.size(), 4000); ++i)
+                values << i << '=' << juce::String (params[i]->getValue(), 5) << ' ';
+            sx->createNewChildElement ("PARAMS")->addTextElement (values.trimEnd());
         }
     }
 
@@ -2040,6 +2049,16 @@ const ShowSnapshot* RackEngine::getSnapshotInfo (int number) const
     for (auto& s : snapshots)
         if (s.number == number)
             return &s;
+    return nullptr;
+}
+
+static juce::XmlElement* findSnapshotSlot (juce::XmlElement& data, int rackId, int slotId)
+{
+    for (auto* rx : data.getChildWithTagNameIterator ("RACK"))
+        if (rx->getIntAttribute ("id") == rackId)
+            for (auto* sx : rx->getChildWithTagNameIterator ("SLOT"))
+                if (sx->getIntAttribute ("id") == slotId)
+                    return sx;
     return nullptr;
 }
 
@@ -2058,14 +2077,226 @@ static void putSnapshot (std::vector<ShowSnapshot>& list, ShowSnapshot snap)
     list.insert (at, std::move (snap));
 }
 
-void RackEngine::storeSnapshot (int number, const juce::String& name)
+void RackEngine::storeSnapshot (int number, const juce::String& name, const SnapshotStoreFilter& filter)
 {
+    number = juce::jmax (0, number);
+    auto fresh = std::shared_ptr<juce::XmlElement> (captureSnapshotData().release());
+    auto* existing = getSnapshotInfo (number);
+
     ShowSnapshot snap;
-    snap.number = juce::jmax (0, number);
-    snap.name = name.trim();
-    snap.data = std::shared_ptr<juce::XmlElement> (captureSnapshotData().release());
+    snap.number = number;
+    snap.name = name.trim().isNotEmpty() || existing == nullptr ? name.trim() : existing->name;
+
+    if (existing == nullptr || existing->data == nullptr)
+    {
+        snap.data = fresh;
+        putSnapshot (snapshots, std::move (snap));
+        sendChangeMessage();
+        return;
+    }
+
+    // Over an existing one: its scope stays; settings are updated where asked
+    auto data = std::make_shared<juce::XmlElement> (*existing->data);
+    auto wanted = [&filter] (const std::vector<int>& ids, int id)
+    {
+        return filter.everything || std::find (ids.begin(), ids.end(), id) != ids.end();
+    };
+
+    if (filter.everything)
+        data->setAttribute ("bpm", fresh->getDoubleAttribute ("bpm"));
+    data->setAttribute ("stored", fresh->getStringAttribute ("stored"));
+
+    for (auto* fr : fresh->getChildWithTagNameIterator ("RACK"))
+    {
+        const int rackId = fr->getIntAttribute ("id");
+        juce::XmlElement* rx = nullptr;
+        for (auto* e : data->getChildWithTagNameIterator ("RACK"))
+            if (e->getIntAttribute ("id") == rackId)
+                rx = e;
+        if (rx == nullptr)
+        {
+            rx = data->createNewChildElement ("RACK");
+            rx->setAttribute ("id", rackId);
+            rx->setAttribute ("bypassed", fr->getBoolAttribute ("bypassed"));
+        }
+
+        if (wanted (filter.rackIds, rackId))
+            rx->setAttribute ("bypassed", fr->getBoolAttribute ("bypassed"));
+
+        for (auto* fs : fr->getChildWithTagNameIterator ("SLOT"))
+        {
+            const int slotId = fs->getIntAttribute ("id");
+            juce::XmlElement* sx = nullptr;
+            for (auto* e : rx->getChildWithTagNameIterator ("SLOT"))
+                if (e->getIntAttribute ("id") == slotId)
+                    sx = e;
+
+            if (sx != nullptr && ! wanted (filter.slotIds, slotId))
+                continue;
+
+            auto copy = std::make_unique<juce::XmlElement> (*fs);
+            if (sx != nullptr)
+            {
+                copy->setAttribute ("inScope", sx->getBoolAttribute ("inScope", true)); // what it recalls stays
+                rx->replaceChildElement (sx, copy.release());
+            }
+            else
+            {
+                rx->addChildElement (copy.release()); // a plugin added since: stored as it is
+            }
+        }
+    }
+
+    snap.data = data;
     putSnapshot (snapshots, std::move (snap));
     sendChangeMessage();
+}
+
+bool RackEngine::duplicateSnapshot (int from, int to)
+{
+    auto* src = getSnapshotInfo (from);
+    if (src == nullptr || getSnapshotInfo (to) != nullptr || to < 0)
+        return false;
+
+    ShowSnapshot snap;
+    snap.number = to;
+    snap.name = src->name.isNotEmpty() ? src->name + " copy" : juce::String();
+    snap.data = src->data != nullptr ? std::make_shared<juce::XmlElement> (*src->data) : nullptr;
+    putSnapshot (snapshots, std::move (snap));
+    sendChangeMessage();
+    return true;
+}
+
+bool RackEngine::renumberSnapshot (int from, int to)
+{
+    if (from == to)
+        return true;
+    if (getSnapshotInfo (from) == nullptr || getSnapshotInfo (to) != nullptr || to < 0)
+        return false;
+
+    ShowSnapshot snap = *getSnapshotInfo (from);
+    snap.number = to;
+    deleteSnapshot (from);
+    putSnapshot (snapshots, std::move (snap));
+    sendChangeMessage();
+    return true;
+}
+
+int RackEngine::nextFreeSnapshotNumber (int after) const
+{
+    int n = juce::jmax (1, after + 1);
+    while (getSnapshotInfo (n) != nullptr)
+        ++n;
+    return n;
+}
+
+juce::Time RackEngine::getSnapshotStoredTime (int number) const
+{
+    auto* snap = getSnapshotInfo (number);
+    if (snap == nullptr || snap->data == nullptr || ! snap->data->hasAttribute ("stored"))
+        return {};
+    return juce::Time::fromISO8601 (snap->data->getStringAttribute ("stored"));
+}
+
+std::vector<SnapshotDifference> RackEngine::differencesFromNow (int number) const
+{
+    std::vector<SnapshotDifference> list;
+    auto* snap = getSnapshotInfo (number);
+    if (snap == nullptr || snap->data == nullptr)
+        return list;
+
+    const auto sc = getScopeFor (number);
+    using Cat = juce::AudioProcessorParameter::Category;
+
+    for (int ri = 0; ri < (int) racks.size(); ++ri)
+    {
+        auto& r = racks[(size_t) ri];
+        if (r->config.recallSafe)
+            continue;
+
+        const juce::XmlElement* rx = nullptr;
+        for (auto* e : snap->data->getChildWithTagNameIterator ("RACK"))
+            if (e->getIntAttribute ("id") == r->config.id)
+                rx = e;
+        if (rx == nullptr)
+            continue;
+
+        if (sc.rackBypass && rx->getBoolAttribute ("bypassed", false) != r->bypassed.load())
+        {
+            SnapshotDifference d;
+            d.rack = ri;
+            d.bypassDiffers = true;
+            d.details.add (rx->getBoolAttribute ("bypassed", false) ? "Rack bypassed in the snapshot, running now"
+                                                                    : "Rack running in the snapshot, bypassed now");
+            list.push_back (d);
+        }
+
+        for (int si = 0; si < (int) r->slots.size(); ++si)
+        {
+            auto* sx = findSnapshotSlot (*snap->data, r->config.id, getSlotId (ri, si));
+            if (sx == nullptr || ! sx->getBoolAttribute ("inScope", true))
+                continue;
+
+            auto& node = r->slots[(size_t) si];
+            auto* plugin = dynamic_cast<juce::AudioPluginInstance*> (node->getProcessor());
+            if (plugin == nullptr)
+                continue;
+
+            SnapshotDifference d;
+            d.rack = ri;
+            d.slot = si;
+
+            if (sc.pluginBypass && sx->getBoolAttribute ("bypassed", false) != node->isBypassed())
+            {
+                d.bypassDiffers = true;
+                d.details.add (sx->getBoolAttribute ("bypassed", false) ? "Bypassed in the snapshot, on now" : "On in the snapshot, bypassed now");
+            }
+
+            if (sc.pluginSettings)
+            {
+                if (auto* px = sx->getChildByName ("PARAMS"))
+                {
+                    const auto& params = plugin->getParameters();
+                    const int meterIndex = GainReduction::findMeterParameter (*plugin);
+                    for (auto& pair : juce::StringArray::fromTokens (px->getAllSubText(), " ", ""))
+                    {
+                        const int i = pair.upToFirstOccurrenceOf ("=", false, false).getIntValue();
+                        const float stored = pair.fromFirstOccurrenceOf ("=", false, false).getFloatValue();
+                        auto* param = params[i];
+                        if (param == nullptr || param == plugin->getBypassParameter())
+                            continue;
+                        const auto cat = param->getCategory();
+                        if ((cat != Cat::genericParameter && cat != Cat::inputGain && cat != Cat::outputGain)
+                            || i == meterIndex || ! param->isAutomatable())
+                            continue; // meters move on their own
+                        if (std::abs (param->getValue() - stored) < 1.0e-4f)
+                            continue;
+
+                        ++d.changedSettings;
+                        if (d.details.size() < 3)
+                            d.details.add (param->getName (40) + "  " + param->getText (stored, 24).trim() + juce::String::fromUTF8 (" " "\xe2\x86\x92" " ")
+                                           + param->getCurrentValueAsText().trim());
+                    }
+                }
+                else if (auto* st = sx->getChildByName ("STATE"))
+                {
+                    // Snapshots from before 0.17: compare the whole state
+                    juce::MemoryBlock now;
+                    plugin->getStateInformation (now);
+                    if (now.toBase64Encoding() != st->getAllSubText().trim())
+                    {
+                        d.changedSettings = -1;
+                        d.details.add ("Settings differ");
+                    }
+                }
+            }
+
+            if (d.changedSettings != 0 || d.bypassDiffers)
+                list.push_back (d);
+        }
+    }
+
+    return list;
 }
 
 bool RackEngine::recallSnapshot (int number, juce::String& note)
@@ -2144,15 +2375,6 @@ bool RackEngine::recallSnapshot (int number, juce::String& note)
     return true;
 }
 
-static juce::XmlElement* findSnapshotSlot (juce::XmlElement& data, int rackId, int slotId)
-{
-    for (auto* rx : data.getChildWithTagNameIterator ("RACK"))
-        if (rx->getIntAttribute ("id") == rackId)
-            for (auto* sx : rx->getChildWithTagNameIterator ("SLOT"))
-                if (sx->getIntAttribute ("id") == slotId)
-                    return sx;
-    return nullptr;
-}
 
 SnapshotScope RackEngine::getScopeFor (int snapshot) const
 {

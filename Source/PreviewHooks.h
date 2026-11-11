@@ -70,6 +70,77 @@ struct PreviewHooks
                                   m.select (0, 1); m.stepRack (-1);
                                   std::cerr << "STEP wrap " << m.selectedRack << " (expect " << m.engine.getNumRacks() - 1 << ")" << std::endl; m.stepRack (1); }
         if (open == "plugins")  m.showPluginScanner();
+        if (open == "snapshots" || open == "snapshotspick")
+            juce::Timer::callAfterDelay (600, [&m, open]
+            {
+                auto& e = m.engine;
+                m.storeScene (1, "Walk-in");
+                e.getPlugin (0, 1)->getParameters()[0]->setValueNotifyingHost (0.3f);
+                m.storeScene (2, "Worship Set");
+                m.storeScene (3, "Message");
+                m.storeScene (10, "Baptism");
+                e.setSlotInScopeFor (3, 1, 0, false);
+                e.setSlotInScopeFor (3, 2, 0, false);
+                m.recallScene (2);
+                // Change things after storing: 2 now differs
+                e.getPlugin (0, 1)->getParameters()[0]->setValueNotifyingHost (0.62f);
+                e.getPlugin (0, 1)->getParameters()[1]->setValueNotifyingHost (0.4f);
+                e.setSlotBypassed (2, 1, true);
+                e.setRackBypassed (3, true);
+                m.showScope();
+                auto d = e.differencesFromNow (2);
+                std::cerr << "SNAP differences for 2: " << d.size() << std::endl;
+                for (auto& x : d)
+                    std::cerr << "SNAP  rack " << x.rack << " slot " << x.slot << " settings " << x.changedSettings << " bypass " << x.bypassDiffers
+                              << " : " << x.details.joinIntoString (" | ") << std::endl;
+                // Program changes recall snapshots
+                {
+                    MidiControl::SnapshotLink link;
+                    link.follow = true;
+                    link.channel = 1;
+                    link.firstSnapshot = 1;
+                    m.midi->setSnapshotLink (link);
+                    m.midi->handle ({ "Test device", juce::MidiMessage::programChange (1, 2) });  // program 3
+                    std::cerr << "SNAP program 3 ch1 -> current " << m.currentScene << " (expect 3)" << std::endl;
+                    m.midi->handle ({ "Test device", juce::MidiMessage::programChange (2, 0) });  // other channel: ignored
+                    std::cerr << "SNAP program 1 ch2 ignored -> current " << m.currentScene << " (expect 3)" << std::endl;
+                    link.firstSnapshot = 0; // a device that counts from 0
+                    m.midi->setSnapshotLink (link);
+                    m.midi->handle ({ "Test device", juce::MidiMessage::programChange (1, 10) });
+                    std::cerr << "SNAP first=0, program 11 -> current " << m.currentScene << " (expect 10)" << std::endl;
+                    std::cerr << "SNAP trigger text for 10: '" << m.midi->describeTriggerFor (10) << "'" << std::endl;
+                    link.firstSnapshot = 1;
+                    link.send = true;
+                    link.output = "Nothing plugged in";
+                    m.midi->setSnapshotLink (link);
+                    m.recallScene (2); // no output: nothing sent, no crash
+                    link.follow = false; link.send = false;
+                    m.midi->setSnapshotLink (link);
+                    m.recallScene (2);
+                }
+                if (open == "snapshotspick")
+                    juce::Timer::callAfterDelay (300, [&m]
+                    {
+                        auto& e = m.engine;
+                        // store only the ticked: untick the Snare bypass, keep the comp change
+                        SnapshotStoreFilter f;
+                        f.everything = false;
+                        f.slotIds.push_back (e.getSlotId (0, 1));
+                        m.storeScene (2, {}, f);
+                        auto d = e.differencesFromNow (2);
+                        std::cerr << "SNAP after storing only Lead Vox comp: " << d.size() << " differences left (expect 2: snare bypass, drum bus rack bypass)" << std::endl;
+                        for (auto& x : d)
+                            std::cerr << "SNAP  left rack " << x.rack << " slot " << x.slot << " : " << x.details.joinIntoString (" | ") << std::endl;
+                        std::cerr << "SNAP scope kept: 3 has kick out " << ! e.isSlotInScopeFor (3, 1, 0) << std::endl;
+                        m.storeScene (3, {}, {});
+                        std::cerr << "SNAP after store over 3: kick still out " << ! e.isSlotInScopeFor (3, 1, 0) << std::endl;
+                        std::cerr << "SNAP duplicate 3 -> " << e.nextFreeSnapshotNumber (3) << " ok " << e.duplicateSnapshot (3, e.nextFreeSnapshotNumber (3))
+                                  << ", renumber 10 -> 3 refused " << ! e.renumberSnapshot (10, 3) << ", 10 -> 12 ok " << e.renumberSnapshot (10, 12) << std::endl;
+                        juce::String names;
+                        for (auto& sn : e.getSnapshots()) names << sn.number << ":" << sn.name << " ";
+                        std::cerr << "SNAP list " << names << std::endl;
+                    });
+            });
         if (open == "devpop")   { m.showDevices(); m.devicesWindow->setPoppedOut (true); }
         if (open == "toolclose") { m.showDevices(); juce::Timer::callAfterDelay (2000, [&m] { m.devicesWindow->close(); }); }
         if (open == "toolstack") { m.showDevices(); m.showScope(); m.scopeWindow->close(); }

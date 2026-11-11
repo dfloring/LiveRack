@@ -65,6 +65,7 @@ namespace Theme
         else if (name == "scope")   { svg ("M3 9.5l4 4 8-9"); p.addRoundedRectangle (1.5f, 1.5f, 15.0f, 15.0f, 3.0f); }
         else if (name == "addrack") { p.addRoundedRectangle (2.0f, 2.0f, 6.0f, 14.0f, 1.5f); svg ("M13 5v8M9 9h8"); }
         else if (name == "windows") { p.addRoundedRectangle (1.5f, 3.0f, 8.0f, 12.0f, 1.5f); p.addRoundedRectangle (11.0f, 3.0f, 5.5f, 12.0f, 1.5f); }
+        else if (name == "snapshots") { p.addRoundedRectangle (1.5f, 3.0f, 11.0f, 8.0f, 1.5f); svg ("M5 14.5h11V6.5"); }
         else if (name == "rack")    { p.addRoundedRectangle (1.5f, 2.0f, 15.0f, 14.0f, 1.5f); svg ("M1.5 6h15M4.5 9.5h9M4.5 12.5h6"); }
         else if (name == "stack")   { p.addRoundedRectangle (2.0f, 2.0f, 14.0f, 6.0f, 1.5f); p.addRoundedRectangle (2.0f, 10.0f, 14.0f, 6.0f, 1.5f); }
         return p;

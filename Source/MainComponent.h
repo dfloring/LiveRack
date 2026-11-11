@@ -15,7 +15,7 @@
 #include "WebRemote.h"
 
 class RoutingMatrix;
-class ScopeEditor;
+class SnapshotsPanel;
 class DevicesPanel;
 
 class MainComponent : public juce::Component,
@@ -125,7 +125,7 @@ private:
     juce::String snapshotLabel (int number) const;
     void confirm (const juce::String& title, const juce::String& message,
                   const juce::String& okText, std::function<void()> onOk);
-    void storeScene (int scene, const juce::String& name = {});
+    void storeScene (int scene, const juce::String& name = {}, const SnapshotStoreFilter& = {});
     void showSnapshotMenu();
     void recallScene (int scene);
     void stepScene (int direction);
@@ -195,7 +195,7 @@ private:
                       devicesButton   { "Devices", "devices", "Audio drivers, consoles and controllers" },
                       routingButton   { "Routing", "routing", "Patch rack inputs and outputs" },
                       scanButton      { "Plugins", "plugins", "Plugin library and scanning" },
-                      scopeButton     { "Scope", "scope", "What snapshots recall" },
+                      scopeButton     { "Snapshots", "snapshots", "Snapshots: recall, store and what each one recalls" },
                       addRackButton   { "Add Rack", "addrack", "Add a rack" },
                       rackViewButton  { "Rack", "rack", "The selected rack's plugins in the whole window (Esc goes back)" },
                       windowModeButton { "Two Windows", "windows", "Rack window: the plugin panel in its own window" },
@@ -242,7 +242,7 @@ private:
     void toggleTool (std::unique_ptr<ToolWindow>&, std::function<void()> open);
     ShortcutsEditor* shortcutsEditor = nullptr;
     RoutingMatrix* routingMatrix = nullptr;
-    ScopeEditor* scopeEditor = nullptr;
+    SnapshotsPanel* scopeEditor = nullptr;   // the Snapshots screen
     DevicesPanel* devicesPanel = nullptr;
 
     std::unique_ptr<juce::AlertWindow> rackDialog, sceneDialog;
