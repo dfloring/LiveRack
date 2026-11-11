@@ -27,7 +27,7 @@ Get the latest build from [Releases](../../releases): the Mac app (Apple silicon
 - **Mac:** unzip, then right-click `LiveRack.app` > **Open** the first time (it isn't notarised).
 - **Windows:** unzip and run `LiveRack.exe`. If Windows warns about an unknown publisher: **More info > Run anyway**. Pick your ASIO driver (Dante Virtual Soundcard, SoundGrid) in Devices > driver Settings.
 
-# User guide (v0.16)
+# User guide (v0.17)
 
 Any number of independent racks of VST3/AU plugins on one or more audio drivers at once (Dante Virtual Soundcard, a Dante interface, the Waves SoundGrid Driver). Everything lives in one **show file** (`.liverack`) with its snapshots inside it, and the open show comes back automatically on launch.
 
