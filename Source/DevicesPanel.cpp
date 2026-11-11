@@ -118,13 +118,20 @@ public:
         auto dspRow = area.removeFromTop (16);
         g.setColour (Theme::textDim);
         g.setFont (juce::FontOptions (11.5f));
-        g.drawText ("DSP", dspRow, juce::Justification::centredLeft);
-        g.drawText (juce::String ((int) std::ceil (s.cpu * 100.0)) + "%  (peak " + juce::String ((int) std::ceil (s.peakCpu * 100.0)) + "%)", dspRow, juce::Justification::centredRight);
+        g.drawText ("DSP  " + juce::String (s.threads) + (s.threads == 1 ? " core" : " cores"), dspRow, juce::Justification::centredLeft);
+        g.drawText (juce::String ((int) std::ceil (s.cpu * 100.0)) + "%  (longest block " + juce::String ((int) std::ceil (s.worstBlock * 100.0)) + "%)",
+                    dspRow, juce::Justification::centredRight);
+
+        // The bar shows the average; the tick shows the longest recent block,
+        // which is what decides a dropout (100% = the block took all its time)
         auto bar = area.removeFromTop (8).toFloat();
         g.setColour (Theme::raised);
         g.fillRoundedRectangle (bar, 4.0f);
-        g.setColour (s.peakCpu > 0.8 ? Theme::red : s.peakCpu > 0.6 ? Theme::amber : Theme::green);
+        const auto worst = juce::jlimit (0.0, 1.0, s.worstBlock);
+        const auto colour = worst > 0.8 ? Theme::red : worst > 0.6 ? Theme::amber : Theme::green;
+        g.setColour (colour);
         g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * (float) juce::jlimit (0.0, 1.0, s.cpu)), 4.0f);
+        g.fillRect (juce::Rectangle<float> (bar.getX() + bar.getWidth() * (float) worst - 1.5f, bar.getY() - 2.0f, 3.0f, bar.getHeight() + 4.0f));
 
         area.removeFromTop (12);
 
@@ -574,11 +581,16 @@ public:
                 m.addItem (-1, problem, false);
             m.addItem (2, "Restart LiveRack if it quits unexpectedly", true, ServerMode::restartsAfterCrash());
             m.addSeparator();
+            m.addItem (3, "Run racks on " + juce::String (RackEngine::getNumRackThreads()) + " CPU cores at once",
+                       RackEngine::getNumRackThreads() > 1, host.engine.isMultiCore());
+            m.addSeparator();
             m.addItem (-1, "Set the computer to log in automatically too", false);
 
             juce::Component::SafePointer<juce::Component> safe (this);
-            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safe] (int r)
+            auto* engine = &host.engine;
+            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safe, engine] (int r)
             {
+                if (r == 3) engine->setMultiCore (! engine->isMultiCore());
                 if (r == 1) ServerMode::setStartAtLogin (! ServerMode::startsAtLogin());
                 if (r == 2) ServerMode::setRestartAfterCrash (! ServerMode::restartsAfterCrash());
                 if (safe != nullptr) safe->repaint();

@@ -428,6 +428,61 @@ struct PreviewHooks
                 });
             });
 
+        if (open == "multicore")
+            juce::Timer::callAfterDelay (600, [&m]
+            {
+                auto& e = m.engine;
+                e.previewPrepare (48000.0, 128);
+                juce::AudioBuffer<float> in (16, 128), out (16, 128);
+                juce::Random rnd (1);
+                auto timeIt = [&] (bool multi)
+                {
+                    e.setMultiCore (multi);
+                    for (int i = 0; i < 200; ++i) e.previewProcess (in, out); // warm up
+                    double worst = 0, total = 0;
+                    for (int i = 0; i < 2000; ++i)
+                    {
+                        for (int c = 0; c < 16; ++c)
+                            for (int k = 0; k < 128; ++k)
+                                in.setSample (c, k, rnd.nextFloat() * 0.5f - 0.25f);
+                        const auto t0 = juce::Time::getMillisecondCounterHiRes();
+                        e.previewProcess (in, out);
+                        const auto dt = juce::Time::getMillisecondCounterHiRes() - t0;
+                        worst = juce::jmax (worst, dt); total += dt;
+                    }
+                    std::cerr << "MULTICORE " << (multi ? "on " : "off") << " threads " << e.getDriverStatus (0).threads
+                              << " avg " << total / 2000.0 * 1000.0 << " us, worst " << worst * 1000.0 << " us, out rms " << out.getRMSLevel (0, 0, 128) << std::endl;
+                };
+                // Each block is checked: same output with and without the rack threads
+                {
+                    juce::AudioBuffer<float> a (16, 128), b (16, 128), x (16, 128);
+                    juce::Random r2 (7);
+                    for (int c = 0; c < 16; ++c) for (int k = 0; k < 128; ++k) x.setSample (c, k, r2.nextFloat() * 0.5f - 0.25f);
+                    float maxDiff = 0;
+                    for (int i = 0; i < 50; ++i)
+                    {
+                        // Two identical engines aren't available, so compare a block against itself after
+                        // the delay lines settle: the same input repeated gives the same steady output
+                        e.setMultiCore (i % 2 == 0);
+                        e.previewProcess (x, i % 2 == 0 ? a : b);
+                        if (i > 40 && i % 2 == 1)
+                            for (int c = 0; c < 16; ++c)
+                                for (int k = 0; k < 128; ++k)
+                                    maxDiff = juce::jmax (maxDiff, std::abs (a.getSample (c, k) - b.getSample (c, k)));
+                    }
+                    std::cerr << "MULTICORE output on vs off (repeated input) max diff " << maxDiff << " rms " << a.getRMSLevel (6, 0, 128) << std::endl;
+                }
+                std::cerr << "MULTICORE racks " << e.getNumRacks() << " cores " << juce::SystemStats::getNumPhysicalCpus() << std::endl;
+                timeIt (false); timeIt (true); timeIt (false); timeIt (true);
+                e.updateDriverStats();
+                for (int r = 0; r < e.getNumRacks(); ++r)
+                {
+                    auto l = e.getRackLoad (r);
+                    std::cerr << "MULTICORE rack " << e.getRackConfig (r).name << " load now " << l.now * 100.0f << "% peak " << l.peak * 100.0f << "%" << std::endl;
+                }
+                e.setMultiCore (true);
+            });
+
         if (open == "selftest")
             juce::Timer::callAfterDelay (600, [&m] { selfTest (m); });
         if (open == "selftest2")

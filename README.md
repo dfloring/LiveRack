@@ -56,11 +56,13 @@ App: `build/LiveRack_artefacts/Release/LiveRack.app`
   - The line under the badges (e.g. `1 → 1`) shows routing; click it to open **Routing** for that rack.
 - **User Keys** (bottom): 8 assignable buttons, lit when what they control is on. Right-click to **Assign** (bypass a rack or plugin, select a rack, open a plugin, Hot Plugin 1–12, recall / next / previous / store scene, show a page, tap tempo, two windows, Full View), **Set keyboard shortcut** or **MIDI Learn**.
 - **Keyboard shortcuts:** F1–F8 press the User Keys and T taps tempo by default. Change any of them, or add shortcuts for other actions, in Devices > Controllers > **Keyboard shortcuts**. LiveRack warns when keys are already used and refuses ones macOS needs (Cmd+Q, Cmd+W...). Shortcuts work while a LiveRack window is in front.
-- **Status bar:** one chip per audio driver (rate, buffer, DSP with 10 s peak, dropouts with the time of the last one), then consoles and the OSC remote. Click it to open Devices.
+- **Status bar:** one chip per audio driver (rate, buffer, DSP and the longest block in the last 10 s, dropouts with the time of the last one), then consoles and the OSC remote. Click it to open Devices.
 
 ## Devices
 
 - **Audio drivers:** each driver is a panel with a status light, rate, buffer, channels, dropouts, DSP and the racks on it. **Settings** picks the device; **+ Add driver** adds another (up to 4). Each driver runs on its own audio thread, so a hiccup on one doesn't touch the other.
+- **DSP** shows the average load (the bar) and the **longest block** in the last 10 s (the tick). The longest block is what matters live: at 100% a block took all of its time, which is a dropout. Each rack strip shows its own share at the bottom right (its longest in the last few seconds; amber over 25%, red over 50%), so you can see which rack is heavy.
+- **Racks run on several CPU cores at once.** Racks don't depend on each other, so each block's racks are shared out between the audio thread and a helper thread per spare core (the DSP line shows how many). Light blocks stay on one core, where it's cheaper. No latency is added. It can be turned off in the Server mode card if a plugin misbehaves with it.
   - A rack runs entirely on one driver: its inputs and outputs are on the same driver. Patching a rack to another driver's channel in Routing moves it there.
   - Two drivers aren't clock-locked to each other inside the Mac. That's fine as long as each rack stays on one driver.
 - **Consoles:** one panel per console (+ Add console for more). Each shows its card slots: click a slot to say what's in it (Dante, Waves SoundGrid, stage box...) and which driver channels it arrives on. Routing uses this to label its channel blocks, e.g. "MY Slot 1". Live tiles show the last scene, the selected channel and its rack, and when the console last sent anything. **Settings** opens the connection settings (console type, IP, scene folder, X32 follow and Learn, and the log).
@@ -73,6 +75,7 @@ For a computer that only runs LiveRack, wherever it lives. In **Devices**, click
 
 - **Start LiveRack when this computer starts.** Also set the computer to log in automatically (Mac: System Settings > Users & Groups; Windows: `netplwiz`). On the Mac, LiveRack must be in the Applications folder first.
 - **Restart LiveRack if it quits unexpectedly.** A small hidden watcher runs alongside (on its own, so ending LiveRack in Task Manager doesn't take the watcher with it) and starts LiveRack again after a crash, with the show it had. Quitting normally doesn't restart it. After three restarts in five minutes it stops trying.
+- **Run racks on all CPU cores** (on by default): see Audio drivers above.
 - An audio driver that was set to a particular device now **waits for that device** instead of moving to the built-in audio. The status bar shows "waiting for ..." and the driver connects by itself when the device appears, e.g. when Dante Virtual Soundcard starts after LiveRack does.
 
 Control it from the iPad / web remote, OSC or Companion as usual.

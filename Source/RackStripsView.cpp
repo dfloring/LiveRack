@@ -368,7 +368,19 @@ public:
             latText = "group " + RackConfig::groupName (cfg.latencyGroup) + "  " + latText;
         g.setColour (cfg.latencyGroup > 0 ? Theme::groupColour (cfg.latencyGroup).withAlpha (0.9f) : juce::Colours::white.withAlpha (0.45f));
         g.setFont (juce::FontOptions (11.5f));
-        g.drawText (latText, l.latency, juce::Justification::centred);
+        auto latArea = l.latency;
+
+        // Processing time: the longest block in the last few seconds, as a share of the block
+        if (! bypassed)
+        {
+            const auto load = engine.getRackLoad (r).peak;
+            const auto pc = (int) std::ceil (load * 100.0f);
+            const auto loadArea = latArea.removeFromRight (30);
+            g.setColour (load > 0.5f ? Theme::red : load > 0.25f ? Theme::amber : juce::Colours::white.withAlpha (0.35f));
+            g.drawText (pc <= 1 ? juce::String ("<1%") : juce::String (pc) + "%", loadArea, juce::Justification::centredRight);
+            g.setColour (cfg.latencyGroup > 0 ? Theme::groupColour (cfg.latencyGroup).withAlpha (0.9f) : juce::Colours::white.withAlpha (0.45f));
+        }
+        g.drawFittedText (latText, latArea, juce::Justification::centred, 1, 0.85f);
 
         // Buttons
         paintButton (g, l.bypass, "BYPASS", bypassed, bypassOn);

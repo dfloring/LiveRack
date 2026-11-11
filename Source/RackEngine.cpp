@@ -1,8 +1,13 @@
 #include "RackEngine.h"
 #include "IsolatedPlugin.h"
 #include "PluginScanning.h"
+#include "AppSettings.h"
 #include <atomic>
 #include <cmath>
+#include <thread>
+#if JUCE_INTEL
+ #include <immintrin.h>
+#endif
 
 static void writeScope (juce::XmlElement&, const SnapshotScope&);
 static SnapshotScope scopeFromXml (const juce::XmlElement&);
@@ -103,6 +108,9 @@ struct RackEngine::Rack
     std::vector<Node::Ptr> taps;    // a LevelTap after each slot (same index)
     std::atomic<bool> bypassed { false };
     std::atomic<float> peaks[2][2] {}; // [input/output][channel]
+
+    // Processing time, as a share of the block (1 = the whole block)
+    std::atomic<float> loadNow { 0.0f }, loadPeak { 0.0f }; // peak: the longest since it was last read
     juce::AudioBuffer<float> buffer;
     juce::MidiBuffer midi;
 
@@ -226,6 +234,138 @@ struct RackEngine::Rack
 };
 
 //==============================================================================
+// Racks don't depend on each other, so each block's racks are shared out
+// between the audio thread and a few helper threads on other CPU cores. Any
+// thread takes the next rack nobody has started; the audio thread does its
+// share too, and then waits for racks still being worked on. A helper that is
+// slow to wake costs nothing: its racks are simply done by someone else.
+class RackWorkers
+{
+public:
+    using Job = void (*) (void* context, int index);
+
+    ~RackWorkers() { stop(); }
+
+    static int threadsForThisComputer()
+    {
+       #if LIVERACK_PREVIEW_HOOKS
+        if (const int n = juce::SystemStats::getEnvironmentVariable ("LIVERACK_TEST_THREADS", "0").getIntValue(); n > 0)
+            return n;
+       #endif
+        return juce::jlimit (0, 7, juce::SystemStats::getNumPhysicalCpus() - 1);
+    }
+
+    void start (int numThreads, double sampleRate, int blockSize, juce::AudioWorkgroup group)
+    {
+        stop();
+        workgroup = group;
+
+        for (int i = 0; i < numThreads; ++i)
+        {
+            auto t = std::make_unique<Worker> (*this, i);
+            const auto options = juce::Thread::RealtimeOptions()
+                                     .withPriority (9)
+                                     .withApproximateAudioProcessingTime (juce::jmax (16, blockSize), juce::jmax (8000.0, sampleRate));
+            if (! t->startRealtimeThread (options))
+                t->startThread (juce::Thread::Priority::highest);
+            threads.push_back (std::move (t));
+        }
+    }
+
+    void stop()
+    {
+        for (auto& t : threads)
+            t->signalThreadShouldExit();
+        for (auto& t : threads)
+        {
+            t->wake.signal();
+            t->stopThread (2000);
+        }
+        threads.clear();
+    }
+
+    int size() const { return (int) threads.size(); }
+
+    // Audio thread: runs job (context, i) for every i below count, and returns
+    // when they have all finished
+    void run (int count, Job job, void* context)
+    {
+        jobFn = job;
+        jobContext = context;
+        numJobs.store (count, std::memory_order_relaxed);
+        finished.store (0, std::memory_order_relaxed);
+        next.store (0, std::memory_order_release);
+
+        const int helpers = juce::jmin (count - 1, size());
+        for (int i = 0; i < helpers; ++i)
+            threads[(size_t) i]->wake.signal();
+
+        work();
+
+        while (finished.load (std::memory_order_acquire) < count)
+            spinPause();
+    }
+
+private:
+    struct Worker : public juce::Thread
+    {
+        Worker (RackWorkers& p, int i) : juce::Thread ("LiveRack racks " + juce::String (i + 1)), pool (p) {}
+
+        void run() override
+        {
+            juce::WorkgroupToken token;
+            if (pool.workgroup)
+                pool.workgroup.join (token); // Mac: run alongside the audio device's own thread
+
+            while (! threadShouldExit())
+            {
+                wake.wait (200);
+                if (! threadShouldExit())
+                    pool.work();
+            }
+        }
+
+        RackWorkers& pool;
+        juce::WaitableEvent wake;
+    };
+
+    void work()
+    {
+        for (;;)
+        {
+            const int i = next.fetch_add (1, std::memory_order_acq_rel);
+            if (i >= numJobs.load (std::memory_order_relaxed))
+                return;
+            jobFn (jobContext, i);
+            finished.fetch_add (1, std::memory_order_acq_rel);
+        }
+    }
+
+    static void spinPause()
+    {
+       #if JUCE_INTEL
+        _mm_pause();
+       #elif JUCE_ARM && (JUCE_MAC || JUCE_IOS || JUCE_LINUX)
+        __asm__ __volatile__ ("yield");
+       #else
+        std::this_thread::yield();
+       #endif
+    }
+
+    std::vector<std::unique_ptr<Worker>> threads;
+    juce::AudioWorkgroup workgroup;
+    Job jobFn = nullptr;
+    void* jobContext = nullptr;
+    std::atomic<int> numJobs { 0 }, next { 0 }, finished { 0 };
+};
+
+static void storeMax (std::atomic<float>& a, float v)
+{
+    auto old = a.load (std::memory_order_relaxed);
+    while (v > old && ! a.compare_exchange_weak (old, v, std::memory_order_relaxed)) {}
+}
+
+//==============================================================================
 struct RackEngine::Driver : public juce::AudioIODeviceCallback,
                             public juce::ChangeListener
 {
@@ -296,51 +436,40 @@ struct RackEngine::Driver : public juce::AudioIODeviceCallback,
                                            float* const* outputs, int numOutputs, int numSamples,
                                            const juce::AudioIODeviceCallbackContext&) override
     {
+        const auto startTicks = juce::Time::getHighResolutionTicks();
+
         for (int i = 0; i < numOutputs; ++i)
             if (outputs[i] != nullptr)
                 juce::FloatVectorOperations::clear (outputs[i], numSamples);
 
+        int racksDone = 0;
         {
             const juce::SpinLock::ScopedLockType lock (rackLock);
 
+            blockInputs = inputs;
+            blockNumInputs = numInputs;
+            blockNumSamples = numSamples;
+            blockTicks = (double) numSamples / juce::jmax (1.0, sampleRate) * (double) juce::Time::getHighResolutionTicksPerSecond();
+
+            const int count = (int) active.size();
+            racksDone = count;
+
+            // Waking other cores costs a little, so light blocks stay on this one
+            blockRackLoad.store (0.0f, std::memory_order_relaxed);
+
+            if (count > 1 && workers.size() > 0 && engine.multiCore.load() && lastRackLoad > 0.15f)
+                workers.run (count, [] (void* d, int i) { static_cast<Driver*> (d)->processRack (i); }, this);
+            else
+                for (int i = 0; i < count; ++i)
+                    processRack (i);
+
+            lastRackLoad = blockRackLoad.load (std::memory_order_relaxed);
+
+            // Add, so two racks returning to the same output are summed
             for (auto* rp : active)
             {
                 auto& r = *rp;
-                const int ch = r.config.numOutputs();
-                const int ins = r.config.numInputs();
-                r.buffer.setSize (ch, numSamples, false, false, true);
-
-                for (int c = ins; c < ch; ++c)
-                    r.buffer.clear (c, 0, numSamples);
-
-                for (int c = 0; c < ins; ++c)
-                {
-                    const int src = r.config.input[c];
-
-                    if (juce::isPositiveAndBelow (src, numInputs) && inputs[src] != nullptr)
-                        r.buffer.copyFrom (c, 0, inputs[src], numSamples);
-                    else
-                        r.buffer.clear (c, 0, numSamples);
-
-                    storePeak (r.peaks[0][c], r.buffer.getMagnitude (c, 0, numSamples));
-                }
-
-                if (! r.bypassed.load())
-                {
-                    r.midi.clear();
-                    r.graph.processBlock (r.buffer, r.midi);
-                    r.applyDelay (numSamples, r.padSamples.load());
-                }
-                else
-                {
-                    r.applyDelay (numSamples, r.bypassDelay.load());
-                }
-
-                for (int c = 0; c < ch; ++c)
-                    storePeak (r.peaks[1][c], r.buffer.getMagnitude (c, 0, numSamples));
-
-                // Add, so two racks returning to the same output are summed
-                for (int c = 0; c < ch; ++c)
+                for (int c = 0; c < r.config.numOutputs(); ++c)
                 {
                     const int dst = r.config.output[c];
 
@@ -351,6 +480,68 @@ struct RackEngine::Driver : public juce::AudioIODeviceCallback,
         }
 
         samplePos += numSamples;
+
+        if (racksDone > 0 && blockTicks > 0.0)
+            storeMax (worstBlock, (float) ((double) (juce::Time::getHighResolutionTicks() - startTicks) / blockTicks));
+    }
+
+    // One rack's block (any of the rack threads)
+    void processRack (int index)
+    {
+        auto& r = *active[(size_t) index];
+        const auto startTicks = juce::Time::getHighResolutionTicks();
+        const int numSamples = blockNumSamples;
+        const int ch = r.config.numOutputs();
+        const int ins = r.config.numInputs();
+        r.buffer.setSize (ch, numSamples, false, false, true);
+
+        for (int c = ins; c < ch; ++c)
+            r.buffer.clear (c, 0, numSamples);
+
+        for (int c = 0; c < ins; ++c)
+        {
+            const int src = r.config.input[c];
+
+            if (juce::isPositiveAndBelow (src, blockNumInputs) && blockInputs[src] != nullptr)
+                r.buffer.copyFrom (c, 0, blockInputs[src], numSamples);
+            else
+                r.buffer.clear (c, 0, numSamples);
+
+            storePeak (r.peaks[0][c], r.buffer.getMagnitude (c, 0, numSamples));
+        }
+
+        if (! r.bypassed.load())
+        {
+            r.midi.clear();
+            r.graph.processBlock (r.buffer, r.midi);
+            r.applyDelay (numSamples, r.padSamples.load());
+        }
+        else
+        {
+            r.applyDelay (numSamples, r.bypassDelay.load());
+        }
+
+       #if LIVERACK_PREVIEW_HOOKS
+        // Tests: pretend each rack has heavy plugins
+        if (static const int us = juce::SystemStats::getEnvironmentVariable ("LIVERACK_TEST_RACK_WORK", "0").getIntValue(); us > 0)
+        {
+            const auto until = juce::Time::getMillisecondCounterHiRes() + us / 1000.0;
+            while (juce::Time::getMillisecondCounterHiRes() < until) {}
+        }
+       #endif
+
+        for (int c = 0; c < ch; ++c)
+            storePeak (r.peaks[1][c], r.buffer.getMagnitude (c, 0, numSamples));
+
+        if (blockTicks > 0.0)
+        {
+            const auto load = (float) ((double) (juce::Time::getHighResolutionTicks() - startTicks) / blockTicks);
+            r.loadNow.store (load, std::memory_order_relaxed);
+            storeMax (r.loadPeak, load);
+
+            auto total = blockRackLoad.load (std::memory_order_relaxed);
+            while (! blockRackLoad.compare_exchange_weak (total, total + load, std::memory_order_relaxed)) {}
+        }
     }
 
     void audioDeviceAboutToStart (juce::AudioIODevice* device) override
@@ -358,6 +549,9 @@ struct RackEngine::Driver : public juce::AudioIODeviceCallback,
         sampleRate = device->getCurrentSampleRate();
         blockSize  = device->getCurrentBufferSizeSamples();
         samplePos = 0;
+
+        // Rack threads, set up for this device's block timing
+        workers.start (RackWorkers::threadsForThisComputer(), sampleRate, blockSize, device->getWorkgroup());
 
         const juce::SpinLock::ScopedLockType lock (rackLock);
 
@@ -369,12 +563,16 @@ struct RackEngine::Driver : public juce::AudioIODeviceCallback,
 
     void audioDeviceStopped() override
     {
-        const juce::SpinLock::ScopedLockType lock (rackLock);
+        {
+            const juce::SpinLock::ScopedLockType lock (rackLock);
 
-        for (auto* r : active)
-            r->graph.releaseResources();
+            for (auto* r : active)
+                r->graph.releaseResources();
 
-        running = false;
+            running = false;
+        }
+
+        workers.stop();
     }
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override
@@ -394,10 +592,19 @@ struct RackEngine::Driver : public juce::AudioIODeviceCallback,
     std::atomic<juce::int64> samplePos { 0 };
     TempoPlayHead playHead { engine.bpm, samplePos, sampleRate };
 
+    // Rack threads, and what they need for the current block
+    RackWorkers workers;
+    const float* const* blockInputs = nullptr;
+    int blockNumInputs = 0, blockNumSamples = 0;
+    double blockTicks = 0.0;
+    std::atomic<float> blockRackLoad { 0.0f }; // all racks' time this block (1 = a whole block's worth)
+    float lastRackLoad = 1.0f;
+    std::atomic<float> worstBlock { 0.0f };  // longest block since last read (1 = the whole block)
+
     // Stats (message thread)
     int lastXRuns = -1, dropouts = 0;
     juce::Time lastDropout;
-    double peakCpu = 0.0;
+    double peakCpu = 0.0, heldWorst = 0.0;
     juce::uint32 peakResetMs = 0;
 };
 
@@ -427,6 +634,8 @@ static bool isMonoToStereoVersion (const juce::String& pluginName)
 //==============================================================================
 RackEngine::RackEngine()
 {
+    multiCore = AppSettings::get ("multiCore") != "0";
+
     formatManager.addDefaultFormats(); // VST3 + AudioUnit
     knownPlugins.setCustomScanner (std::make_unique<PluginScanning::OutOfProcessScanner>());
 
@@ -560,6 +769,8 @@ DriverStatus RackEngine::getDriverStatus (int index) const
         s.ioLatency = dev->getInputLatencyInSamples() + dev->getOutputLatencyInSamples();
         s.cpu = dm.getCpuUsage();
         s.peakCpu = d.peakCpu;
+        s.worstBlock = d.heldWorst;
+        s.threads = multiCore.load() ? d.workers.size() + 1 : 1;
         s.dropouts = dev->getXRunCount() >= 0 ? d.dropouts : -1;
         s.lastDropout = d.lastDropout;
     }
@@ -585,8 +796,10 @@ void RackEngine::updateDriverStats()
         auto& d = *dp;
         const double cpu = d.deviceManager.getCpuUsage();
 
-        if (now - d.peakResetMs > 10000) { d.peakCpu = cpu; d.peakResetMs = now; }
-        else                             { d.peakCpu = juce::jmax (d.peakCpu, cpu); }
+        const double worst = d.worstBlock.exchange (0.0f);
+
+        if (now - d.peakResetMs > 10000) { d.peakCpu = cpu; d.heldWorst = worst; d.peakResetMs = now; }
+        else                             { d.peakCpu = juce::jmax (d.peakCpu, cpu); d.heldWorst = juce::jmax (d.heldWorst, worst); }
 
         if (auto* dev = d.deviceManager.getCurrentAudioDevice())
         {
@@ -738,6 +951,8 @@ void RackEngine::previewPrepare (double sr, int bs)
         d->sampleRate = sr;
         d->blockSize = bs;
         d->running = true;
+        if (d->workers.size() == 0)
+            d->workers.start (RackWorkers::threadsForThisComputer(), sr, bs, {});
     }
 
     for (auto& r : racks)
@@ -2243,4 +2458,29 @@ bool RackEngine::restoreSession (juce::String& error)
 
     error = "Couldn't read the last session file.";
     return false;
+}
+
+//==============================================================================
+void RackEngine::setMultiCore (bool shouldUse)
+{
+    multiCore = shouldUse;
+    AppSettings::set ("multiCore", shouldUse ? "1" : "0");
+}
+
+int RackEngine::getNumRackThreads() { return RackWorkers::threadsForThisComputer() + 1; }
+
+RackEngine::RackLoad RackEngine::getRackLoad (int rack)
+{
+    RackLoad l;
+    if (auto* r = getRack (rack))
+    {
+        l.now = r->loadNow.load();
+        const float peak = r->loadPeak.exchange (0.0f);
+        auto& held = rackLoadHolds[r];
+        const auto now = juce::Time::getMillisecondCounter();
+        if (now - held.second > 5000 || peak > held.first)
+            held = { peak, now };
+        l.peak = held.first;
+    }
+    return l;
 }

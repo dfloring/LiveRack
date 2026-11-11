@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
+#include <map>
 
 // One insert rack: mono or stereo, fed from channels of one audio driver and
 // returned to channels of the same driver. Channel numbers are 0-based
@@ -65,6 +66,8 @@ struct DriverStatus
     double sampleRate = 0;
     int bufferSize = 0, numIns = 0, numOuts = 0, ioLatency = 0;
     double cpu = 0, peakCpu = 0;
+    double worstBlock = 0;       // the longest block in the last ~10 s (1 = took the whole block: a dropout)
+    int threads = 1;             // CPU cores the racks run on
     int dropouts = 0;            // since launch (-1 = the driver can't report them)
     juce::Time lastDropout;
     int numRacks = 0;
@@ -90,6 +93,16 @@ public:
     DriverStatus getDriverStatus (int driver) const;
     juce::String getDriverLabel (int driver) const; // short: device name or "Driver 2"
     void updateDriverStats();
+
+    // Racks run on several CPU cores at once (on by default)
+    void setMultiCore (bool);
+    bool isMultiCore() const { return multiCore.load(); }
+    static int getNumRackThreads();
+
+    // How long a rack takes, as a share of the block: now, and the longest in
+    // the last few seconds (message thread)
+    struct RackLoad { float now = 0.0f, peak = 0.0f; };
+    RackLoad getRackLoad (int rack);
     juce::String getDriverWaitingFor (int driver) const; // device name while it isn't available, or empty         // call regularly from the UI (tracks peaks and dropouts)
 
     juce::AudioPluginFormatManager& getFormatManager()  { return formatManager; }
@@ -268,6 +281,8 @@ private:
     int currentPage = -1;
     std::vector<int> hotPlugins;
     std::atomic<double> bpm { 120.0 };
+    std::atomic<bool> multiCore { true };
+    std::map<const Rack*, std::pair<float, juce::uint32>> rackLoadHolds;
     juce::Array<double> tapTimes;
 
    #if LIVERACK_PREVIEW_HOOKS

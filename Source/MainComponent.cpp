@@ -354,7 +354,7 @@ public:
             const bool recentDrop = s.dropouts > 0 && juce::Time::getCurrentTime() - s.lastDropout < juce::RelativeTime::minutes (5);
             juce::String rest;
             rest << juce::String (s.sampleRate / 1000.0, 1) << " kHz  " << s.bufferSize << " smp  DSP "
-                 << juce::String ((int) std::ceil (s.cpu * 100.0)) << "% (pk " << juce::String ((int) std::ceil (s.peakCpu * 100.0)) << "%)";
+                 << juce::String ((int) std::ceil (s.cpu * 100.0)) << "%, longest block " << juce::String ((int) std::ceil (s.worstBlock * 100.0)) << "%";
             if (s.dropouts >= 0)
             {
                 rest << "  " << s.dropouts << (s.dropouts == 1 ? " drop" : " drops");
