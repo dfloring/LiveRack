@@ -1,4 +1,5 @@
 #include "ConsoleLink.h"
+#include "SocketUtil.h"
 
 //==============================================================================
 // Yamaha RCP: plain text lines over TCP 49280. Runs on its own thread and
@@ -24,6 +25,7 @@ public:
                 continue;
             }
 
+            SocketUtil::keepInThisProcess (socket);
             owner.post ("#connected");
             send (socket, "sscurrent_ex " + sceneList); // ask for the current scene
             auto lastSend = juce::Time::getMillisecondCounter();
@@ -152,6 +154,8 @@ void ConsoleLink::start()
             oscSocket.reset();
             return;
         }
+
+        SocketUtil::keepInThisProcess (*oscSocket);
 
         oscReceiver.addListener (this);
         oscReceiver.connectToSocket (*oscSocket);

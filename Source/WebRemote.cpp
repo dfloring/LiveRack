@@ -1,4 +1,5 @@
 #include "WebRemote.h"
+#include "SocketUtil.h"
 #include "RackEngine.h"
 #include "PluginViewCapture.h"
 #include "BinaryData.h"
@@ -284,22 +285,16 @@ void WebRemote::setEnabled (bool shouldBeEnabled, int newPort)
     if (! socket->createListener (port))
         return;
 
+    SocketUtil::keepInThisProcess (*socket);
     listener = std::move (socket);
     startThread();
 }
 
 juce::String WebRemote::getUrl() const
 {
-    juce::String ip = "127.0.0.1";
-    for (auto& a : juce::IPAddress::getAllAddresses (false))
-    {
-        const auto s = a.toString();
-        if (! a.isNull() && s != "127.0.0.1" && ! s.startsWith ("169.254."))
-        {
-            ip = s;
-            break;
-        }
-    }
+    auto ip = SocketUtil::getLanAddress();
+    if (ip.isEmpty())
+        ip = "127.0.0.1";
     return "http://" + ip + ":" + juce::String (port);
 }
 
@@ -331,6 +326,7 @@ void WebRemote::run()
         if (client == nullptr || threadShouldExit())
             continue;
 
+        SocketUtil::keepInThisProcess (*client);
         auto* raw = client.release();
         pool.addJob ([this, raw] { handle (std::unique_ptr<juce::StreamingSocket> (raw)); });
     }

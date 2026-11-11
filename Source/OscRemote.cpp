@@ -1,4 +1,5 @@
 #include "OscRemote.h"
+#include "SocketUtil.h"
 #include "RackEngine.h"
 
 namespace
@@ -70,6 +71,7 @@ void OscRemote::setEnabled (bool shouldBeEnabled, int newPort)
         return;
     }
 
+    SocketUtil::keepInThisProcess (*socket);
     sender.connectToSocket (*socket, "127.0.0.1", port);
     startThread();
     startTimerHz (30);

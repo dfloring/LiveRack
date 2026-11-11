@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(LiveRack VERSION 0.16.2)
+project(LiveRack VERSION 0.16.3)
 if(APPLE)
     enable_language(OBJCXX)
 endif()
@@ -53,6 +53,7 @@ target_sources(LiveRack PRIVATE
     Source/DevicesPanel.cpp
     Source/Shortcuts.cpp
     Source/WebRemote.cpp
+    Source/SocketUtil.cpp
     Source/PluginViewCapture.cpp
     Source/PluginViewCaptureWindows.cpp)
 
