@@ -21,13 +21,23 @@ static void storePeak (std::atomic<float>& slot, float value)
 }
 
 // Passes audio straight through and remembers the peak level
+// When the plugin before each tap finished: the time since the last tap (or
+// the start of the rack's block) is that plugin's processing time
+struct ChainClock
+{
+    juce::int64 last = 0;          // audio thread (one rack is processed by one thread at a time)
+    double blockTicks = 0.0;       // ticks in one block
+};
+
 class LevelTap final : public juce::AudioProcessor
 {
 public:
-    LevelTap() : AudioProcessor (BusesProperties().withInput ("In", juce::AudioChannelSet::stereo())
-                                                  .withOutput ("Out", juce::AudioChannelSet::stereo())) {}
+    explicit LevelTap (ChainClock& c) : AudioProcessor (BusesProperties().withInput ("In", juce::AudioChannelSet::stereo())
+                                                                         .withOutput ("Out", juce::AudioChannelSet::stereo())),
+                                        clock (c) {}
 
     std::atomic<float> peak { 0.0f };
+    std::atomic<float> loadPeak { 0.0f };   // the plugin before it: longest share of a block since last read
 
     const juce::String getName() const override { return "LevelTap"; }
     void prepareToPlay (double, int) override {}
@@ -35,11 +45,25 @@ public:
 
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
     {
+        const auto now = juce::Time::getHighResolutionTicks();
+        if (clock.last != 0 && clock.blockTicks > 0.0)
+        {
+            const auto load = (float) ((double) (now - clock.last) / clock.blockTicks);
+            auto old = loadPeak.load (std::memory_order_relaxed);
+            while (load > old && ! loadPeak.compare_exchange_weak (old, load, std::memory_order_relaxed)) {}
+        }
+
         float m = 0.0f;
         for (int c = 0; c < getTotalNumInputChannels(); ++c)
             m = juce::jmax (m, buffer.getMagnitude (c, 0, buffer.getNumSamples()));
         storePeak (peak, m);
+
+        clock.last = juce::Time::getHighResolutionTicks(); // the next plugin starts now
     }
+
+private:
+    ChainClock& clock;
+public:
 
     bool isBusesLayoutSupported (const BusesLayout& l) const override
     {
@@ -103,6 +127,7 @@ struct RackEngine::Rack
     using IOProcessor = juce::AudioProcessorGraph::AudioGraphIOProcessor;
 
     RackConfig config;
+    ChainClock clock;               // plugin timing (before the graph: its taps use it until the end)
     juce::AudioProcessorGraph graph;
     Node::Ptr inNode, outNode;
     std::vector<Node::Ptr> slots;
@@ -156,7 +181,7 @@ struct RackEngine::Rack
 
     void addTap (int channels)
     {
-        auto tap = std::make_unique<LevelTap>();
+        auto tap = std::make_unique<LevelTap> (clock);
         const auto set = channels == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo();
         juce::AudioProcessor::BusesLayout layout;
         layout.inputBuses.add (set);
@@ -514,6 +539,8 @@ struct RackEngine::Driver : public juce::AudioIODeviceCallback,
         if (! r.bypassed.load())
         {
             r.midi.clear();
+            r.clock.blockTicks = blockTicks;
+            r.clock.last = juce::Time::getHighResolutionTicks();
             r.graph.processBlock (r.buffer, r.midi);
             r.applyDelay (numSamples, r.padSamples.load());
         }
@@ -1519,6 +1546,42 @@ bool RackEngine::copyPlugin (int fromRack, int fromSlot, int toRack, int toIndex
     setSlotInScope (toRack, newSlot, inScope);
     moveSlotTo (toRack, newSlot, toIndex);
     return true;
+}
+
+RackEngine::RackLoad RackEngine::getSlotLoad (int index, int slot)
+{
+    RackLoad l;
+    auto* r = getRack (index);
+    if (r == nullptr || ! juce::isPositiveAndBelow (slot, (int) r->taps.size()) || r->bypassed.load())
+        return l;
+
+    if (auto* tap = dynamic_cast<LevelTap*> (r->taps[(size_t) slot]->getProcessor()))
+    {
+        const float peak = tap->loadPeak.exchange (0.0f);
+        auto& held = slotLoadHolds[tap];
+        const auto now = juce::Time::getMillisecondCounter();
+        if (now - held.second > 5000 || peak > held.first)
+            held = { peak, now };
+        l.now = peak;
+        l.peak = held.first;
+    }
+    return l;
+}
+
+std::vector<RackEngine::HeavyPlugin> RackEngine::getHeaviestPlugins (int driver, int count)
+{
+    std::vector<HeavyPlugin> list;
+    for (int r = 0; r < getNumRacks(); ++r)
+    {
+        if (driver >= 0 && getRackConfig (r).driver != driver)
+            continue;
+        for (int s = 0; s < getNumSlots (r); ++s)
+            list.push_back ({ r, s, getSlotLoad (r, s).peak });
+    }
+    std::sort (list.begin(), list.end(), [] (auto& a, auto& b) { return a.load > b.load; });
+    if ((int) list.size() > count)
+        list.resize ((size_t) count);
+    return list;
 }
 
 float RackEngine::consumeSlotOutputPeak (int index, int slot)

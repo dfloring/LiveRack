@@ -47,6 +47,7 @@ private:
     class TabButton;
     int dropIndexAt (juce::Point<int>) const;
     int dropIndex = -1;
+    int meterTicks = 0;
 
     void rebuildTabs();
     void updateHeader();

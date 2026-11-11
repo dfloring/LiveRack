@@ -100,10 +100,39 @@ juce::Colour RackStripsView::colourFor (const RackEngine& engine, int rack)
 
 //==============================================================================
 class RackStripsView::Content : public juce::Component,
-                                public juce::DragAndDropTarget
+                                public juce::DragAndDropTarget,
+                                public juce::TooltipClient
 {
 public:
     Content (RackStripsView& o, RackEngine& e) : owner (o), engine (e) {}
+
+    // Hovering a plugin: how long it takes; hovering a rack's figure: the rack's
+    juce::String getTooltip() override
+    {
+        const auto pos = getMouseXYRelative();
+        const int r = rackAt (pos);
+        if (! juce::isPositiveAndBelow (r, engine.getNumRacks()) || engine.isRackBypassed (r))
+            return {};
+
+        const auto l = layoutFor (r);
+        auto pc = [] (float load) { const int p = (int) std::ceil (load * 100.0f); return p <= 1 ? juce::String ("under 1%") : juce::String (p) + "%"; };
+
+        for (int sl = 0; sl < (int) l.slots.size() && sl < engine.getNumSlots (r); ++sl)
+            if (l.slots[(size_t) sl].contains (pos))
+                if (auto* p = engine.getPlugin (r, sl))
+                    return p->getName() + ": " + pc (engine.getSlotLoad (r, sl).peak)
+                         + " of each audio block at most (last few seconds)";
+
+        if (l.latency.contains (pos))
+        {
+            juce::String t = engine.getRackConfig (r).name + ": " + pc (engine.getRackLoad (r).peak) + " of each audio block at most.";
+            for (int sl = 0; sl < engine.getNumSlots (r); ++sl)
+                if (auto* p = engine.getPlugin (r, sl))
+                    t << "\n  " << p->getName() << "  " << pc (engine.getSlotLoad (r, sl).peak);
+            return t;
+        }
+        return {};
+    }
 
     // Drag and drop of plugins
     int dragFromRack = -1, dragFromSlot = -1;

@@ -1,4 +1,5 @@
 #pragma once
+#include "SocketUtil.h"
 #include <juce_core/juce_core.h>
 #include <juce_events/juce_events.h>
 #include <juce_osc/juce_osc.h>
@@ -23,6 +24,10 @@ public:
     ~OscRemote() override;
 
     void setEnabled (bool, int port);
+    // Answer only devices on this network (and this computer); empty = all
+    void setNetwork (const juce::String& networkId, const juce::String& networkName);
+    juce::String getNetworkId() const   { return networkId; }
+    juce::String getNetworkName() const { return networkName; }
     bool isEnabled() const   { return enabled; }
     bool isListening() const { return socket != nullptr; }
     int  getPort() const     { return port; }
@@ -50,6 +55,9 @@ private:
 
     bool enabled = false;
     int port = 9010;
+    juce::String networkId, networkName;
+    SocketUtil::Network chosenNetwork;
+    bool networkFound = false;
     std::unique_ptr<juce::DatagramSocket> socket;
     juce::OSCSender sender;
 

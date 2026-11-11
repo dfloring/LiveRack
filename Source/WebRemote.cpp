@@ -259,16 +259,21 @@ private:
 class WebRemote::Beacon final : public juce::Thread
 {
 public:
-    Beacon (const WebRemote& o) : juce::Thread ("LiveRack beacon"), owner (o) { startThread (juce::Thread::Priority::low); }
+    Beacon (WebRemote& o) : juce::Thread ("LiveRack beacon"), owner (o), networkId (o.networkId), bound (o.boundAddress),
+                            token (o.aliveToken)
+    {
+        startThread (juce::Thread::Priority::low);
+    }
     ~Beacon() override { stopThread (3000); }
 
     void run() override
     {
         juce::DatagramSocket socket (true);
-        if (! socket.bindToPort (0))
+        if (! socket.bindToPort (0, bound))
             return;
         SocketUtil::keepInThisProcess (socket);
 
+        int loops = 0;
         while (! threadShouldExit())
         {
             auto* o = new juce::DynamicObject();
@@ -277,13 +282,40 @@ public:
             o->setProperty ("port", owner.getPort());
             o->setProperty ("version", juce::String (JUCE_APPLICATION_VERSION_STRING));
             const auto text = juce::JSON::toString (juce::var (o), true);
-            socket.write ("255.255.255.255", beaconPort, text.toRawUTF8(), (int) text.getNumBytesAsUTF8());
+
+            // To each network's own broadcast address (the chosen one, or all),
+            // so it reaches every network the computer is on
+            juce::StringArray targets;
+            for (auto& n : SocketUtil::getNetworks())
+                if ((networkId.isEmpty() || n.id == networkId) && n.broadcast.isNotEmpty())
+                    targets.addIfNotAlreadyThere (n.broadcast);
+            if (targets.isEmpty())
+                targets.add ("255.255.255.255");
+            for (auto& t : targets)
+                socket.write (t, beaconPort, text.toRawUTF8(), (int) text.getNumBytesAsUTF8());
+
+            // The chosen network's address changed (DHCP, plugged back in): listen again
+            if (networkId.isNotEmpty() && ++loops % 5 == 0)
+            {
+                SocketUtil::Network n;
+                const auto now = SocketUtil::findNetwork (networkId, n) ? n.address : juce::String();
+                if (now != bound)
+                {
+                    auto t = token;
+                    auto* w = &owner;
+                    juce::MessageManager::callAsync ([t, w] { if (t->load()) w->setEnabled (w->isEnabled(), w->getPort()); });
+                    return;
+                }
+            }
+
             wait (2000);
         }
     }
 
 private:
-    const WebRemote& owner;
+    WebRemote& owner;
+    const juce::String networkId, bound;
+    std::shared_ptr<std::atomic<bool>> token;
 };
 
 juce::String WebRemote::getServerName() const
@@ -334,6 +366,7 @@ WebRemote::WebRemote() : juce::Thread ("LiveRack web remote")
 
 WebRemote::~WebRemote()
 {
+    aliveToken->store (false);
     setEnabled (false, port);
 }
 
@@ -355,6 +388,15 @@ void WebRemote::setEnabled (bool shouldBeEnabled, int newPort)
     if (! enabled)
         return;
 
+    // The chosen network, if it's here; otherwise every network, so the
+    // remote can still be found
+    boundAddress.clear();
+    chosenNetwork = {};
+    if (networkId.isNotEmpty() && SocketUtil::findNetwork (networkId, chosenNetwork))
+        boundAddress = chosenNetwork.address;
+
+    // Listens everywhere (so this computer's own browser still works) and
+    // answers only devices on the chosen network
     auto socket = std::make_unique<juce::StreamingSocket>();
     if (! socket->createListener (port))
         return;
@@ -365,9 +407,16 @@ void WebRemote::setEnabled (bool shouldBeEnabled, int newPort)
     beacon = std::make_unique<Beacon> (*this);
 }
 
+void WebRemote::setNetwork (const juce::String& id, const juce::String& name)
+{
+    networkId = id;
+    networkName = id.isEmpty() ? juce::String() : name;
+    setEnabled (enabled, port);
+}
+
 juce::String WebRemote::getUrl() const
 {
-    auto ip = SocketUtil::getLanAddress();
+    auto ip = boundAddress.isNotEmpty() ? boundAddress : SocketUtil::getLanAddress();
     if (ip.isEmpty())
         ip = "127.0.0.1";
     return "http://" + ip + ":" + juce::String (port);
@@ -389,7 +438,8 @@ juce::String WebRemote::getStatusText() const
     if (! enabled)       return "Web remote off";
     if (! isListening()) return "Port " + juce::String (port) + " is in use";
     const int n = getNumClients();
-    return getUrl() + "  |  " + juce::String (n) + (n == 1 ? " device" : " devices");
+    return getUrl() + "  |  " + juce::String (n) + (n == 1 ? " device" : " devices")
+         + (isNetworkMissing() ? "  |  " + networkName + " not found: on all networks" : juce::String());
 }
 
 //==============================================================================
@@ -402,6 +452,8 @@ void WebRemote::run()
             continue;
 
         SocketUtil::keepInThisProcess (*client);
+        if (boundAddress.isNotEmpty() && ! SocketUtil::isOnNetworkOrLocal (client->getHostName(), chosenNetwork))
+            continue; // from another network (an audio network, say): closed unanswered
         auto* raw = client.release();
         pool.addJob ([this, raw] { handle (std::unique_ptr<juce::StreamingSocket> (raw)); });
     }
@@ -816,6 +868,8 @@ void WebRemote::saveSettings() const
     juce::XmlElement xml ("WEBREMOTE");
     xml.setAttribute ("enabled", enabled);
     xml.setAttribute ("port", port);
+    xml.setAttribute ("network", networkId);
+    xml.setAttribute ("networkName", networkName);
     xml.writeTo (RackEngine::getSettingsDir().getChildFile ("web-remote.xml"));
 }
 
@@ -823,6 +877,11 @@ void WebRemote::loadSettings()
 {
     auto xml = juce::parseXML (RackEngine::getSettingsDir().getChildFile ("web-remote.xml"));
     const bool on = xml != nullptr ? xml->getBoolAttribute ("enabled", true) : true;
-    const int p = xml != nullptr ? xml->getIntAttribute ("port", 8080) : 8080;
+    const int p = xml != nullptr ? xml->getIntAttribute ("port", defaultPort) : defaultPort;
+    if (xml != nullptr)
+    {
+        networkId = xml->getStringAttribute ("network");
+        networkName = xml->getStringAttribute ("networkName");
+    }
     setEnabled (on, p);
 }

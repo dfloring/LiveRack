@@ -320,6 +320,20 @@ void PluginDock::updateMeters()
 {
     if (rack >= 0 && ! meterArea.isEmpty())
         repaint (meterArea);
+
+    // Each tab shows how long its plugin takes, a few times a second
+    if (++meterTicks % 8 == 0 && rack >= 0 && ! engine.isRackBypassed (rack))
+    {
+        for (int s = 0; s < tabs.size() && s < engine.getNumSlots (rack); ++s)
+        {
+            auto* plugin = engine.getPlugin (rack, s);
+            const int pc = (int) std::ceil (engine.getSlotLoad (rack, s).peak * 100.0f);
+            const auto text = juce::String (s + 1) + ". " + (plugin != nullptr ? plugin->getName() : "?")
+                            + (pc >= 1 ? "   " + juce::String (pc) + "%" : juce::String());
+            if (tabs[s]->getButtonText() != text)
+                tabs[s]->setButtonText (text);
+        }
+    }
 }
 
 void PluginDock::paint (juce::Graphics& g)
@@ -418,7 +432,7 @@ void PluginDock::resized()
         auto tabRow = area.removeFromTop (28);
         for (auto* tab : tabs)
         {
-            const int w = juce::jmin (220, juce::jmax (110, tab->getBestWidthForHeight (28) + 20));
+            const int w = juce::jmin (264, juce::jmax (110, tab->getBestWidthForHeight (28) + 20 + 44)); // room for the %
             tab->setBounds (tabRow.removeFromLeft (w));
             tabRow.removeFromLeft (4);
         }

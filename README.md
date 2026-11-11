@@ -27,7 +27,7 @@ Get the latest build from [Releases](../../releases): the Mac app (Apple silicon
 - **Mac:** unzip, then right-click `LiveRack.app` > **Open** the first time (it isn't notarised).
 - **Windows:** unzip and run `LiveRack.exe`. If Windows warns about an unknown publisher: **More info > Run anyway**. Pick your ASIO driver (Dante Virtual Soundcard, SoundGrid) in Devices > driver Settings.
 
-# User guide (v0.18)
+# User guide (v0.19)
 
 Any number of independent racks of VST3/AU plugins on one or more audio drivers at once (Dante Virtual Soundcard, a Dante interface, the Waves SoundGrid Driver). Everything lives in one **show file** (`.liverack`) with its snapshots inside it, and the open show comes back automatically on launch.
 
@@ -61,7 +61,7 @@ App: `build/LiveRack_artefacts/Release/LiveRack.app`
 ## Devices
 
 - **Audio drivers:** each driver is a panel with a status light, rate, buffer, channels, dropouts, DSP and the racks on it. **Settings** picks the device; **+ Add driver** adds another (up to 4). Each driver runs on its own audio thread, so a hiccup on one doesn't touch the other.
-- **DSP** shows the average load (the bar) and the **longest block** in the last 10 s (the tick). The longest block is what matters live: at 100% a block took all of its time, which is a dropout. Each rack strip shows its own share at the bottom right (its longest in the last few seconds; amber over 25%, red over 50%), so you can see which rack is heavy.
+- **DSP** shows the average load (the bar) and the **longest block** in the last 10 s (the tick). The longest block is what matters live: at 100% a block took all of its time, which is a dropout. Each rack strip shows its own share at the bottom right (its longest in the last few seconds; amber over 25%, red over 50%), so you can see which rack is heavy. Inside a rack, each plugin's share shows on its tab in the plugin panel, and when you hover a plugin in a strip (hover the rack's % for all its plugins). The driver card lists the three **heaviest** plugins.
 - **Racks run on several CPU cores at once.** Racks don't depend on each other, so each block's racks are shared out between the audio thread and a helper thread per spare core (the DSP line shows how many). Light blocks stay on one core, where it's cheaper. No latency is added. It can be turned off in the Server mode card if a plugin misbehaves with it.
   - A rack runs entirely on one driver: its inputs and outputs are on the same driver. Patching a rack to another driver's channel in Routing moves it there.
   - Two drivers aren't clock-locked to each other inside the Mac. That's fine as long as each rack stays on one driver.
@@ -76,6 +76,8 @@ For a computer that only runs LiveRack, wherever it lives. In **Devices**, click
 - **Start LiveRack when this computer starts.** Also set the computer to log in automatically (Mac: System Settings > Users & Groups; Windows: `netplwiz`, untick "Users must enter a user name and password", then type the account's password carefully: a wrong one is accepted there and simply doesn't log in. If that tick box is missing, turn off Settings > Accounts > Sign-in options > "For improved security, only allow Windows Hello sign-in" first). On the Mac, LiveRack must be in the Applications folder first.
 - **Restart LiveRack if it quits unexpectedly.** A small hidden watcher runs alongside (on its own, so ending LiveRack in Task Manager doesn't take the watcher with it) and starts LiveRack again after a crash, with the show it had. Quitting normally doesn't restart it. After three restarts in five minutes it stops trying.
 - **Run racks on all CPU cores** (on by default): see Audio drivers above.
+- **Start these apps too:** apps LiveRack starts when it starts, if they aren't running already. Add QRec (or SoundGrid Studio) here when the SoundGrid driver needs it running.
+- **Server check** (a card under Controllers): checks what makes an unattended computer drop out, sleep, restart or lock mid-service, and offers a fix where LiveRack can make one. Windows: the power plan (High performance), sleep, the screen saver lock, Windows Update paused or not, automatic login, and Avast/AVG (add an exception for LiveRack and your plugins). Mac: sleep and automatic login. Both: start at login, restart after a crash, all CPU cores, each audio driver (missing, recent dropouts, longest block over 80%), and the remote's network. Rechecked every minute.
 - An audio driver that was set to a particular device now **waits for that device** instead of moving to the built-in audio. The status bar shows "waiting for ..." and the driver connects by itself when the device appears, e.g. when Dante Virtual Soundcard starts after LiveRack does.
 
 Control it from the iPad / web remote, OSC or Companion as usual.
@@ -157,7 +159,9 @@ Buttons (notes, CCs above 0, program changes) press; CCs move parameters. LiveRa
 
 ## iPad / web remote
 
-LiveRack runs a small web server (port 8080; Devices > Controllers > **iPad / web remote** shows the address and turns it on or off). On an iPad on the same network, open that address in Safari, e.g. `http://192.168.1.20:8080`. **Share > Add to Home Screen** gives it an app-like icon that opens full screen.
+LiveRack runs a small web server (port 8090 on new setups; one set to 8080 before keeps it. Devices > Controllers > **iPad / web remote** shows the address and turns it on or off). On an iPad on the same network, open that address in Safari, e.g. `http://192.168.1.20:8090`.
+
+**Network:** in the same settings, pick which network the remote answers on (each of this computer's network ports is listed with its address; "self-assigned" ones are usually Dante or SoundGrid). LiveRack then answers only devices on that network (and this computer itself), announces itself only there, and shows that network's address. Pick your control network to keep remote traffic off the audio networks. If that port isn't connected, the remote answers on every network so it can still be reached, and says so. The OSC remote has the same choice. **Share > Add to Home Screen** gives it an app-like icon that opens full screen.
 
 - Rack strips for the current page: tap the header to select, **BYPASS** to bypass, with level and gain reduction
 - Tap a plugin to open **all its parameters** as touch sliders (with filter and plugin bypass); meters like gain reduction show read-only

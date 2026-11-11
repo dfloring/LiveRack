@@ -3232,14 +3232,18 @@ juce::String MainComponent::buildWebMeters()
     juce::Array<juce::var> racks;
     for (int i = 0; i < engine.getNumRacks(); ++i)
     {
-        juce::Array<juce::var> gr;
+        juce::Array<juce::var> gr, loads;
         for (int sl = 0; sl < engine.getNumSlots (i); ++sl)
+        {
             gr.add (std::round ((double) strips.getSlotGainReduction (i, sl) * 10.0) / 10.0);
+            loads.add (std::round ((double) engine.getSlotLoad (i, sl).peak * 1000.0) / 1000.0);
+        }
 
         auto* o = new juce::DynamicObject();
         o->setProperty ("in", std::round ((double) strips.getInputLevel (i) * 1000.0) / 1000.0);
         o->setProperty ("out", std::round ((double) strips.getOutputLevel (i) * 1000.0) / 1000.0);
         o->setProperty ("gr", gr);
+        o->setProperty ("loads", loads);
         o->setProperty ("load", std::round ((double) engine.getRackLoad (i).peak * 1000.0) / 1000.0);
         racks.add (juce::var (o));
     }

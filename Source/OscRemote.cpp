@@ -64,6 +64,9 @@ void OscRemote::setEnabled (bool shouldBeEnabled, int newPort)
     if (! enabled)
         return;
 
+    chosenNetwork = {};
+    networkFound = networkId.isNotEmpty() && SocketUtil::findNetwork (networkId, chosenNetwork);
+
     socket = std::make_unique<juce::DatagramSocket> (false);
     if (! socket->bindToPort (port))
     {
@@ -77,12 +80,20 @@ void OscRemote::setEnabled (bool shouldBeEnabled, int newPort)
     startTimerHz (30);
 }
 
+void OscRemote::setNetwork (const juce::String& id, const juce::String& name)
+{
+    networkId = id;
+    networkName = id.isEmpty() ? juce::String() : name;
+    setEnabled (enabled, port);
+}
+
 juce::String OscRemote::getStatusText() const
 {
     if (! enabled)        return "OSC remote off";
     if (socket == nullptr) return "OSC port " + juce::String (port) + " is in use";
-    return "OSC on port " + juce::String (port) + ", " + juce::String (clients.size())
-           + (clients.size() == 1 ? " client" : " clients");
+    return "OSC on port " + juce::String (port)
+           + (networkId.isEmpty() ? juce::String() : networkFound ? " (" + networkName + ")" : " (" + networkName + " not found: all networks)")
+           + ", " + juce::String (clients.size()) + (clients.size() == 1 ? " client" : " clients");
 }
 
 void OscRemote::run()
@@ -97,6 +108,9 @@ void OscRemote::run()
         juce::String ip;
         int fromPort = 0;
         const int n = socket->read (buffer.get(), 65536, false, ip, fromPort);
+
+        if (n > 0 && networkFound && ! SocketUtil::isOnNetworkOrLocal (ip, chosenNetwork))
+            continue; // from another network: ignored
 
         if (n > 0)
             parsePacket (buffer.get(), n, ip, fromPort, 0);
@@ -232,6 +246,8 @@ void OscRemote::saveSettings() const
     juce::XmlElement xml ("OSCREMOTE");
     xml.setAttribute ("enabled", enabled);
     xml.setAttribute ("port", port);
+    xml.setAttribute ("network", networkId);
+    xml.setAttribute ("networkName", networkName);
     xml.writeTo (RackEngine::getSettingsDir().getChildFile ("osc-remote.xml"));
 }
 
@@ -240,5 +256,10 @@ void OscRemote::loadSettings()
     auto xml = juce::parseXML (RackEngine::getSettingsDir().getChildFile ("osc-remote.xml"));
     const bool on = xml != nullptr ? xml->getBoolAttribute ("enabled", true) : true;
     const int p = xml != nullptr ? xml->getIntAttribute ("port", 9010) : 9010;
+    if (xml != nullptr)
+    {
+        networkId = xml->getStringAttribute ("network");
+        networkName = xml->getStringAttribute ("networkName");
+    }
     setEnabled (on, p);
 }

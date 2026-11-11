@@ -120,6 +120,9 @@ public:
     // the last few seconds (message thread)
     struct RackLoad { float now = 0.0f, peak = 0.0f; };
     RackLoad getRackLoad (int rack);
+    RackLoad getSlotLoad (int rack, int slot);      // one plugin (with the hand-off, if it runs in its own process)
+    struct HeavyPlugin { int rack, slot; float load; };
+    std::vector<HeavyPlugin> getHeaviestPlugins (int driver, int count);   // driver -1: all
     juce::String getDriverWaitingFor (int driver) const; // device name while it isn't available, or empty         // call regularly from the UI (tracks peaks and dropouts)
 
     juce::AudioPluginFormatManager& getFormatManager()  { return formatManager; }
@@ -307,6 +310,7 @@ private:
     std::atomic<double> bpm { 120.0 };
     std::atomic<bool> multiCore { true };
     std::map<const Rack*, std::pair<float, juce::uint32>> rackLoadHolds;
+    std::map<const void*, std::pair<float, juce::uint32>> slotLoadHolds;
     juce::Array<double> tapTimes;
 
    #if LIVERACK_PREVIEW_HOOKS

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(LiveRack VERSION 0.18.0)
+project(LiveRack VERSION 0.19.0)
 if(APPLE)
     enable_language(OBJCXX)
 endif()
@@ -50,6 +50,7 @@ target_sources(LiveRack PRIVATE
     Source/MidiControl.cpp
     Source/RoutingMatrix.cpp
     Source/SnapshotsPanel.cpp
+    Source/ServerCheck.cpp
     Source/DevicesPanel.cpp
     Source/Shortcuts.cpp
     Source/WebRemote.cpp

@@ -1,6 +1,8 @@
 #pragma once
 #include "IsolatedPlugin.h"
 #include "ServerMode.h"
+#include "SocketUtil.h"
+#include "ServerCheck.h"
 // Only compiled into Linux preview builds (LIVERACK_PREVIEW_HOOKS=1), used to
 // set up a sample session, feed a test signal through it, and open dialogs
 // for UI screenshots. Never part of the Mac app.
@@ -70,6 +72,60 @@ struct PreviewHooks
                                   m.select (0, 1); m.stepRack (-1);
                                   std::cerr << "STEP wrap " << m.selectedRack << " (expect " << m.engine.getNumRacks() - 1 << ")" << std::endl; m.stepRack (1); }
         if (open == "plugins")  m.showPluginScanner();
+        if (open == "timing")
+        {
+            // Keep the audio going so plugin timing shows
+            m.select (3, 1);
+            struct Feeder : juce::Timer
+            {
+                MainComponent& m;
+                explicit Feeder (MainComponent& mm) : m (mm) { m.engine.previewPrepare (48000.0, 128); startTimer (2); }
+                void timerCallback() override
+                {
+                    juce::AudioBuffer<float> in (16, 128), out (16, 128);
+                    for (int c = 0; c < 16; ++c) for (int k = 0; k < 128; ++k) in.setSample (c, k, r.nextFloat() * 0.4f - 0.2f);
+                    m.engine.previewProcess (in, out);
+                }
+                juce::Random r;
+            };
+            static std::unique_ptr<Feeder> feeder;
+            feeder = std::make_unique<Feeder> (m);
+            juce::Timer::callAfterDelay (3000, [&m] { m.showDevices(); });
+        }
+        if (open == "servercheck")
+        {
+            for (auto& i : ServerCheck::getAppItems (m.engine, m.webRemote))
+                std::cerr << "CHECK app " << (int) i.state << " " << i.title << " | " << i.detail << " | fix " << i.fixLabel << std::endl;
+            std::cerr << "CHECK Xvfb running " << ServerMode::isAppRunning (juce::File ("/usr/bin/Xvfb"))
+                      << ", nothing running " << ServerMode::isAppRunning (juce::File ("/usr/bin/not-a-thing")) << std::endl;
+            ServerMode::setStartApps ({ "/usr/bin/Xvfb", "/tmp/x y/App" });
+            std::cerr << "CHECK start apps " << ServerMode::getStartApps().joinIntoString (" ; ") << std::endl;
+            ServerMode::setStartApps ({});
+            m.showDevices();
+            juce::Timer::callAfterDelay (1500, [&m] { ServerCheck::showWindow (m.engine, m.webRemote); });
+        }
+        if (open == "networks")
+        {
+            for (auto& n : SocketUtil::getNetworks())
+                std::cerr << "NET " << n.id << " '" << n.name << "' " << n.address << " bcast " << n.broadcast << " linklocal " << n.linkLocal << std::endl;
+            SocketUtil::Network fake;
+            fake.ip = (10u << 24) | 5u; fake.mask = 0xffffff00u;
+            std::cerr << "NET filter 10.0.0.77 " << SocketUtil::isOnNetworkOrLocal ("10.0.0.77", fake)
+                      << " 169.254.1.1 " << SocketUtil::isOnNetworkOrLocal ("169.254.1.1", fake)
+                      << " 127.0.0.1 " << SocketUtil::isOnNetworkOrLocal ("127.0.0.1", fake)
+                      << " 10.0.1.2 " << SocketUtil::isOnNetworkOrLocal ("10.0.1.2", fake) << " (expect 1 0 1 0)" << std::endl;
+            auto nets = SocketUtil::getNetworks();
+            if (! nets.empty())
+            {
+                m.webRemote.setNetwork (nets[0].id, nets[0].name);
+                std::cerr << "NET web on " << nets[0].name << ": " << m.webRemote.getStatusText() << std::endl;
+                m.osc.setNetwork (nets[0].id, nets[0].name);
+                std::cerr << "NET osc: " << m.osc.getStatusText() << std::endl;
+            }
+            m.webRemote.setNetwork ("missing0", "Ethernet 9");
+            std::cerr << "NET missing: " << m.webRemote.getStatusText() << " listening " << m.webRemote.isListening() << std::endl;
+            m.webRemote.setNetwork ({}, {});
+        }
         if (open == "snapshots" || open == "snapshotspick")
             juce::Timer::callAfterDelay (600, [&m, open]
             {
@@ -552,7 +608,16 @@ struct PreviewHooks
                 for (int r = 0; r < e.getNumRacks(); ++r)
                 {
                     auto l = e.getRackLoad (r);
-                    std::cerr << "MULTICORE rack " << e.getRackConfig (r).name << " load now " << l.now * 100.0f << "% peak " << l.peak * 100.0f << "%" << std::endl;
+                    juce::String slots;
+                    float sum = 0;
+                    for (int sl = 0; sl < e.getNumSlots (r); ++sl)
+                    {
+                        const auto pl = e.getSlotLoad (r, sl).peak;
+                        sum += pl;
+                        slots << e.getPlugin (r, sl)->getName() << "=" << juce::String (pl * 100.0f, 2) << "% ";
+                    }
+                    std::cerr << "MULTICORE rack " << e.getRackConfig (r).name << " load now " << l.now * 100.0f << "% peak " << l.peak * 100.0f
+                              << "% | plugins " << slots << std::endl;
                 }
                 e.setMultiCore (true);
             });

@@ -1,4 +1,5 @@
 #include "ServerMode.h"
+#include <thread>
 #include "AppSettings.h"
 
 #if JUCE_WINDOWS
@@ -294,9 +295,83 @@ void ServerMode::setRestartAfterCrash (bool on)
     }
 }
 
+//==============================================================================
+static juce::File startAppsFile() { return RackEngine::getSettingsDir().getChildFile ("start-apps.txt"); }
+
+juce::StringArray ServerMode::getStartApps()
+{
+    juce::StringArray list;
+    list.addLines (startAppsFile().loadFileAsString());
+    list.trim();
+    list.removeEmptyStrings();
+    return list;
+}
+
+void ServerMode::setStartApps (const juce::StringArray& paths)
+{
+    startAppsFile().replaceWithText (paths.joinIntoString ("\n"));
+}
+
+static juce::StringArray runningProcesses()
+{
+    juce::ChildProcess p;
+   #if JUCE_WINDOWS
+    if (! p.start ("tasklist /FO CSV /NH", juce::ChildProcess::wantStdOut))
+        return {};
+   #else
+    if (! p.start (juce::StringArray { "ps", "-axo", "args=" }, juce::ChildProcess::wantStdOut))
+        return {};
+   #endif
+    juce::StringArray lines;
+    lines.addLines (p.readAllProcessOutput());
+    p.waitForProcessToFinish (3000);
+    return lines;
+}
+
+bool ServerMode::isAppRunning (const juce::File& app)
+{
+    const auto lines = runningProcesses();
+   #if JUCE_WINDOWS
+    const auto exe = "\"" + app.getFileName().toLowerCase() + "\"";
+    for (auto& l : lines)
+        if (l.toLowerCase().startsWith (exe))
+            return true;
+   #elif JUCE_MAC
+    // An .app bundle runs the binary inside it
+    const auto inside = app.getFullPathName() + (app.getFileExtension() == ".app" ? "/Contents/MacOS/" : "");
+    for (auto& l : lines)
+        if (l.trim().startsWith (inside))
+            return true;
+   #else
+    for (auto& l : lines)
+        if (l.trim().startsWith (app.getFullPathName()))
+            return true;
+   #endif
+    return false;
+}
+
+static void startAppsIfNeeded()
+{
+    const auto apps = ServerMode::getStartApps();
+    if (apps.isEmpty())
+        return;
+
+    // Off the message thread: listing processes takes a moment
+    std::thread ([apps]
+    {
+        for (auto& path : apps)
+        {
+            const juce::File app (path);
+            if (app.exists() && ! ServerMode::isAppRunning (app))
+                app.startAsProcess();
+        }
+    }).detach();
+}
+
 void ServerMode::appStarted()
 {
     wasRestartedAfterCrash();
+    startAppsIfNeeded();
 
     // The app may have been moved or updated since start-at-login was turned on
     if (startsAtLogin() && startAtLoginProblem().isEmpty())

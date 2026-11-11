@@ -2,6 +2,7 @@
 #include <juce_core/juce_core.h>
 #include <juce_events/juce_events.h>
 #include <memory>
+#include "SocketUtil.h"
 
 class PluginViewCapture;
 
@@ -38,6 +39,14 @@ public:
 
     void setEnabled (bool, int port);
     bool isEnabled() const    { return enabled; }
+
+    // Which network port it answers on: empty = all of them. Keeping it off the
+    // audio networks (Dante, SoundGrid) keeps their ports free of remote traffic.
+    void setNetwork (const juce::String& networkId, const juce::String& networkName);
+    juce::String getNetworkId() const   { return networkId; }
+    juce::String getNetworkName() const { return networkName; }
+    bool isNetworkMissing() const       { return networkId.isNotEmpty() && boundAddress.isEmpty(); }
+    static constexpr int defaultPort = 8090;
     bool isListening() const  { return listener != nullptr; }
     int  getPort() const      { return port; }
     juce::String getUrl() const;          // http://192.168.x.x:8080
@@ -78,6 +87,9 @@ private:
 
     class Beacon;
     std::unique_ptr<Beacon> beacon;
+    juce::String networkId, networkName, boundAddress; // boundAddress: the chosen network's address now
+    SocketUtil::Network chosenNetwork;                 // only devices on it are answered (and this computer)
+    std::shared_ptr<std::atomic<bool>> aliveToken { std::make_shared<std::atomic<bool>> (true) };
 
     bool enabled = false;
     int port = 8080;

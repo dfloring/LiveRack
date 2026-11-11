@@ -22,6 +22,12 @@ namespace ServerMode
     bool restartsAfterCrash();
     void setRestartAfterCrash (bool);
 
+    // Other apps LiveRack starts when it starts, if they aren't running
+    // already (QRec for SoundGrid, say)
+    juce::StringArray getStartApps();
+    void setStartApps (const juce::StringArray& paths);
+    bool isAppRunning (const juce::File&);   // blocks briefly: lists the running processes
+
     void appStarted();                 // the normal app, once it is up
     void appQuitting();                // the normal app, on a proper quit
     bool wasRestartedAfterCrash();     // true for a launch made by the watcher

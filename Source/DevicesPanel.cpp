@@ -2,6 +2,36 @@
 #include "ServerMode.h"
 #include "RackStripsView.h"
 #include "Theme.h"
+#include "SocketUtil.h"
+#include "ServerCheck.h"
+
+// A "Network" choice for a remote's settings: all networks, or one of this computer's
+static void addNetworkChoice (juce::AlertWindow& w, const juce::String& currentId, const juce::String& currentName,
+                              std::vector<std::pair<juce::String, juce::String>>& choices)
+{
+    choices.clear();
+    choices.push_back ({ {}, {} });
+    juce::StringArray items { "All networks" };
+    int selected = 0;
+
+    for (auto& n : SocketUtil::getNetworks())
+    {
+        if (n.id == currentId)
+            selected = items.size();
+        choices.push_back ({ n.id, n.name });
+        items.add (n.describe());
+    }
+
+    if (currentId.isNotEmpty() && selected == 0)
+    {
+        selected = items.size();
+        choices.push_back ({ currentId, currentName });
+        items.add (currentName + "  (not connected now)");
+    }
+
+    w.addComboBox ("network", items, "Network");
+    w.getComboBoxComponent ("network")->setSelectedItemIndex (selected);
+}
 
 namespace
 {
@@ -132,6 +162,22 @@ public:
         g.setColour (colour);
         g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * (float) juce::jlimit (0.0, 1.0, s.cpu)), 4.0f);
         g.fillRect (juce::Rectangle<float> (bar.getX() + bar.getWidth() * (float) worst - 1.5f, bar.getY() - 2.0f, 3.0f, bar.getHeight() + 4.0f));
+
+        // The plugins taking longest, so a heavy one is easy to find
+        {
+            auto heavy = host.engine.getHeaviestPlugins (index, 3);
+            juce::StringArray names;
+            for (auto& h : heavy)
+                if (h.load >= 0.01f)
+                    if (auto* p = host.engine.getPlugin (h.rack, h.slot))
+                        names.add (host.engine.getRackConfig (h.rack).name + " " + p->getName() + " "
+                                   + juce::String ((int) std::ceil (h.load * 100.0f)) + "%");
+            area.removeFromTop (4);
+            g.setColour (Theme::textDim);
+            g.setFont (juce::FontOptions (11.0f));
+            g.drawText (names.isEmpty() ? juce::String() : "Heaviest: " + names.joinIntoString (",  "),
+                        area.removeFromTop (14), juce::Justification::centredLeft, true);
+        }
 
         area.removeFromTop (12);
 
@@ -447,7 +493,7 @@ public:
 class DevicesPanel::ControllerCard : public juce::Component
 {
 public:
-    enum Kind { midiDevice, osc, mappings, addMidi, shortcuts, web, server };
+    enum Kind { midiDevice, osc, mappings, addMidi, shortcuts, web, server, serverCheck };
 
     ControllerCard (Host& h, Kind k, juce::String id = {}) : host (h), kind (k), identifier (std::move (id)) {}
 
@@ -505,6 +551,15 @@ public:
                 : restart          ? "Restarts after a crash"
                                    : "Off: click to run LiveRack unattended";
             light = login || restart ? Theme::green.withAlpha (0.6f) : Theme::textDim.withAlpha (0.3f);
+        }
+        else if (kind == serverCheck)
+        {
+            int look = 0;
+            for (auto& i : ServerCheck::getSystemItems()) if (i.state == ServerCheck::Item::lookAt) ++look;
+            for (auto& i : ServerCheck::getAppItems (host.engine, host.web)) if (i.state == ServerCheck::Item::lookAt) ++look;
+            title = "Server check";
+            sub = look == 0 ? "Ready for a service: nothing to look at" : juce::String (look) + (look == 1 ? " thing" : " things") + " to look at: click for the list";
+            light = look == 0 ? Theme::green.withAlpha (0.6f) : Theme::amber;
         }
         else if (kind == shortcuts)
         {
@@ -571,6 +626,10 @@ public:
             if (host.openShortcuts != nullptr)
                 host.openShortcuts();
         }
+        else if (kind == serverCheck)
+        {
+            ServerCheck::showWindow (host.engine, host.web);
+        }
         else if (kind == server)
         {
             const auto problem = ServerMode::startAtLoginProblem();
@@ -584,13 +643,57 @@ public:
             m.addItem (3, "Run racks on " + juce::String (RackEngine::getNumRackThreads()) + " CPU cores at once",
                        RackEngine::getNumRackThreads() > 1, host.engine.isMultiCore());
             m.addSeparator();
-            m.addItem (-1, "Set the computer to log in automatically too", false);
+
+            // Other apps to start with LiveRack (QRec for SoundGrid, say)
+            juce::PopupMenu apps;
+            const auto startApps = ServerMode::getStartApps();
+            for (int i = 0; i < startApps.size(); ++i)
+                apps.addItem (100 + i, "Remove " + juce::File (startApps[i]).getFileNameWithoutExtension());
+            if (! startApps.isEmpty())
+                apps.addSeparator();
+            apps.addItem (99, juce::String::fromUTF8 ("Add an app" "\xe2\x80\xa6"));
+            juce::String appNames;
+            for (auto& a : startApps)
+                appNames << (appNames.isEmpty() ? "" : ", ") << juce::File (a).getFileNameWithoutExtension();
+            m.addSubMenu ("Start these apps too" + (appNames.isEmpty() ? juce::String() : ": " + appNames), apps);
+            m.addSeparator();
+            m.addItem (-1, "Set the computer to log in automatically too (Server check shows it)", false);
 
             juce::Component::SafePointer<juce::Component> safe (this);
             auto* engine = &host.engine;
             m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safe, engine] (int r)
             {
                 if (r == 3) engine->setMultiCore (! engine->isMultiCore());
+                if (r >= 100)
+                {
+                    auto list = ServerMode::getStartApps();
+                    list.remove (r - 100);
+                    ServerMode::setStartApps (list);
+                }
+                if (r == 99)
+                {
+                   #if JUCE_MAC
+                    const auto where = juce::File ("/Applications");
+                    const juce::String pattern = "*.app";
+                   #elif JUCE_WINDOWS
+                    const auto where = juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory);
+                    const juce::String pattern = "*.exe";
+                   #else
+                    const auto where = juce::File ("/usr/bin");
+                    const juce::String pattern = "*";
+                   #endif
+                    auto chooser = std::make_shared<juce::FileChooser> ("An app to start with LiveRack", where, pattern);
+                    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                          [chooser] (const juce::FileChooser& fc)
+                                          {
+                                              const auto f = fc.getResult();
+                                              if (f == juce::File())
+                                                  return;
+                                              auto list = ServerMode::getStartApps();
+                                              list.addIfNotAlreadyThere (f.getFullPathName());
+                                              ServerMode::setStartApps (list);
+                                          });
+                }
                 if (r == 1) ServerMode::setStartAtLogin (! ServerMode::startsAtLogin());
                 if (r == 2) ServerMode::setRestartAfterCrash (! ServerMode::restartsAfterCrash());
                 if (safe != nullptr) safe->repaint();
@@ -605,13 +708,18 @@ public:
             w->addTextEditor ("port", juce::String (host.web.getPort()), "Port");
             w->addComboBox ("on", { "On", "Off" }, "Web remote");
             w->getComboBoxComponent ("on")->setSelectedItemIndex (host.web.isEnabled() ? 0 : 1);
+            auto choices = std::make_shared<std::vector<std::pair<juce::String, juce::String>>>();
+            addNetworkChoice (*w, host.web.getNetworkId(), host.web.getNetworkName(), *choices);
+            w->addTextBlock ("Network: answer only devices on this network (and this computer). Pick your control network to keep remote traffic off Dante and SoundGrid.");
             w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
             w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
             auto& wr = host.web;
-            w->enterModalState (true, juce::ModalCallbackFunction::create ([&wr, w] (int r)
+            w->enterModalState (true, juce::ModalCallbackFunction::create ([&wr, w, choices] (int r)
             {
                 if (r == 1)
                 {
+                    const auto& c = (*choices)[(size_t) juce::jmax (0, w->getComboBoxComponent ("network")->getSelectedItemIndex())];
+                    wr.setNetwork (c.first, c.second);
                     wr.setEnabled (w->getComboBoxComponent ("on")->getSelectedItemIndex() == 0,
                                    w->getTextEditorContents ("port").getIntValue());
                     wr.saveSettings();
@@ -625,13 +733,17 @@ public:
             w->addTextEditor ("port", juce::String (host.osc.getPort()), "Port");
             w->addComboBox ("on", { "On", "Off" }, "Remote control");
             w->getComboBoxComponent ("on")->setSelectedItemIndex (host.osc.isEnabled() ? 0 : 1);
+            auto choices = std::make_shared<std::vector<std::pair<juce::String, juce::String>>>();
+            addNetworkChoice (*w, host.osc.getNetworkId(), host.osc.getNetworkName(), *choices);
             w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
             w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
             auto& o = host.osc;
-            w->enterModalState (true, juce::ModalCallbackFunction::create ([&o, w] (int r)
+            w->enterModalState (true, juce::ModalCallbackFunction::create ([&o, w, choices] (int r)
             {
                 if (r == 1)
                 {
+                    const auto& c = (*choices)[(size_t) juce::jmax (0, w->getComboBoxComponent ("network")->getSelectedItemIndex())];
+                    o.setNetwork (c.first, c.second);
                     o.setEnabled (w->getComboBoxComponent ("on")->getSelectedItemIndex() == 0,
                                   w->getTextEditorContents ("port").getIntValue());
                     o.saveSettings();
@@ -709,6 +821,7 @@ public:
         addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::shortcuts)));
         addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::web)));
         addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::osc)));
+        addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::serverCheck)));
         addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::server)));
 
         addDriver.setEnabled (host.engine.getNumDrivers() < RackEngine::maxDrivers);
@@ -832,7 +945,7 @@ void DevicesPanel::timerCallback()
     // Devices plugged in or removed
     if ((int) content->drivers.size() != host.engine.getNumDrivers()
         || (int) content->consoles.size() != (int) host.consoles.size()
-        || (int) content->controllers.size() != (int) host.midi.getDevices().size() + 6)
+        || (int) content->controllers.size() != (int) host.midi.getDevices().size() + 7)
         refresh();
 
     content->update();
