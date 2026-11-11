@@ -79,6 +79,10 @@ private:
     void setTwoWindowMode (bool);
     bool isTwoWindowMode() const { return rackWindow != nullptr; }
 
+    // Full View: the selected rack's plugin panel fills the main window
+    void setFullView (bool);
+    bool isFullView() const { return fullView && ! isTwoWindowMode(); }
+
     // Floating editor windows
     void closeEditorFor (juce::AudioProcessor*);
     void closeEditorsForRack (int rack);
@@ -192,6 +196,7 @@ private:
                       stackRowsButton { "Stack Rows", "stack", "Stack racks in rows to fit the window" };
     juce::TextButton storeSceneButton { "STORE" }, tapButton { "TAP" };
     std::vector<juce::Rectangle<int>> toolbarGroups;
+    static constexpr int toolbarHeight = 72;
     juce::Rectangle<int> sceneChip;
     class BpmDisplay;
     std::unique_ptr<BpmDisplay> bpmDisplay;
@@ -209,6 +214,7 @@ private:
 
     class RackViewWindow;
     std::unique_ptr<RackViewWindow> rackWindow;
+    bool fullView = false;
 
     std::vector<std::unique_ptr<PluginWindow>> editorWindows;
 
@@ -219,7 +225,15 @@ private:
     std::vector<std::unique_ptr<InspectorWindow>> inspectorWindows;
 
     class ToolWindow;
-    std::unique_ptr<ToolWindow> devicesWindow, routingWindow, scopeWindow, shortcutsWindow;
+    std::unique_ptr<ToolWindow> devicesWindow, routingWindow, scopeWindow, shortcutsWindow, pluginsWindow;
+    std::vector<ToolWindow*> tools; // shown in the main window; the last is in front
+    void attachTool (ToolWindow*);
+    void detachTool (ToolWindow*);
+    void showFrontTool();
+    void updateToolButtons();
+    bool dockIsCovered() const;
+    bool dockWasCovered = false;
+    void toggleTool (std::unique_ptr<ToolWindow>&, std::function<void()> open);
     ShortcutsEditor* shortcutsEditor = nullptr;
     RoutingMatrix* routingMatrix = nullptr;
     ScopeEditor* scopeEditor = nullptr;

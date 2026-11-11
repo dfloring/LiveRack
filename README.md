@@ -44,7 +44,8 @@ App: `build/LiveRack_artefacts/Release/LiveRack.app`
 
 ## The main window
 
-- **Top bar,** in groups: **Show** (save; open, save as, new), **Snapshots** (previous / next, the current snapshot: click it for the list, rename and delete; **STORE**), **Setup** (Devices, Routing, Plugins, Scope), **View** (add rack, rack window, stack rows), and **BPM** with **TAP**. Hover a button for its name. Click the BPM number to type a tempo.
+- **Top bar,** in groups: **Show** (save; open, save as, new), **Snapshots** (previous / next, the current snapshot: click it for the list, rename and delete; **STORE**), **Setup** (Devices, Routing, Plugins, Scope), **View** (add rack, rack window, stack rows), and **BPM** with **TAP**. Buttons are labelled when the window is wide enough; hover one for more. Click the BPM number to type a tempo. The window title shows the LiveRack version.
+- **Setup screens** (Devices, Routing, Plugins, Scope, Keyboard shortcuts) open in the main window in place of the racks, so everything works on one screen. **‹ Racks**, Esc or the toolbar button again goes back. **Pop Out** moves a screen into its own window (for a second screen), and **Show in Main Window** brings it back; LiveRack remembers which way you like each one.
 - **Pages** (tabs above the strips): **All** shows every rack; **+ Page** makes a page (starting with the selected rack). Put racks on pages from a rack's right-click menu > **Pages** (a rack can be on several), or right-click a page tab > Add. New racks join the page you're on. Selecting a rack (from the console, a key, MIDI or OSC) switches to a page that has it. Pages are saved in the show, not in snapshots.
 - **Hot Plugins** (under the top bar): up to 12 pinned plugins. Right-click a plugin on a strip > **Pin to Hot Plugins**. Click a tile to open that plugin; drag tiles to reorder; right-click to unpin. Hot Plugins are saved in the show.
 - **Strips:** each rack's header shows its name and console channel (**CH**, click to set). Double-click the name to rename in place. The badges under it are buttons:
@@ -53,7 +54,7 @@ App: `build/LiveRack_artefacts/Release/LiveRack.app`
   - **SAFE**: Recall Safe
   - colour swatch: pick a colour
   - The line under the badges (e.g. `1 → 1`) shows routing; click it to open **Routing** for that rack.
-- **User Keys** (bottom): 8 assignable buttons, lit when what they control is on. Right-click to **Assign** (bypass a rack or plugin, select a rack, open a plugin, Hot Plugin 1–12, recall / next / previous / store scene, show a page, tap tempo, two windows), **Set keyboard shortcut** or **MIDI Learn**.
+- **User Keys** (bottom): 8 assignable buttons, lit when what they control is on. Right-click to **Assign** (bypass a rack or plugin, select a rack, open a plugin, Hot Plugin 1–12, recall / next / previous / store scene, show a page, tap tempo, two windows, Full View), **Set keyboard shortcut** or **MIDI Learn**.
 - **Keyboard shortcuts:** F1–F8 press the User Keys and T taps tempo by default. Change any of them, or add shortcuts for other actions, in Devices > Controllers > **Keyboard shortcuts**. LiveRack warns when keys are already used and refuses ones macOS needs (Cmd+Q, Cmd+W...). Shortcuts work while a LiveRack window is in front.
 - **Status bar:** one chip per audio driver (rate, buffer, DSP with 10 s peak, dropouts with the time of the last one), then consoles and the OSC remote. Click it to open Devices.
 
@@ -106,7 +107,7 @@ Give racks a group letter (A–H) with the badge on the strip. Every rack in a g
 
 ## Rack window
 
-The plugin panel shows the selected rack: its colour, name, console channel, latency, in/out meters, **Rack Bypass**, and a tab for each plugin. A resizable plugin window is sized to fit the panel. One that can't resize and doesn't fit isn't squeezed in: **Pop Out** opens it in its own window, or make the window bigger and it comes back. The rack window button (View group) moves it into its own window, e.g. on a second screen. Whether it's open and where are saved in the show.
+The plugin panel shows the selected rack: its colour, name, console channel, latency, in/out meters, **Rack Bypass**, and a tab for each plugin. A resizable plugin window is sized to fit the panel. One that can't resize and doesn't fit isn't squeezed in: use **Full View**, **Pop Out**, or make the window bigger and it comes back. **Full View** (top left of the panel, or double-click a plugin in a strip) gives the panel the whole main window, below the Hot Plugins, so big plugins fit without a second window; **‹ All Racks** or Esc goes back. **Pop Out** opens a plugin in its own window. The rack window button (View group) moves it into its own window, e.g. on a second screen. Whether it's open and where are saved in the show.
 
 ## Console Link (follow the console, like Waves ProLink)
 
@@ -172,7 +173,7 @@ Commands:
 - `/liverack/rack/<n>/slot/<m>/bypass [0|1]`, `/liverack/selected/bypass [0|1]`
 - `/liverack/key/<n>/press`, `/liverack/hot/<n>/open`
 - `/liverack/scene/recall <n>`, `/liverack/scene/next`, `/liverack/scene/prev`, `/liverack/scene/store [n]`
-- `/liverack/tap`, `/liverack/bpm <bpm>`, `/liverack/view/twowindows [0|1]`
+- `/liverack/tap`, `/liverack/bpm <bpm>`, `/liverack/view/twowindows [0|1]`, `/liverack/view/fullview [0|1]`
 - `/liverack/page/<n>/select` (0 = All), `/liverack/page/next`, `/liverack/page/prev`
 - `/liverack/subscribe` (send everything again), `/liverack/ping`
 

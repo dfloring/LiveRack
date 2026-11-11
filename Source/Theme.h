@@ -80,6 +80,19 @@ namespace Theme
             setTitle (tip);
         }
 
+        // A label under the icon (toolbar buttons with room for one)
+        void setLabel (const juce::String& text) { label = text; repaint(); }
+        void setShowsLabel (bool shouldShow) { if (showLabel != shouldShow) { showLabel = shouldShow; repaint(); } }
+        bool hasLabel() const { return label.isNotEmpty(); }
+
+        static juce::Font labelFont() { return juce::Font (juce::FontOptions (11.0f)); }
+        int getLabelledWidth() const
+        {
+            juce::GlyphArrangement ga;
+            ga.addLineOfText (labelFont(), label, 0.0f, 0.0f);
+            return juce::jmax (44, (int) std::ceil (ga.getBoundingBox (0, -1, true).getWidth()) + 16);
+        }
+
         void paintButton (juce::Graphics& g, bool over, bool down) override
         {
             auto r = getLocalBounds().toFloat();
@@ -91,14 +104,29 @@ namespace Theme
                 g.fillRoundedRectangle (r, 6.0f);
             }
 
-            const auto box = juce::Rectangle<float> (18.0f, 18.0f).withCentre (r.getCentre());
-            g.setColour (on ? accent : (isEnabled() ? juce::Colour (0xffc3c9d0) : textDim.withAlpha (0.5f)));
+            const bool labelled = showLabel && label.isNotEmpty() && r.getHeight() >= 34.0f;
+            const auto colour = on ? accent : (isEnabled() ? juce::Colour (0xffc3c9d0) : textDim.withAlpha (0.5f));
+            auto centre = r.getCentre();
+            if (labelled)
+                centre.y = r.getY() + 4.0f + 9.0f;
+
+            const auto box = juce::Rectangle<float> (18.0f, 18.0f).withCentre (centre);
+            g.setColour (colour);
             g.strokePath (path, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded),
                           juce::AffineTransform::translation (box.getX(), box.getY()));
+
+            if (labelled)
+            {
+                g.setFont (labelFont());
+                g.setColour (on ? accent : (isEnabled() ? textDim.brighter (0.25f) : textDim.withAlpha (0.5f)));
+                g.drawText (label, r.withTop (box.getBottom() + 2.0f).withTrimmedBottom (2.0f), juce::Justification::centredTop, false);
+            }
         }
 
     private:
         juce::Path path;
+        juce::String label;
+        bool showLabel = false;
     };
 
     class LookAndFeel : public juce::LookAndFeel_V4

@@ -20,6 +20,7 @@ struct Action
         twoWindows,
         storeScene,
         showPage,        // number: 0 = All, 1.. = custom page
+        fullView,        // the plugin panel fills the main window
         numTypes
     };
 
@@ -28,7 +29,7 @@ struct Action
     int slotId = 0;
     int number = 0;
 
-    bool isToggle() const { return type == rackBypass || type == pluginBypass || type == twoWindows; }
+    bool isToggle() const { return type == rackBypass || type == pluginBypass || type == twoWindows || type == fullView; }
     bool operator== (const Action& o) const { return type == o.type && rack == o.rack && slotId == o.slotId && number == o.number; }
 
     juce::String describe (const RackEngine&) const;    // "Bypass Lead Vox"

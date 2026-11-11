@@ -56,6 +56,9 @@ PluginDock::PluginDock (RackEngine& e) : engine (e)
     popOutButton.onClick = [this] { if (onPopOut != nullptr) onPopOut (rack, slot); };
     removeButton.onClick = [this] { if (onRemove != nullptr) onRemove (rack, slot); };
 
+    addChildComponent (fullViewButton);
+    fullViewButton.onClick = [this] { if (onToggleFullView != nullptr) onToggleFullView(); };
+
     addAndMakeVisible (editorHolder);
     show (-1, -1);
 }
@@ -169,7 +172,9 @@ void PluginDock::show (int newRack, int newSlot)
 
     if (plugin != nullptr && plugin == tooBig)
     {
-        message = "This plugin is too big for this panel. Pop Out opens it in its own window, or make the window bigger.";
+        message = fullViewAvailable && ! fullView
+                    ? "This plugin is too big for this panel. Full View shows it in the whole window, or Pop Out opens it in its own window."
+                    : "This plugin is too big for this panel. Pop Out opens it in its own window, or make the window bigger.";
     }
     else if (plugin == nullptr)
     {
@@ -388,6 +393,11 @@ void PluginDock::resized()
     auto area = getLocalBounds().reduced (10);
 
     auto header = area.removeFromTop (32);
+    if (fullViewAvailable)
+    {
+        fullViewButton.setBounds (header.removeFromLeft (fullView ? 112 : 96));
+        header.removeFromLeft (12);
+    }
     removeButton.setBounds (header.removeFromRight (84));
     header.removeFromRight (6);
     popOutButton.setBounds (header.removeFromRight (84));
@@ -430,4 +440,28 @@ void PluginDock::resized()
             }
         });
     }
+}
+
+void PluginDock::setFullView (bool isFull, bool isAvailable)
+{
+    if (fullView == isFull && fullViewAvailable == isAvailable)
+        return;
+
+    fullView = isFull;
+    fullViewAvailable = isAvailable;
+    fullViewButton.setVisible (isAvailable);
+    fullViewButton.setButtonText (isFull ? juce::String::fromUTF8 ("\u2039 All Racks") : juce::String ("Full View"));
+    fullViewButton.setTooltip (isFull ? "Back to the rack strips (Esc)" : "Show this rack's plugins in the whole window (or double-click a plugin)");
+    if (isFull)
+    {
+        fullViewButton.setColour (juce::TextButton::buttonColourId, Theme::accent);
+        fullViewButton.setColour (juce::TextButton::textColourOffId, Theme::background);
+    }
+    else
+    {
+        fullViewButton.removeColour (juce::TextButton::buttonColourId);
+        fullViewButton.removeColour (juce::TextButton::textColourOffId);
+    }
+    show (rack, slot); // the "too big" message changes, and a plugin may fit now
+    resized();
 }

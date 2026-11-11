@@ -797,6 +797,10 @@ public:
             const auto l = layoutFor (r);
             if (l.header.contains (e.getPosition()) && ! l.chBadge.contains (e.getPosition()))
                 startRename (r);
+
+            for (int s = 0; s < (int) l.slots.size() && s < engine.getNumSlots (r); ++s)
+                if (l.slots[(size_t) s].contains (e.getPosition()) && owner.onOpenSlot != nullptr)
+                    owner.onOpenSlot (r, s);
         }
     }
 

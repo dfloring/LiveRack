@@ -17,6 +17,7 @@ public:
     std::function<void (int rack, int slot)> onSlotMenu;  // right-click on a slot
     std::function<void (int rack)>           onRackMenu;  // right-click on the rack
     std::function<void (int rack)>           onEditRack;  // double-click on the header
+    std::function<void (int rack, int slot)> onOpenSlot;  // double-click on a plugin
     std::function<void()>                    onAddRack;
     std::function<void (int rack)>           onOpenRouting;         // click on the I/O line
     std::function<void (int rack)>           onEditConsoleChannel;  // click on "CH"

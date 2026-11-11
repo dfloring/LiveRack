@@ -19,6 +19,10 @@ public:
 
     std::function<void (int rack, int slot)> onSelectSlot, onPopOut, onRemove, onToggleBypass;
     std::function<void()> onPreferredHeightChanged;
+
+    // Full View: the panel fills the main window instead of sharing it with the strips
+    std::function<void()> onToggleFullView;
+    void setFullView (bool isFull, bool isAvailable);
     std::function<void (int fromRack, int fromSlot, int toRack, int toIndex, bool copy)> onSlotDropped;
 
     // Tabs can be dragged to reorder (or onto a rack strip)
@@ -62,6 +66,8 @@ private:
     juce::Rectangle<int> headerArea, meterArea;
     juce::TextButton rackBypassButton { "Rack Bypass" }, bypassButton { "Bypass" },
                      popOutButton { "Pop Out" }, removeButton { "Remove" };
+    juce::TextButton fullViewButton { "Full View" };
+    bool fullView = false, fullViewAvailable = false;
     juce::OwnedArray<juce::TextButton> tabs;
     juce::Component editorHolder; // plugin editors are often native views: no scrolling container
 };

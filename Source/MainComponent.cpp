@@ -83,31 +83,177 @@ private:
 };
 
 // Devices, Routing and Scope: windows that stay open while you work
-class MainComponent::ToolWindow : public juce::DocumentWindow
+// A setup screen (Devices, Routing, Plugins, Scope, Shortcuts). It shows in
+// the main window in place of the racks, which suits a single screen, or pops
+// out into its own window. Where each one goes is remembered.
+class MainComponent::ToolWindow
 {
 public:
-    ToolWindow (const juce::String& title, juce::Component* content, const juce::String& key, std::function<void()> onClose)
-        : DocumentWindow (title, Theme::background, DocumentWindow::closeButton | DocumentWindow::minimiseButton),
-          settingsKey (key), closeCallback (std::move (onClose))
+    ToolWindow (MainComponent& o, const juce::String& t, juce::Component* c, const juce::String& key, std::function<void()> onClose)
+        : owner (o), title (t), settingsKey (key), closeCallback (std::move (onClose)), frame (*this)
     {
-        setUsingNativeTitleBar (true);
-        setContentOwned (content, true);
-        setResizable (true, false);
+        content.reset (c);
+        frame.addAndMakeVisible (*content);
+        windowSize = { juce::jmax (480, content->getWidth()), content->getHeight() + Frame::headerHeight };
 
-        const auto saved = AppSettings::get (settingsKey);
-        if (saved.isEmpty() || ! restoreWindowStateFromString (saved))
-            centreWithSize (getWidth(), getHeight());
-
-        setVisible (true);
+        if (AppSettings::get (settingsKey + "Popped") == "1")
+            openWindow();
+        else
+            owner.attachTool (this);
+        frame.update();
     }
 
-    ~ToolWindow() override { AppSettings::set (settingsKey, getWindowStateAsString()); }
+    ~ToolWindow()
+    {
+        closeWindow();
+        owner.detachTool (this);
+        frame.removeChildComponent (content.get());
+    }
 
-    void closeButtonPressed() override { closeCallback(); }
+    juce::Component& getFrame() { return frame; }
+    bool isPoppedOut() const { return window != nullptr; }
+    void close() { if (closeCallback != nullptr) closeCallback(); }
+
+    void toFront (bool)
+    {
+        if (window != nullptr)
+            window->toFront (true);
+        else
+            owner.attachTool (this);
+    }
+
+    void setPoppedOut (bool shouldPopOut)
+    {
+        if (shouldPopOut == isPoppedOut())
+            return;
+
+        AppSettings::set (settingsKey + "Popped", shouldPopOut ? "1" : "0");
+
+        if (shouldPopOut)
+        {
+            owner.detachTool (this);
+            openWindow();
+        }
+        else
+        {
+            closeWindow();
+            owner.attachTool (this);
+        }
+    }
 
 private:
-    juce::String settingsKey;
+    class Frame : public juce::Component
+    {
+    public:
+        static constexpr int headerHeight = 44;
+
+        explicit Frame (ToolWindow& t) : tool (t)
+        {
+            addAndMakeVisible (moveButton);
+            addAndMakeVisible (closeButton);
+
+            // Moving between windows deletes a window: never from inside its own click
+            moveButton.onClick = [this]
+            {
+                juce::Component::SafePointer<Frame> safe (this);
+                juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->tool.setPoppedOut (! safe->tool.isPoppedOut()); });
+            };
+            closeButton.onClick = [this] { tool.close(); };
+            closeButton.setTooltip ("Back to the racks (Esc)");
+        }
+
+        void update()
+        {
+            const bool popped = tool.isPoppedOut();
+            moveButton.setButtonText (popped ? "Show in Main Window" : "Pop Out");
+            moveButton.setTooltip (popped ? "Show this in the main window, in place of the racks"
+                                          : "Open this in its own window, for a second screen");
+            closeButton.setVisible (! popped); // its window has its own close button
+            resized();
+            repaint();
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            g.fillAll (Theme::background);
+            if (tool.isPoppedOut())
+                return;
+
+            g.setColour (Theme::text);
+            g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+            g.drawText (tool.title, getLocalBounds().removeFromTop (headerHeight).withTrimmedLeft (12),
+                        juce::Justification::centredLeft);
+        }
+
+        void resized() override
+        {
+            auto area = getLocalBounds();
+            auto header = area.removeFromTop (headerHeight).reduced (8, 6);
+            if (closeButton.isVisible())
+            {
+                closeButton.setBounds (header.removeFromRight (120));
+                header.removeFromRight (6);
+            }
+            moveButton.setBounds (header.removeFromRight (tool.isPoppedOut() ? 170 : 96));
+
+            if (auto* c = tool.content.get())
+                c->setBounds (area);
+        }
+
+    private:
+        ToolWindow& tool;
+        juce::TextButton moveButton, closeButton { juce::String::fromUTF8 ("\u2039 Racks") };
+    };
+
+    class Window : public juce::DocumentWindow
+    {
+    public:
+        Window (ToolWindow& t)
+            : DocumentWindow ("LiveRack - " + t.title, Theme::background, DocumentWindow::closeButton | DocumentWindow::minimiseButton),
+              tool (t)
+        {
+            setUsingNativeTitleBar (true);
+            setContentNonOwned (&t.frame, true);
+            setResizable (true, false);
+
+            const auto saved = AppSettings::get (t.settingsKey);
+            if (saved.isEmpty() || ! restoreWindowStateFromString (saved))
+                centreWithSize (getWidth(), getHeight());
+
+            setVisible (true);
+        }
+
+        void closeButtonPressed() override { tool.close(); }
+
+    private:
+        ToolWindow& tool;
+    };
+
+    void openWindow()
+    {
+        frame.setSize (windowSize.x, windowSize.y);
+        window = std::make_unique<Window> (*this);
+        frame.update();
+    }
+
+    void closeWindow()
+    {
+        if (window == nullptr)
+            return;
+
+        AppSettings::set (settingsKey, window->getWindowStateAsString());
+        window->clearContentComponent();
+        window.reset();
+        frame.update();
+    }
+
+    MainComponent& owner;
+    juce::String title, settingsKey;
     std::function<void()> closeCallback;
+    Frame frame;
+    std::unique_ptr<juce::Component> content;
+    std::unique_ptr<Window> window;
+    juce::Point<int> windowSize;
 };
 
 // BPM read-out: click to type a tempo
@@ -284,10 +430,20 @@ MainComponent::MainComponent()
     addAndMakeVisible (keysBar);
     addAndMakeVisible (*statusBar);
 
-    devicesButton.onClick    = [this] { showDevices(); };
-    routingButton.onClick    = [this] { showRouting (selectedRack); };
-    scopeButton.onClick      = [this] { showScope(); };
-    scanButton.onClick       = [this] { showPluginScanner(); };
+    saveButton.setLabel ("Save");
+    loadButton.setLabel ("Show");
+    devicesButton.setLabel ("Devices");
+    routingButton.setLabel ("Routing");
+    scanButton.setLabel ("Plugins");
+    scopeButton.setLabel ("Scope");
+    addRackButton.setLabel ("Add Rack");
+    windowModeButton.setLabel ("Rack Window");
+    stackRowsButton.setLabel ("Stack Rows");
+
+    devicesButton.onClick    = [this] { toggleTool (devicesWindow, [this] { showDevices(); }); };
+    routingButton.onClick    = [this] { toggleTool (routingWindow, [this] { showRouting (selectedRack); }); };
+    scopeButton.onClick      = [this] { toggleTool (scopeWindow, [this] { showScope(); }); };
+    scanButton.onClick       = [this] { toggleTool (pluginsWindow, [this] { showPluginScanner(); }); };
     storeSceneButton.onClick = [this] { showStoreSceneDialog(); };
     addRackButton.onClick    = [this] { addRack(); };
     windowModeButton.onClick = [this] { setTwoWindowMode (! isTwoWindowMode()); };
@@ -316,6 +472,7 @@ MainComponent::MainComponent()
     strips.onSlotMenu  = [this] (int r, int s) { showSlotMenu (r, s); };
     strips.onRackMenu  = [this] (int r) { showRackMenu (r); };
     strips.onEditRack  = [this] (int r) { showRackDialog (r); };
+    strips.onOpenSlot  = [this] (int r, int s) { select (r, s); if (! isTwoWindowMode()) setFullView (true); };
     strips.onAddRack   = [this] { addRack(); };
     strips.onOpenRouting = [this] (int r) { showRouting (r); };
     strips.onEditConsoleChannel = [this] (int r) { editConsoleChannel (r); };
@@ -329,6 +486,8 @@ MainComponent::MainComponent()
     dock.onRemove       = [this] (int r, int s) { removeSlot (r, s); };
     dock.onToggleBypass = [this] (int r, int s) { engine.setSlotBypassed (r, s, ! engine.isSlotBypassed (r, s)); };
     dock.onPreferredHeightChanged = [this] { resized(); };
+    dock.onToggleFullView = [this] { setFullView (! fullView); };
+    dock.setFullView (false, true);
     dock.levelFor = [this] (int r, bool out) { return strips.getLevel (r, out); };
     dock.onSlotDropped = [this] (int fr, int fs, int tr, int ti, bool copy) { handleSlotDrop (fr, fs, tr, ti, copy); };
 
@@ -441,6 +600,7 @@ MainComponent::~MainComponent()
     keysBar.save();
 
     devicesWindow.reset();
+    pluginsWindow.reset();
     shortcutsWindow.reset();
     routingWindow.reset();
     scopeWindow.reset();
@@ -467,11 +627,11 @@ void MainComponent::paint (juce::Graphics& g)
 
     // Toolbar background and logo
     g.setColour (Theme::panel);
-    g.fillRect (0, 0, getWidth(), 64);
+    g.fillRect (0, 0, getWidth(), toolbarHeight);
     g.setColour (Theme::border);
-    g.fillRect (0, 64, getWidth(), 1);
+    g.fillRect (0, toolbarHeight, getWidth(), 1);
 
-    auto logo = juce::Rectangle<float> (16.0f, 18.0f, 28.0f, 28.0f);
+    auto logo = juce::Rectangle<float> (16.0f, (toolbarHeight - 28) / 2.0f, 28.0f, 28.0f);
     g.setColour (Theme::accent);
     g.fillRoundedRectangle (logo, 6.0f);
     g.setColour (Theme::background);
@@ -480,7 +640,7 @@ void MainComponent::paint (juce::Graphics& g)
 
     g.setColour (Theme::text);
     g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
-    g.drawText ("LiveRack", 52, 0, 90, 64, juce::Justification::centredLeft);
+    g.drawText ("LiveRack", 52, 0, 90, toolbarHeight, juce::Justification::centredLeft);
 
     // Button groups sit in sunken wells
     for (auto& grp : toolbarGroups)
@@ -516,9 +676,20 @@ void MainComponent::resized()
 {
     auto area = getLocalBounds();
 
-    auto bar = area.removeFromTop (64).reduced (12, 10);
+    auto bar = area.removeFromTop (toolbarHeight).reduced (12, 10);
     bar.removeFromLeft (140); // logo and name
     toolbarGroups.clear();
+
+    // Labels under the icons when there's room for them
+    Theme::IconButton* labelled[] = { &saveButton, &loadButton, &devicesButton, &routingButton, &scanButton,
+                                      &scopeButton, &addRackButton, &windowModeButton, &stackRowsButton };
+    int labelledWidth = 0;
+    for (auto* b : labelled)
+        labelledWidth += b->getLabelledWidth() - 40;
+    const bool showLabels = bar.getWidth() >= 1010 + labelledWidth;
+    for (auto* b : labelled)
+        b->setShowsLabel (showLabels);
+    auto w = [showLabels] (Theme::IconButton& b) { return showLabels ? b.getLabelledWidth() : 40; };
 
     // A group of buttons in a well, laid out left to right
     auto group = [this, &bar] (std::initializer_list<std::pair<juce::Component*, int>> items, bool fromRight = false)
@@ -540,10 +711,10 @@ void MainComponent::resized()
         if (fromRight) bar.removeFromRight (12); else bar.removeFromLeft (12);
     };
 
-    group ({ { &saveButton, 40 }, { &loadButton, 40 } });
+    group ({ { &saveButton, w (saveButton) }, { &loadButton, w (loadButton) } });
     group ({ { &prevSceneButton, 34 }, { nullptr, 168 }, { &nextSceneButton, 34 }, { &storeSceneButton, 64 } });
-    group ({ { &devicesButton, 40 }, { &routingButton, 40 }, { &scanButton, 40 }, { &scopeButton, 40 } });
-    group ({ { &addRackButton, 40 }, { &windowModeButton, 40 }, { &stackRowsButton, 40 } });
+    group ({ { &devicesButton, w (devicesButton) }, { &routingButton, w (routingButton) }, { &scanButton, w (scanButton) }, { &scopeButton, w (scopeButton) } });
+    group ({ { &addRackButton, w (addRackButton) }, { &windowModeButton, w (windowModeButton) }, { &stackRowsButton, w (stackRowsButton) } });
     group ({ { bpmDisplay.get(), 84 }, { &tapButton, 60 } }, true);
 
     statusBar->setBounds (area.removeFromBottom (30));
@@ -559,9 +730,35 @@ void MainComponent::resized()
     if (pickerOverlay != nullptr)
         pickerOverlay->setBounds (getLocalBounds());
 
+    // A setup screen in front covers the racks (the User Keys stay)
+    const bool toolInFront = ! tools.empty();
+    hotBar.setVisible (! toolInFront);
+    if (toolInFront)
+    {
+        tools.back()->getFrame().setBounds (area.withTop (hotBar.getY()));
+        strips.setVisible (false);
+        pageTabs.setVisible (false);
+        dock.setVisible (false);
+        return;
+    }
+    dock.setVisible (true);
+
     if (isTwoWindowMode())
     {
+        strips.setVisible (true);
+        pageTabs.setVisible (true);
         strips.setBounds (area); // the plugin panel lives in the rack view window
+        return;
+    }
+
+    strips.setVisible (! fullView);
+    pageTabs.setVisible (! fullView);
+
+    if (fullView)
+    {
+        // The rack's plugins get the whole window, under the Hot Plugins row
+        area.setTop (pageTabs.getY());
+        dock.setBounds (area);
         return;
     }
 
@@ -623,6 +820,8 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component*)
     if (key == juce::KeyPress ('s', juce::ModifierKeys::commandModifier, 0)) { saveShow (false); return true; }
     if (key == juce::KeyPress ('s', juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier, 0)) { saveShow (true); return true; }
     if (key == juce::KeyPress ('o', juce::ModifierKeys::commandModifier, 0)) { openShow(); return true; }
+    if (key == juce::KeyPress::escapeKey && ! tools.empty()) { tools.back()->close(); return true; }
+    if (key == juce::KeyPress::escapeKey && isFullView()) { setFullView (false); return true; }
 
     // User Key shortcuts first, then the extra ones
     if (const int k = keysBar.keyForShortcut (key); k >= 0)
@@ -686,6 +885,7 @@ void MainComponent::performAction (const Action& a, int value)
         case Action::prevScene:    stepScene (-1); break;
         case Action::tapTempo:     engine.tapTempo(); break;
         case Action::twoWindows:   setTwoWindowMode (value < 0 ? ! isTwoWindowMode() : value > 0); break;
+        case Action::fullView:     setFullView (value < 0 ? ! isFullView() : value > 0); break;
         case Action::storeScene:   storeScene (juce::jmax (0, currentScene)); break;
         case Action::showPage:     engine.setCurrentPage (a.number - 1); break;
         case Action::none: case Action::numTypes: default: break;
@@ -723,6 +923,7 @@ bool MainComponent::isActionActive (const Action& a) const
         }
         case Action::recallScene:  return currentScene == a.number;
         case Action::twoWindows:   return isTwoWindowMode();
+        case Action::fullView:     return isFullView();
         case Action::showPage:     return engine.getCurrentPage() == a.number - 1;
         case Action::tapTempo:     return std::fmod (juce::Time::getMillisecondCounterHiRes(), 60000.0 / engine.getBpm()) < 100.0;
         case Action::nextScene: case Action::prevScene: case Action::storeScene:
@@ -794,6 +995,8 @@ void MainComponent::handleOsc (const juce::String& address, const juce::Array<ju
         engine.setBpm ((double) args[0]);
     else if (p[1] == "view" && p.size() >= 3 && p[2] == "twowindows")
         performAction (make (Action::twoWindows), value);
+    else if (p[1] == "view" && p.size() >= 3 && p[2] == "fullview")
+        performAction (make (Action::fullView), value);
 }
 
 // State to OSC clients (only values that changed are actually sent)
@@ -917,9 +1120,9 @@ void MainComponent::refreshAll()
     if (routingMatrix != nullptr) routingMatrix->refresh();
     if (scopeEditor != nullptr)   scopeEditor->refresh();
 
-    // While the plugin picker is open the docked plugin stays closed
-    // (its native view would draw over the picker)
-    if (pickerOverlay == nullptr)
+    // While the plugin picker or a setup screen covers the panel, the docked
+    // plugin stays closed (its native view would draw over them)
+    if (pickerOverlay == nullptr && ! dockIsCovered())
         dock.show (selectedRack, selectedSlot);
 }
 
@@ -1462,10 +1665,90 @@ void MainComponent::removeSlot (int rack, int slot)
 
 //==============================================================================
 // One or two windows
+void MainComponent::setFullView (bool shouldBeFull)
+{
+    fullView = shouldBeFull && ! isTwoWindowMode();
+    dock.setFullView (fullView, ! isTwoWindowMode());
+    resized();
+    repaint();
+}
+
+//==============================================================================
+// Setup screens shown in the main window, in place of the racks
+void MainComponent::attachTool (ToolWindow* tool)
+{
+    tools.erase (std::remove (tools.begin(), tools.end(), tool), tools.end());
+    tools.push_back (tool); // the last one is in front
+
+    if (tool->getFrame().getParentComponent() != this)
+        addChildComponent (tool->getFrame());
+
+    showFrontTool();
+}
+
+void MainComponent::detachTool (ToolWindow* tool)
+{
+    tools.erase (std::remove (tools.begin(), tools.end(), tool), tools.end());
+
+    if (tool->getFrame().getParentComponent() == this)
+        removeChildComponent (&tool->getFrame());
+
+    showFrontTool();
+}
+
+bool MainComponent::dockIsCovered() const
+{
+    return ! tools.empty() && ! isTwoWindowMode();
+}
+
+void MainComponent::showFrontTool()
+{
+    for (auto* t : tools)
+        t->getFrame().setVisible (t == tools.back());
+
+    // Plugin editors are native views that would draw over the screen in front
+    const bool covered = dockIsCovered();
+    if (covered)
+        dock.releaseEditor();
+    else if (dockWasCovered)
+        dock.show (selectedRack, selectedSlot);
+    dockWasCovered = covered;
+
+    // The toolbar buttons are updated once the screen has been stored
+    juce::Component::SafePointer<MainComponent> safe (this);
+    juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->updateToolButtons(); });
+
+    resized();
+    repaint();
+}
+
+void MainComponent::updateToolButtons()
+{
+    // The toolbar button of the screen in front lights up
+    auto front = [this] (const std::unique_ptr<ToolWindow>& w) { return w != nullptr && ! tools.empty() && tools.back() == w.get(); };
+    devicesButton.setToggleState (front (devicesWindow), juce::dontSendNotification);
+    routingButton.setToggleState (front (routingWindow), juce::dontSendNotification);
+    scopeButton.setToggleState (front (scopeWindow), juce::dontSendNotification);
+    scanButton.setToggleState (front (pluginsWindow), juce::dontSendNotification);
+}
+
+// A toolbar button opens its screen, or goes back to the racks if it's already in front
+void MainComponent::toggleTool (std::unique_ptr<ToolWindow>& tool, std::function<void()> open)
+{
+    if (tool != nullptr && ! tool->isPoppedOut() && ! tools.empty() && tools.back() == tool.get())
+        tool->close();
+    else
+        open();
+}
+
 void MainComponent::setTwoWindowMode (bool shouldBeTwo)
 {
     if (shouldBeTwo == isTwoWindowMode())
         return;
+
+    // The rack window replaces Full View
+    if (shouldBeTwo)
+        fullView = false;
 
     // Plugin editors are native views: recreate them in their new window
     // rather than moving them between windows.
@@ -1522,6 +1805,7 @@ void MainComponent::setTwoWindowMode (bool shouldBeTwo)
 
     windowModeButton.setToggleState (shouldBeTwo, juce::dontSendNotification);
     AppSettings::set ("twoWindows", shouldBeTwo ? "1" : "0");
+    dock.setFullView (false, ! shouldBeTwo); // Full View is for the main window only
     resized();
     refreshAll(); // shows the selected plugin again in its new home
 }
@@ -1601,7 +1885,7 @@ void MainComponent::showDevices()
         [safe] { return safe != nullptr ? (int) safe->extraShortcuts.size() + [&]{ int n = 0; for (int i = 0; i < UserKeysBar::numKeys; ++i) if (safe->keysBar.getShortcut (i).isValid()) ++n; return n; }() : 0; } };
 
     devicesPanel = new DevicesPanel (host);
-    devicesWindow = std::make_unique<ToolWindow> ("LiveRack - Devices", devicesPanel, "devicesWindow", [safe]
+    devicesWindow = std::make_unique<ToolWindow> (*this, "Devices", devicesPanel, "devicesWindow", [safe]
     {
         juce::MessageManager::callAsync ([safe]
         {
@@ -1646,7 +1930,7 @@ void MainComponent::showRouting (int rack)
             }
         };
 
-        routingWindow = std::make_unique<ToolWindow> ("LiveRack - Routing", routingMatrix, "routingWindow", [safe]
+        routingWindow = std::make_unique<ToolWindow> (*this, "Routing", routingMatrix, "routingWindow", [safe]
         {
             juce::MessageManager::callAsync ([safe]
             {
@@ -1672,7 +1956,7 @@ void MainComponent::showScope()
 
     juce::Component::SafePointer<MainComponent> safe (this);
     scopeEditor = new ScopeEditor (engine, engine.getSnapshotInfo (currentScene) != nullptr ? currentScene : -1);
-    scopeWindow = std::make_unique<ToolWindow> ("LiveRack - Snapshot Scope", scopeEditor, "scopeWindow", [safe]
+    scopeWindow = std::make_unique<ToolWindow> (*this, "Snapshot Scope", scopeEditor, "scopeWindow", [safe]
     {
         juce::MessageManager::callAsync ([safe]
         {
@@ -1685,6 +1969,12 @@ void MainComponent::showScope()
 
 void MainComponent::showPluginScanner()
 {
+    if (pluginsWindow != nullptr)
+    {
+        pluginsWindow->toFront (true);
+        return;
+    }
+
     auto* list = new juce::PluginListComponent (engine.getFormatManager(),
                                                 engine.getKnownPlugins(),
                                                 engine.getDeadMansPedalFile(),
@@ -1692,14 +1982,11 @@ void MainComponent::showPluginScanner()
     list->setNumberOfThreadsForScanning (1); // keep the UI responsive while scanning
     list->setSize (760, 520);
 
-    juce::DialogWindow::LaunchOptions o;
-    o.content.setOwned (list);
-    o.dialogTitle = "Plugins";
-    o.dialogBackgroundColour = Theme::panel;
-    o.escapeKeyTriggersCloseButton = true;
-    o.useNativeTitleBar = true;
-    o.resizable = true;
-    o.launchAsync();
+    juce::Component::SafePointer<MainComponent> safe (this);
+    pluginsWindow = std::make_unique<ToolWindow> (*this, "Plugins", list, "pluginsWindow", [safe]
+    {
+        juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->pluginsWindow.reset(); });
+    });
 }
 
 //==============================================================================
@@ -2538,7 +2825,7 @@ void MainComponent::showShortcuts()
     };
 
     shortcutsEditor = new ShortcutsEditor (host);
-    shortcutsWindow = std::make_unique<ToolWindow> ("LiveRack - Keyboard Shortcuts", shortcutsEditor, "shortcutsWindow", [safe]
+    shortcutsWindow = std::make_unique<ToolWindow> (*this, "Keyboard Shortcuts", shortcutsEditor, "shortcutsWindow", [safe]
     {
         juce::MessageManager::callAsync ([safe]
         {

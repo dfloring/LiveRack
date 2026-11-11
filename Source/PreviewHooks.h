@@ -65,6 +65,11 @@ struct PreviewHooks
         if (open == "routing")  { m.select (2, 0); m.showRouting (2); }
         if (open == "routingout") { m.showRouting (6); m.routingMatrix->outputs = true; m.routingMatrix->refresh(); }
         if (open == "scope")    m.showScope();
+        if (open == "fullview") { m.select (0, 1); m.setFullView (true); }
+        if (open == "plugins")  m.showPluginScanner();
+        if (open == "devpop")   { m.showDevices(); m.devicesWindow->setPoppedOut (true); }
+        if (open == "toolclose") { m.showDevices(); juce::Timer::callAfterDelay (2000, [&m] { m.devicesWindow->close(); }); }
+        if (open == "toolstack") { m.showDevices(); m.showScope(); m.scopeWindow->close(); }
         if (open == "groupmenu")  juce::Timer::callAfterDelay (1500, [&m] { m.strips.previewMenu (0, 0); });
         if (open == "colourmenu") juce::Timer::callAfterDelay (1500, [&m] { m.strips.previewMenu (1, 1); });
         if (open == "keymenu2")   juce::Timer::callAfterDelay (1500, [&m] { Action::showChooser (m.engine, {}, 0, [] (Action) {}); });
