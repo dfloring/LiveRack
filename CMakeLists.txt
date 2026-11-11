@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(LiveRack VERSION 0.15.1)
+project(LiveRack VERSION 0.16.0)
 if(APPLE)
     enable_language(OBJCXX)
 endif()

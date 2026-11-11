@@ -27,7 +27,7 @@ Get the latest build from [Releases](../../releases): the Mac app (Apple silicon
 - **Mac:** unzip, then right-click `LiveRack.app` > **Open** the first time (it isn't notarised).
 - **Windows:** unzip and run `LiveRack.exe`. If Windows warns about an unknown publisher: **More info > Run anyway**. Pick your ASIO driver (Dante Virtual Soundcard, SoundGrid) in Devices > driver Settings.
 
-# User guide (v0.15)
+# User guide (v0.16)
 
 Any number of independent racks of VST3/AU plugins on one or more audio drivers at once (Dante Virtual Soundcard, a Dante interface, the Waves SoundGrid Driver). Everything lives in one **show file** (`.liverack`) with its snapshots inside it, and the open show comes back automatically on launch.
 
@@ -132,6 +132,18 @@ LiveRack runs a small web server (port 8080; Devices > Controllers > **iPad / we
 - Tap a plugin to open **all its parameters** as touch sliders (with filter and plugin bypass); meters like gain reduction show read-only
 - Pages, User Keys, previous / next scene and tap tempo
 - Any number of iPads, phones or computers at once; it shows "Not connected" if LiveRack goes away
+
+### Building the show from the remote (for a server)
+
+Tap **Edit** at the top of the remote. Then:
+
+- **+ Add rack** at the end of the strips: name, mono / stereo / mono-to-stereo, audio driver, console channel, Recall Safe. It takes the next free channels.
+- Tap a **rack's header** to change the same settings plus its input and output channels (named as the driver names them), or to remove it.
+- **+ Add plugin** on a rack opens the scanned plugin list with search. The right mono or stereo version loads.
+- Tap a **plugin** to move it up or down, open its parameters, or remove it.
+- The **show button** (the show's name; a dot means unsaved changes) saves, saves under a new name, starts a new show, or opens one. Shows saved from the remote go in **Documents/LiveRack Shows** on the LiveRack computer; the list also shows the folder of the current show. Opening or starting another show asks about unsaved changes first.
+
+Scanning for plugins, choosing audio devices and installing plugins still happen on the LiveRack computer itself (or over screen sharing).
 
 ### Plugin windows on the iPad (Mac)
 

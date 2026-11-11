@@ -1183,8 +1183,15 @@ void MainComponent::closePicker()
 
 void MainComponent::handlePluginDrop (const juce::String& pluginId, int toRack, int toIndex)
 {
+    juce::String error;
+    if (! insertPlugin (pluginId, toRack, toIndex, error) && error.isNotEmpty())
+        showError ("Couldn't load plugin", error);
+}
+
+bool MainComponent::insertPlugin (const juce::String& pluginId, int toRack, int toIndex, juce::String& error)
+{
     if (! juce::isPositiveAndBelow (toRack, engine.getNumRacks()))
-        return;
+        return false;
 
     juce::PluginDescription desc;
 
@@ -1192,7 +1199,10 @@ void MainComponent::handlePluginDrop (const juce::String& pluginId, int toRack, 
     {
         auto* f = library.findFamily (pluginId.fromFirstOccurrenceOf ("family:", false, false));
         if (f == nullptr)
-            return;
+        {
+            error = "That plugin isn't in the plugin list";
+            return false;
+        }
         desc = PluginLibrary::bestVersionFor (*f, wantForSlot (toRack, toIndex, *f));
         library.noteUsed (f->key);
     }
@@ -1202,20 +1212,18 @@ void MainComponent::handlePluginDrop (const juce::String& pluginId, int toRack, 
     }
     else
     {
-        return;
+        error = "That plugin isn't in the plugin list";
+        return false;
     }
 
-    juce::String error;
     if (! engine.addPlugin (toRack, desc, error))
-    {
-        showError ("Couldn't load plugin", error);
-        return;
-    }
+        return false;
 
     const int last = engine.getNumSlots (toRack) - 1;
     engine.moveSlotTo (toRack, last, toIndex);
     fixStereoVersions (toRack);
     select (toRack, juce::jlimit (0, last, toIndex));
+    return true;
 }
 
 void MainComponent::showSlotMenu (int rack, int slot, juce::Rectangle<int> screenArea)
@@ -1906,21 +1914,20 @@ void MainComponent::openShowFile (const juce::File& f)
 void MainComponent::newShow()
 {
     juce::Component::SafePointer<MainComponent> safe (this);
-    checkUnsavedThen ([safe]
-    {
-        if (safe == nullptr)
-            return;
+    checkUnsavedThen ([safe] { if (safe != nullptr) safe->startNewShow(); });
+}
 
-        safe->closeAllEditors();
-        safe->engine.newShow();
-        RackConfig first;
-        first.name = "Rack 1";
-        first.stereo = true;
-        safe->engine.addRack (first);
-        safe->afterShowLoaded();
-        safe->select (0, 0);
-        safe->consoleNote = "New show";
-    });
+void MainComponent::startNewShow()
+{
+    closeAllEditors();
+    engine.newShow();
+    RackConfig first;
+    first.name = "Rack 1";
+    first.stereo = true;
+    engine.addRack (first);
+    afterShowLoaded();
+    select (0, 0);
+    consoleNote = "New show";
 }
 
 void MainComponent::afterShowLoaded()
@@ -2557,6 +2564,9 @@ juce::String MainComponent::buildWebState (const juce::String& query)
     r->setProperty ("selected", selectedRack);
     r->setProperty ("selectedSlot", selectedSlot);
     r->setProperty ("pluginWindows", PluginViewCapture::isSupported());
+    r->setProperty ("note", consoleNote);
+    r->setProperty ("edited", engine.isShowEdited());
+    r->setProperty ("hasShowFile", engine.getShowFile() != juce::File());
 
     juce::Array<juce::var> pages;
     for (auto& p : engine.getPages())
@@ -2580,6 +2590,12 @@ juce::String MainComponent::buildWebState (const juce::String& query)
         ro->setProperty ("gr", strips.getMaxGainReduction (i));
         ro->setProperty ("level", strips.getOutputLevel (i));
         ro->setProperty ("visible", std::find (visible.begin(), visible.end(), i) != visible.end());
+        ro->setProperty ("stereo", cfg.stereo);
+        ro->setProperty ("m2s", cfg.isMonoToStereo());
+        ro->setProperty ("driver", cfg.driver);
+        ro->setProperty ("in", juce::Array<juce::var> { cfg.input[0], cfg.input[1] });
+        ro->setProperty ("out", juce::Array<juce::var> { cfg.output[0], cfg.output[1] });
+        ro->setProperty ("console", cfg.consoleChannel);
 
         const int point = engine.getStereoPoint (i);
         juce::Array<juce::var> slots;
@@ -2654,7 +2670,259 @@ juce::String MainComponent::buildWebState (const juce::String& query)
             r->setProperty ("view", view);
         }
 
+    addWebEditState (*r, query);
     return juce::JSON::toString (root, true);
+}
+
+//==============================================================================
+// Building the show from the web remote, for a server nobody sits at
+juce::File MainComponent::getShowsFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("LiveRack Shows");
+}
+
+juce::Array<juce::File> MainComponent::getRemoteShowFolders() const
+{
+    juce::Array<juce::File> folders;
+    folders.add (getShowsFolder());
+
+    const auto current = engine.getShowFile().getParentDirectory();
+    if (engine.getShowFile() != juce::File() && current != getShowsFolder())
+        folders.add (current);
+
+    return folders;
+}
+
+void MainComponent::addWebEditState (juce::DynamicObject& r, const juce::String& query)
+{
+    auto has = [&query] (const juce::String& flag)
+    {
+        return juce::StringArray::fromTokens (query, "&", "").contains (flag + "=1");
+    };
+
+    auto obj = [] { return juce::var (new juce::DynamicObject()); };
+
+    if (has ("edit"))
+    {
+        juce::Array<juce::var> drivers;
+        for (int d = 0; d < engine.getNumDrivers(); ++d)
+        {
+            const auto st = engine.getDriverStatus (d);
+            auto dv = obj();
+            auto* o = dv.getDynamicObject();
+            o->setProperty ("name", st.open ? st.deviceName : "Driver " + juce::String (d + 1) + " (no device)");
+            o->setProperty ("open", st.open);
+
+            juce::Array<juce::var> ins, outs;
+            if (auto* dev = engine.getDeviceManager (d).getCurrentAudioDevice())
+            {
+                const auto inNames = dev->getInputChannelNames(), outNames = dev->getOutputChannelNames();
+                for (auto& n : inNames)  ins.add (n);
+                for (auto& n : outNames) outs.add (n);
+            }
+            o->setProperty ("ins", ins);
+            o->setProperty ("outs", outs);
+            drivers.add (dv);
+        }
+        r.setProperty ("drivers", drivers);
+
+        // Shows the remote can open: the shows folder, and the current show's folder
+        juce::Array<juce::var> shows;
+        const auto folders = getRemoteShowFolders();
+        for (int fi = 0; fi < folders.size(); ++fi)
+        {
+            auto files = folders[fi].findChildFiles (juce::File::findFiles, false, "*.liverack");
+            std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b)
+                       { return a.getLastModificationTime() > b.getLastModificationTime(); });
+            for (auto& f : files)
+            {
+                auto sv = obj();
+                sv.getDynamicObject()->setProperty ("name", f.getFileNameWithoutExtension());
+                sv.getDynamicObject()->setProperty ("folder", fi);
+                sv.getDynamicObject()->setProperty ("current", f == engine.getShowFile());
+                shows.add (sv);
+            }
+        }
+        r.setProperty ("shows", shows);
+        r.setProperty ("showsFolder", getShowsFolder().getFullPathName());
+    }
+
+    if (has ("lib"))
+    {
+        juce::Array<juce::var> lib;
+        for (auto& f : library.getFamilies())
+        {
+            auto lv = obj();
+            auto* o = lv.getDynamicObject();
+            o->setProperty ("key", f.key);
+            o->setProperty ("name", f.name);
+            o->setProperty ("maker", f.manufacturer);
+            o->setProperty ("cat", PluginLibrary::categoryName (f.category));
+            lib.add (lv);
+        }
+        r.setProperty ("library", lib);
+    }
+}
+
+bool MainComponent::handleWebEditCommand (const juce::String& cmd, const juce::var& c)
+{
+    const int rack = c.hasProperty ("rack") ? (int) c["rack"] : -1;
+    const bool validRack = juce::isPositiveAndBelow (rack, engine.getNumRacks());
+
+    // Rack settings sent from the remote, applied to a config
+    auto applyTo = [&c, this] (RackConfig& cfg)
+    {
+        if (c.hasProperty ("name"))
+        {
+            cfg.name = c["name"].toString().trim();
+            if (cfg.name.isEmpty())
+                cfg.name = "Rack";
+        }
+        if (c.hasProperty ("format"))
+        {
+            const auto f = c["format"].toString();
+            cfg.stereo = f == "stereo";
+            cfg.monoToStereo = f == "m2s";
+        }
+        if (c.hasProperty ("driver"))
+            cfg.driver = juce::jlimit (0, juce::jmax (0, engine.getNumDrivers() - 1), (int) c["driver"]);
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            if (auto* in = c["in"].getArray(); in != nullptr && ch < in->size())
+                cfg.input[ch] = juce::jmax (0, (int) (*in)[ch]);
+            if (auto* out = c["out"].getArray(); out != nullptr && ch < out->size())
+                cfg.output[ch] = juce::jmax (0, (int) (*out)[ch]);
+        }
+        if (c.hasProperty ("console"))
+            cfg.consoleChannel = juce::jmax (0, (int) c["console"]);
+        if (c.hasProperty ("safe"))
+            cfg.recallSafe = (bool) c["safe"];
+    };
+
+    if (cmd == "addRack")
+    {
+        addRack(); // next free channels, joins the current page
+        const int r = engine.getNumRacks() - 1;
+        auto cfg = engine.getRackConfig (r);
+        applyTo (cfg);
+        engine.setRackConfig (r, cfg);
+        select (r, -1);
+        consoleNote = "Added " + cfg.name;
+        return true;
+    }
+
+    if (cmd == "rackConfig" && validRack)
+    {
+        const auto before = engine.getRackConfig (rack);
+        auto cfg = before;
+        applyTo (cfg);
+
+        if (cfg.stereo != before.stereo || cfg.monoToStereo != before.monoToStereo || cfg.driver != before.driver)
+        {
+            // Plugins are re-prepared: their windows close first
+            dock.releaseEditor();
+            closeEditorsForRack (rack);
+        }
+
+        engine.setRackConfig (rack, cfg);
+        if (cfg.isMonoToStereo() != before.isMonoToStereo() || cfg.stereo != before.stereo)
+            fixStereoVersions (rack);
+        refreshAll();
+        return true;
+    }
+
+    if (cmd == "removeRack" && validRack)
+    {
+        consoleNote = "Removed " + engine.getRackConfig (rack).name;
+        removeRack (rack);
+        return true;
+    }
+
+    if (cmd == "addPlugin" && validRack)
+    {
+        const int at = c.hasProperty ("index") ? (int) c["index"] : engine.getNumSlots (rack);
+        juce::String error;
+        if (insertPlugin ("family:" + c["key"].toString(), rack, juce::jlimit (0, engine.getNumSlots (rack), at), error))
+            consoleNote = "Added " + engine.getPlugin (rack, juce::jlimit (0, engine.getNumSlots (rack) - 1, at))->getName();
+        else
+            consoleNote = "Couldn't add the plugin" + (error.isNotEmpty() ? ": " + error : juce::String());
+        return true;
+    }
+
+    const int slot = c.hasProperty ("slot") ? (int) c["slot"] : -1;
+    const bool validSlot = validRack && engine.getPlugin (rack, slot) != nullptr;
+
+    if (cmd == "removePlugin" && validSlot)
+    {
+        consoleNote = "Removed " + engine.getPlugin (rack, slot)->getName();
+        removeSlot (rack, slot);
+        return true;
+    }
+
+    if (cmd == "movePlugin" && validSlot)
+    {
+        const int to = juce::jlimit (0, engine.getNumSlots (rack) - 1, (int) c["to"]);
+        engine.moveSlotTo (rack, slot, to);
+        fixStereoVersions (rack);
+        select (rack, to);
+        return true;
+    }
+
+    // Shows. "save": true saves the current show first (the remote asks).
+    auto saveFirst = [this, &c]
+    {
+        if ((bool) c["save"] && engine.getShowFile() != juce::File())
+            saveShow (false);
+    };
+
+    if (cmd == "showSave")
+    {
+        const auto name = juce::File::createLegalFileName (c["name"].toString().trim());
+
+        if (name.isNotEmpty())
+        {
+            getShowsFolder().createDirectory();
+            engine.setShowFile (getShowsFolder().getChildFile (name + ".liverack"));
+        }
+        else if (engine.getShowFile() == juce::File())
+        {
+            consoleNote = "Give the show a name to save it";
+            return true;
+        }
+
+        saveShow (false);
+        return true;
+    }
+
+    if (cmd == "showNew")
+    {
+        saveFirst();
+        startNewShow();
+        return true;
+    }
+
+    if (cmd == "showOpen")
+    {
+        const auto folders = getRemoteShowFolders();
+        const int fi = (int) c["folder"];
+        const auto name = c["name"].toString();
+
+        if (! juce::isPositiveAndBelow (fi, folders.size()) || name.isEmpty() || name.containsAnyOf ("/\\:"))
+            return true;
+
+        const auto file = folders[fi].getChildFile (name + ".liverack");
+        if (! file.existsAsFile())
+        {
+            consoleNote = "That show isn't there any more";
+            return true;
+        }
+
+        saveFirst();
+        openShowFile (file);
+        return true;
+    }
+
+    return false;
 }
 
 //==============================================================================
@@ -2817,4 +3085,6 @@ void MainComponent::handleWebCommand (const juce::var& c)
         stepScene ((int) c["dir"]);
     else if (cmd == "scene")
         recallScene ((int) c["number"]);
+    else
+        handleWebEditCommand (cmd, c);
 }

@@ -72,6 +72,7 @@ private:
     void showParameters (int rack, int slot);
     void handleSlotDrop (int fromRack, int fromSlot, int toRack, int toIndex, bool copy);
     void handlePluginDrop (const juce::String& pluginId, int toRack, int toIndex);
+    bool insertPlugin (const juce::String& pluginId, int toRack, int toIndex, juce::String& error);
     void openSlotId (int slotId);
 
     // One window (strips + plugin panel) or two (overview + rack view, e.g. on two screens)
@@ -93,6 +94,7 @@ private:
     void saveShow (bool askForFile);
     void openShow();
     void newShow();
+    void startNewShow();                 // without asking about unsaved changes
     void openShowFile (const juce::File&);
     void showShowMenu();
     void afterShowLoaded();
@@ -144,6 +146,10 @@ private:
     // iPad / web remote
     juce::String buildWebState (const juce::String& query);
     void handleWebCommand (const juce::var&);
+    bool handleWebEditCommand (const juce::String& cmd, const juce::var&); // building the show from the remote
+    void addWebEditState (juce::DynamicObject& root, const juce::String& query);
+    static juce::File getShowsFolder();     // Documents/LiveRack Shows
+    juce::Array<juce::File> getRemoteShowFolders() const;
     std::shared_ptr<PluginViewCapture> openRemoteView (const juce::String& query, juce::String& error);
     void closeRemoteView (std::shared_ptr<PluginViewCapture>);
 
