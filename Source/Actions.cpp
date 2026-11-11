@@ -31,7 +31,9 @@ juce::String Action::describe (const RackEngine& engine) const
         case prevScene:     return "Previous Snapshot";
         case tapTempo:      return "Tap Tempo";
         case twoWindows:    return "Rack Window";
-        case fullView:      return "Full View";
+        case fullView:      return "Rack View";
+        case nextRack:      return "Next Rack";
+        case prevRack:      return "Previous Rack";
         case storeScene:    return "Store Snapshot";
         case showPage:
             if (number <= 0) return "Page: All";
@@ -57,6 +59,7 @@ juce::String Action::category() const
         case tapTempo:      return "BPM";
         case twoWindows:    return "view";
         case fullView:      return "view";
+        case nextRack: case prevRack: return "select rack";
         case storeScene:    return "store";
         case showPage:      return "page";
         case none: case numTypes: default: break;
@@ -141,6 +144,8 @@ void Action::showChooser (const RackEngine& engine, const Action& current, int s
     m.addSubMenu ("Bypass rack", bypassRack);
     m.addSubMenu ("Bypass plugin", bypassPlugin);
     m.addSubMenu ("Select rack", selectRackMenu);
+    add (m, make (nextRack), "Next rack");
+    add (m, make (prevRack), "Previous rack");
     m.addSubMenu ("Open plugin", openPluginMenu);
     m.addSubMenu ("Hot Plugin", hot);
 
@@ -157,7 +162,7 @@ void Action::showChooser (const RackEngine& engine, const Action& current, int s
     m.addSeparator();
     add (m, make (tapTempo), "Tap tempo");
     add (m, make (twoWindows), "Rack window on/off");
-    add (m, make (fullView), "Full View on/off");
+    add (m, make (fullView), "Rack view on/off (plugins in the whole window)");
     m.addSeparator();
     add (m, make (none), "Clear");
 

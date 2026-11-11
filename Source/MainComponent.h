@@ -81,6 +81,7 @@ private:
 
     // Full View: the selected rack's plugin panel fills the main window
     void setFullView (bool);
+    void stepRack (int delta);   // next (+1) / previous (-1) rack on the page shown
     bool isFullView() const { return fullView && ! isTwoWindowMode(); }
 
     // Floating editor windows
@@ -192,6 +193,7 @@ private:
                       scanButton      { "Plugins", "plugins", "Plugin library and scanning" },
                       scopeButton     { "Scope", "scope", "What snapshots recall" },
                       addRackButton   { "Add Rack", "addrack", "Add a rack" },
+                      rackViewButton  { "Rack", "rack", "The selected rack's plugins in the whole window (Esc goes back)" },
                       windowModeButton { "Two Windows", "windows", "Rack window: the plugin panel in its own window" },
                       stackRowsButton { "Stack Rows", "stack", "Stack racks in rows to fit the window" };
     juce::TextButton storeSceneButton { "STORE" }, tapButton { "TAP" };

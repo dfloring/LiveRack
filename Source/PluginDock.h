@@ -1,5 +1,6 @@
 #pragma once
 #include "RackEngine.h"
+#include "Theme.h"
 
 // Shows the selected plugin's editor docked under the strips, with a tab for
 // each plugin in the rack, like SuperRack's plugin pane.
@@ -19,9 +20,9 @@ public:
 
     std::function<void (int rack, int slot)> onSelectSlot, onPopOut, onRemove, onToggleBypass;
     std::function<void()> onPreferredHeightChanged;
+    std::function<void (int delta)> onStepRack;    // previous / next rack
 
-    // Full View: the panel fills the main window instead of sharing it with the strips
-    std::function<void()> onToggleFullView;
+    // Rack view: the panel fills the main window instead of sharing it with the strips
     void setFullView (bool isFull, bool isAvailable);
     std::function<void (int fromRack, int fromSlot, int toRack, int toIndex, bool copy)> onSlotDropped;
 
@@ -64,9 +65,10 @@ private:
     juce::String message;
 
     juce::Rectangle<int> headerArea, meterArea;
+    Theme::IconButton prevRackButton { "Previous rack", "prev", "Previous rack" },
+                      nextRackButton { "Next rack", "next", "Next rack" };
     juce::TextButton rackBypassButton { "Rack Bypass" }, bypassButton { "Bypass" },
                      popOutButton { "Pop Out" }, removeButton { "Remove" };
-    juce::TextButton fullViewButton { "Full View" };
     bool fullView = false, fullViewAvailable = false;
     juce::OwnedArray<juce::TextButton> tabs;
     juce::Component editorHolder; // plugin editors are often native views: no scrolling container

@@ -21,6 +21,8 @@ struct Action
         storeScene,
         showPage,        // number: 0 = All, 1.. = custom page
         fullView,        // the plugin panel fills the main window
+        nextRack,        // the next rack on the page shown
+        prevRack,
         numTypes
     };
 

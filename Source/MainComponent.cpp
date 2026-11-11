@@ -417,7 +417,7 @@ MainComponent::MainComponent()
 
     for (juce::Button* b : { (juce::Button*) &devicesButton, (juce::Button*) &routingButton, (juce::Button*) &scopeButton,
                              (juce::Button*) &scanButton, (juce::Button*) &storeSceneButton, (juce::Button*) &addRackButton,
-                             (juce::Button*) &windowModeButton, (juce::Button*) &stackRowsButton, (juce::Button*) &saveButton,
+                             (juce::Button*) &windowModeButton, (juce::Button*) &rackViewButton, (juce::Button*) &stackRowsButton, (juce::Button*) &saveButton,
                              (juce::Button*) &loadButton, (juce::Button*) &tapButton, (juce::Button*) &prevSceneButton,
                              (juce::Button*) &nextSceneButton })
         addAndMakeVisible (b);
@@ -437,6 +437,7 @@ MainComponent::MainComponent()
     scanButton.setLabel ("Plugins");
     scopeButton.setLabel ("Scope");
     addRackButton.setLabel ("Add Rack");
+    rackViewButton.setLabel ("Rack");
     windowModeButton.setLabel ("Rack Window");
     stackRowsButton.setLabel ("Stack Rows");
 
@@ -447,6 +448,7 @@ MainComponent::MainComponent()
     storeSceneButton.onClick = [this] { showStoreSceneDialog(); };
     addRackButton.onClick    = [this] { addRack(); };
     windowModeButton.onClick = [this] { setTwoWindowMode (! isTwoWindowMode()); };
+    rackViewButton.onClick   = [this] { setFullView (! isFullView()); };
     tapButton.onClick        = [this] { engine.tapTempo(); };
     prevSceneButton.onClick  = [this] { stepScene (-1); };
     nextSceneButton.onClick  = [this] { stepScene (1); };
@@ -486,7 +488,7 @@ MainComponent::MainComponent()
     dock.onRemove       = [this] (int r, int s) { removeSlot (r, s); };
     dock.onToggleBypass = [this] (int r, int s) { engine.setSlotBypassed (r, s, ! engine.isSlotBypassed (r, s)); };
     dock.onPreferredHeightChanged = [this] { resized(); };
-    dock.onToggleFullView = [this] { setFullView (! fullView); };
+    dock.onStepRack     = [this] (int delta) { stepRack (delta); };
     dock.setFullView (false, true);
     dock.levelFor = [this] (int r, bool out) { return strips.getLevel (r, out); };
     dock.onSlotDropped = [this] (int fr, int fs, int tr, int ti, bool copy) { handleSlotDrop (fr, fs, tr, ti, copy); };
@@ -682,7 +684,7 @@ void MainComponent::resized()
 
     // Labels under the icons when there's room for them
     Theme::IconButton* labelled[] = { &saveButton, &loadButton, &devicesButton, &routingButton, &scanButton,
-                                      &scopeButton, &addRackButton, &windowModeButton, &stackRowsButton };
+                                      &scopeButton, &addRackButton, &rackViewButton, &windowModeButton, &stackRowsButton };
     int labelledWidth = 0;
     for (auto* b : labelled)
         labelledWidth += b->getLabelledWidth() - 40;
@@ -714,7 +716,7 @@ void MainComponent::resized()
     group ({ { &saveButton, w (saveButton) }, { &loadButton, w (loadButton) } });
     group ({ { &prevSceneButton, 34 }, { nullptr, 168 }, { &nextSceneButton, 34 }, { &storeSceneButton, 64 } });
     group ({ { &devicesButton, w (devicesButton) }, { &routingButton, w (routingButton) }, { &scanButton, w (scanButton) }, { &scopeButton, w (scopeButton) } });
-    group ({ { &addRackButton, w (addRackButton) }, { &windowModeButton, w (windowModeButton) }, { &stackRowsButton, w (stackRowsButton) } });
+    group ({ { &addRackButton, w (addRackButton) }, { &rackViewButton, w (rackViewButton) }, { &windowModeButton, w (windowModeButton) }, { &stackRowsButton, w (stackRowsButton) } });
     group ({ { bpmDisplay.get(), 84 }, { &tapButton, 60 } }, true);
 
     statusBar->setBounds (area.removeFromBottom (30));
@@ -872,6 +874,8 @@ void MainComponent::performAction (const Action& a, int value)
             if (juce::isPositiveAndBelow (a.rack, engine.getNumRacks()))
                 select (a.rack, -1);
             break;
+        case Action::nextRack:     stepRack (1); break;
+        case Action::prevRack:     stepRack (-1); break;
         case Action::openPlugin:   openSlotId (a.slotId); break;
         case Action::hotPlugin:
         {
@@ -962,6 +966,9 @@ void MainComponent::handleOsc (const juce::String& address, const juce::Array<ju
         Action a; a.type = t; a.rack = rack; a.slotId = slotId; a.number = number; return a;
     };
 
+    if (p[1] == "rack" && p.size() == 3 && (p[2] == "next" || p[2] == "prev"))
+        stepRack (p[2] == "next" ? 1 : -1);
+
     if (p[1] == "rack" && p.size() >= 4)
     {
         const int r = p[2].getIntValue() - 1; // 1-based in OSC
@@ -995,7 +1002,7 @@ void MainComponent::handleOsc (const juce::String& address, const juce::Array<ju
         engine.setBpm ((double) args[0]);
     else if (p[1] == "view" && p.size() >= 3 && p[2] == "twowindows")
         performAction (make (Action::twoWindows), value);
-    else if (p[1] == "view" && p.size() >= 3 && p[2] == "fullview")
+    else if (p[1] == "view" && p.size() >= 3 && (p[2] == "fullview" || p[2] == "rack"))
         performAction (make (Action::fullView), value);
 }
 
@@ -1093,6 +1100,24 @@ void MainComponent::select (int rack, int slot)
 
     if (routingMatrix != nullptr)
         routingMatrix->setSelectedRack (rack);
+}
+
+// Next / previous rack, in the order of the page shown (All: every rack)
+void MainComponent::stepRack (int delta)
+{
+    std::vector<int> order;
+    const int page = engine.getCurrentPage();
+    for (int r = 0; r < engine.getNumRacks(); ++r)
+        if (page < 0 || engine.isRackOnPage (r, page))
+            order.push_back (r);
+
+    if (order.empty())
+        return;
+
+    const auto it = std::find (order.begin(), order.end(), selectedRack);
+    const int at = it == order.end() ? (delta > 0 ? -1 : 0) : (int) (it - order.begin());
+    const int n = (int) order.size();
+    select (order[(size_t) (((at + delta) % n + n) % n)], -1);
 }
 
 void MainComponent::refreshAll()
@@ -1669,6 +1694,7 @@ void MainComponent::setFullView (bool shouldBeFull)
 {
     fullView = shouldBeFull && ! isTwoWindowMode();
     dock.setFullView (fullView, ! isTwoWindowMode());
+    rackViewButton.setToggleState (fullView, juce::dontSendNotification);
     resized();
     repaint();
 }
@@ -1805,7 +1831,9 @@ void MainComponent::setTwoWindowMode (bool shouldBeTwo)
 
     windowModeButton.setToggleState (shouldBeTwo, juce::dontSendNotification);
     AppSettings::set ("twoWindows", shouldBeTwo ? "1" : "0");
-    dock.setFullView (false, ! shouldBeTwo); // Full View is for the main window only
+    dock.setFullView (false, ! shouldBeTwo); // Rack view is for the main window only
+    rackViewButton.setToggleState (false, juce::dontSendNotification);
+    rackViewButton.setEnabled (! shouldBeTwo);
     resized();
     refreshAll(); // shows the selected plugin again in its new home
 }
