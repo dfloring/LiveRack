@@ -80,6 +80,17 @@ For a computer that only runs LiveRack, wherever it lives. In **Devices**, click
 
 Control it from the iPad / web remote, OSC or Companion as usual.
 
+### Server protocol (for clients)
+
+The web remote's server also speaks a fuller protocol for apps that control LiveRack over the network (the coming LiveRack Client, Companion, your own scripts). Everything is JSON over one WebSocket at `ws://<computer>:<port>/live`:
+
+- On connect the server sends `{"t":"hello", "protocol":1, "version":..., "server":<computer name>}`, then `{"t":"state", "data":...}` whenever anything changes (the same JSON as `/state`; ask for `live=1` to get drivers with their status, consoles, snapshots, Hot Plugins, latency, isolation and server settings), and `{"t":"meters", "data":...}` about 20 times a second (rack in / out levels, gain reduction per plugin, each rack's processing time, each driver's DSP and longest block).
+- The client sends `{"t":"query", "q":"live=1&view=2:0"}` to choose what the state includes (`view` adds every parameter of one plugin), `{"t":"cmd", ...}` for any command, `{"t":"get", "what":"library"|"shows"|"devices", "id":n}` (answered with a `reply`), and `{"t":"ping"}` every few seconds.
+- Commands, besides everything the web remote already does: `rackStep` (dir), `sceneStore` / `sceneRename` / `sceneDelete`, `hot` (rack, slot, on), `latencyGroup`, `isolate` (rack, slot, on), `server` (multiCore, startAtLogin, restartAfterCrash), and the audio drivers: `driverSet` (driver, type, device, rate, buffer), `driverAdd`, `driverRemove`. `get devices` lists each driver's device types, devices, sample rates and buffer sizes.
+- **Finding servers:** while the web remote is on, LiveRack announces itself every 2 s with a UDP broadcast on port 47810 (`{"liverack":1, "name", "port", "version"}`), so clients can list the LiveRack computers on the network by name.
+
+The iPad / web remote page now uses this connection too, so changes show up straight away; it falls back to polling where WebSockets aren't available.
+
 ## Routing
 
 A console-style crosspoint matrix. Rack inputs (or outputs) run down the side, driver channels across the top, 32 per page. Click a crosspoint to patch, click a lit one to unpatch. Stereo racks patch L and R separately; mono-to-stereo racks have one input and L/R outputs.

@@ -254,6 +254,79 @@ private:
 };
 } // namespace
 
+//==============================================================================
+// "LiveRack is here": a small UDP broadcast every two seconds
+class WebRemote::Beacon final : public juce::Thread
+{
+public:
+    Beacon (const WebRemote& o) : juce::Thread ("LiveRack beacon"), owner (o) { startThread (juce::Thread::Priority::low); }
+    ~Beacon() override { stopThread (3000); }
+
+    void run() override
+    {
+        juce::DatagramSocket socket (true);
+        if (! socket.bindToPort (0))
+            return;
+        SocketUtil::keepInThisProcess (socket);
+
+        while (! threadShouldExit())
+        {
+            auto* o = new juce::DynamicObject();
+            o->setProperty ("liverack", 1);
+            o->setProperty ("name", owner.getServerName());
+            o->setProperty ("port", owner.getPort());
+            o->setProperty ("version", juce::String (JUCE_APPLICATION_VERSION_STRING));
+            const auto text = juce::JSON::toString (juce::var (o), true);
+            socket.write ("255.255.255.255", beaconPort, text.toRawUTF8(), (int) text.getNumBytesAsUTF8());
+            wait (2000);
+        }
+    }
+
+private:
+    const WebRemote& owner;
+};
+
+juce::String WebRemote::getServerName() const
+{
+    const auto name = juce::SystemStats::getComputerName();
+    return name.isNotEmpty() ? name : juce::String ("LiveRack");
+}
+
+std::vector<WebRemote::FoundServer> WebRemote::findServers (int timeoutMs)
+{
+    std::vector<FoundServer> found;
+    juce::DatagramSocket socket (true);
+    if (! socket.bindToPort (beaconPort))
+        return found;
+
+    const auto end = juce::Time::getMillisecondCounter() + (juce::uint32) timeoutMs;
+    char buffer[2048];
+
+    while (juce::Time::getMillisecondCounter() < end)
+    {
+        if (socket.waitUntilReady (true, 100) <= 0)
+            continue;
+
+        juce::String from;
+        int fromPort = 0;
+        const int n = socket.read (buffer, (int) sizeof (buffer) - 1, false, from, fromPort);
+        if (n <= 0)
+            continue;
+
+        const auto v = juce::JSON::parse (juce::String::fromUTF8 (buffer, n));
+        if (! v.hasProperty ("liverack"))
+            continue;
+
+        FoundServer f { v["name"].toString(), from, v["version"].toString(), (int) v["port"] };
+        const bool known = std::any_of (found.begin(), found.end(), [&f] (auto& x) { return x.address == f.address && x.port == f.port; });
+        if (! known)
+            found.push_back (f);
+    }
+
+    return found;
+}
+
+//==============================================================================
 WebRemote::WebRemote() : juce::Thread ("LiveRack web remote")
 {
     loadSettings();
@@ -267,6 +340,7 @@ WebRemote::~WebRemote()
 void WebRemote::setEnabled (bool shouldBeEnabled, int newPort)
 {
     stopping = true;
+    beacon.reset();
     signalThreadShouldExit();
     if (listener != nullptr)
         listener->close();
@@ -288,6 +362,7 @@ void WebRemote::setEnabled (bool shouldBeEnabled, int newPort)
     SocketUtil::keepInThisProcess (*socket);
     listener = std::move (socket);
     startThread();
+    beacon = std::make_unique<Beacon> (*this);
 }
 
 juce::String WebRemote::getUrl() const
@@ -433,6 +508,10 @@ void WebRemote::handle (std::unique_ptr<juce::StreamingSocket> socket)
     {
         runPluginView (*socket, query, webSocketKey);
     }
+    else if (method == "GET" && path == "/live" && webSocketKey.isNotEmpty())
+    {
+        runLive (*socket, query, webSocketKey);
+    }
     else if (method == "GET" && (path == "/" || path == "/index.html"))
     {
         respond (*socket, 200, "text/html; charset=utf-8", BinaryData::remote_html, (size_t) BinaryData::remote_htmlSize);
@@ -464,6 +543,122 @@ void WebRemote::handle (std::unique_ptr<juce::StreamingSocket> socket)
 // A live plugin window: JPEG frames out, input in. The page acknowledges each
 // frame it draws; with at most two frames unacknowledged, the picture never
 // falls behind on a slow network (frames are skipped instead).
+//==============================================================================
+// The server protocol: one connection, state pushed as it changes
+void WebRemote::runLive (juce::StreamingSocket& socket, const juce::String& firstQuery, const juce::String& key)
+{
+    WebSocket ws (socket);
+    if (! ws.handshake (key))
+        return;
+
+    ++numLive;
+
+    {
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("t", "hello");
+        o->setProperty ("protocol", 1);
+        o->setProperty ("app", "LiveRack");
+        o->setProperty ("version", juce::String (JUCE_APPLICATION_VERSION_STRING));
+        o->setProperty ("server", getServerName());
+        ws.sendText (juce::JSON::toString (juce::var (o), true));
+    }
+
+    juce::String query = firstQuery.isNotEmpty() ? firstQuery : juce::String ("live=1");
+    juce::String lastState;
+    juce::uint32 lastStateMs = 0, lastMetersMs = 0, lastHeard = juce::Time::getMillisecondCounter();
+    juce::MemoryBlock message;
+    bool alive = true;
+
+    auto reply = [&ws] (const juce::var& id, const juce::String& what, const juce::String& json)
+    {
+        return ws.sendText ("{\"t\":\"reply\",\"id\":" + juce::JSON::toString (id) + ",\"what\":"
+                            + juce::JSON::toString (what) + ",\"data\":" + (json.isNotEmpty() ? json : juce::String ("null")) + "}");
+    };
+
+    while (alive && ! stopping.load())
+    {
+        int ready = socket.waitUntilReady (true, 10);
+        if (ready < 0)
+            break;
+
+        for (int reads = 0; ready > 0 && reads < 64; ++reads, ready = socket.waitUntilReady (true, 0))
+        {
+            const int type = ws.read (message);
+            if (type < 0)
+            {
+                alive = false;
+                break;
+            }
+            if (type != 1)
+                continue;
+
+            lastHeard = juce::Time::getMillisecondCounter();
+            lastActivityMs = lastHeard;
+            const auto event = juce::JSON::parse (message.toString());
+            const auto t = event["t"].toString();
+
+            if (t == "ping")
+            {
+                alive = ws.sendText ("{\"t\":\"pong\"}");
+            }
+            else if (t == "query")
+            {
+                query = event["q"].toString();
+                lastState.clear(); // send the new state at once
+                lastStateMs = 0;
+            }
+            else if (t == "cmd")
+            {
+                juce::MessageManager::callAsync ([this, event] { if (onCommand != nullptr) onCommand (event); });
+                if (event.hasProperty ("id"))
+                    alive = reply (event["id"], "cmd", "{\"ok\":true}");
+                lastStateMs = 0; // show the result straight away
+            }
+            else if (t == "get")
+            {
+                const auto what = event["what"].toString();
+                const juce::String q = what == "library" ? "lib=1" : what == "shows" ? "shows=1" : what == "devices" ? "devices=1" : "";
+                const auto json = onMessageThread ([this, q] { return buildState != nullptr ? buildState (q) : juce::String ("{}"); });
+                alive = reply (event["id"], what, json);
+            }
+        }
+
+        if (! alive)
+            break;
+
+        const auto now = juce::Time::getMillisecondCounter();
+
+        if (now - lastStateMs >= 100)
+        {
+            lastStateMs = now;
+            {
+                const juce::ScopedLock sl (clientLock);
+                clients[socket.getHostName()] = now; // still connected
+            }
+            const auto state = onMessageThread ([this, query] { return buildState != nullptr ? buildState (query) : juce::String(); });
+            if (state.isNotEmpty() && state != lastState)
+            {
+                lastState = state;
+                alive = ws.sendText ("{\"t\":\"state\",\"data\":" + state + "}");
+            }
+        }
+
+        if (alive && now - lastMetersMs >= 50)
+        {
+            lastMetersMs = now;
+            const auto meters = onMessageThread ([this] { return buildMeters != nullptr ? buildMeters() : juce::String(); });
+            if (meters.isNotEmpty())
+                alive = ws.sendText ("{\"t\":\"meters\",\"data\":" + meters + "}");
+        }
+
+        if (now - lastHeard > 15000)
+            break; // the client went away without closing
+    }
+
+    ws.close();
+    --numLive;
+}
+
 void WebRemote::runPluginView (juce::StreamingSocket& socket, const juce::String& query, const juce::String& key)
 {
     WebSocket ws (socket);

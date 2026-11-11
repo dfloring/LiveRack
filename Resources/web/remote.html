@@ -206,6 +206,10 @@ let paramKey = '', touching = {};         // param index -> time of last touch
 let lastOk = 0;
 
 function post(cmd) {
+  if (typeof live !== 'undefined' && live && live.readyState === 1) {
+    live.send(JSON.stringify(Object.assign({ t: 'cmd' }, cmd)));
+    return;
+  }
   fetch('/cmd', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cmd) }).catch(() => {});
 }
 
@@ -236,8 +240,8 @@ function render() {
     if (!r.slots.length && !editing) h += `<div class="empty" style="padding:12px">No plugins</div>`;
     if (editing) h += `<button class="addp" data-addp="${ri}">+ Add plugin</button>`;
     h += `</div>
-      <div class="meter"><i style="width:${Math.round(r.level * 100)}%"></i></div>
-      <div class="foot"><button class="${r.bypass ? 'byp' : ''}" data-bypass="${ri}">${r.bypass ? 'BYPASSED' : 'BYPASS'}</button><span class="gr">${r.gr >= 59 ? '-inf' : r.gr > 0.4 ? '-' + r.gr.toFixed(1) : ''}</span></div>
+      <div class="meter"><i data-m="${ri}" style="width:${Math.round((r.level || 0) * 100)}%"></i></div>
+      <div class="foot"><button class="${r.bypass ? 'byp' : ''}" data-bypass="${ri}">${r.bypass ? 'BYPASSED' : 'BYPASS'}</button><span class="gr" data-g="${ri}">${grText(r.gr || 0)}</span></div>
     </div>`;
   });
   const strips = $('strips'), scroll = strips.scrollLeft;
@@ -305,22 +309,86 @@ function renderParams() {
   }
 }
 
+function grText(gr) { return gr >= 59 ? '-inf' : gr > 0.4 ? '-' + gr.toFixed(1) : ''; }
+
+// The query: what the state should include
+function currentQuery() {
+  const parts = [];
+  if (view) parts.push('view=' + view.join(':'));
+  if (editing) parts.push('edit=1');
+  return parts.join('&');
+}
+
+// A state arrived (live or polled)
+function gotState(next, asked) {
+  if (!next || !next.racks) return;
+  // Live states carry no levels: keep the last ones until the meters arrive
+  if (state && state.racks) next.racks.forEach((r, i) => {
+    if (r.level === undefined) r.level = state.racks[i] ? state.racks[i].level || 0 : 0;
+    if (r.gr === undefined) r.gr = state.racks[i] ? state.racks[i].gr || 0 : 0;
+  });
+  state = next;
+  lastOk = Date.now();
+  // The plugin may have moved or gone
+  if (view && view.join(':') === asked && !state.view) view = null;
+  render();
+}
+
+// Levels, ~20 a second over the live connection: only the meters are redrawn
+function gotMeters(m) {
+  lastOk = Date.now();
+  if (!state || !state.racks) return;
+  m.racks.forEach((mr, i) => {
+    const r = state.racks[i];
+    if (!r) return;
+    r.level = mr.out;
+    r.gr = Math.max(0, ...mr.gr);
+    const bar = document.querySelector(`[data-m="${i}"]`);
+    if (bar) bar.style.width = Math.round(r.level * 100) + '%';
+    const g = document.querySelector(`[data-g="${i}"]`);
+    if (g) g.textContent = grText(r.gr);
+  });
+}
+
+// One connection that pushes changes as they happen; polling if it can't be used
+let live = null, liveQuery = null, liveFails = 0, lastPing = 0;
+
+function connectLive() {
+  if (typeof WebSocket === 'undefined' || liveFails >= 3) return false;
+  const q = currentQuery();
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/live?live=1' + (q ? '&' + q : ''));
+  live = ws; liveQuery = q;
+  ws.onmessage = (e) => {
+    let m;
+    try { m = JSON.parse(e.data); } catch (err) { return; }
+    if (m.t === 'hello') liveFails = 0;
+    else if (m.t === 'state') gotState(m.data, (liveQuery.match(/view=([\d:]+)/) || [])[1] || '');
+    else if (m.t === 'meters') gotMeters(m.data);
+    else if (m.t === 'pong') lastOk = Date.now();
+  };
+  ws.onclose = () => { if (live === ws) { live = null; liveFails++; } };
+  return true;
+}
+
 async function poll() {
-  try {
-    const asked = view ? view.join(':') : '';
-    const parts = [];
-    if (view) parts.push('view=' + asked);
-    if (editing) parts.push('edit=1');
-    const q = parts.length ? '?' + parts.join('&') : '';
-    const res = await fetch('/state' + q, { cache: 'no-store' });
-    state = await res.json();
-    if (state.racks) {
-      lastOk = Date.now();
-      // The plugin may have moved or gone
-      if (view && view.join(':') === asked && !state.view) view = null;
-      render();
+  if (live && live.readyState === 1) {
+    // Live: just say what we want to see, and keep the connection warm
+    const q = currentQuery();
+    if (q !== liveQuery) {
+      liveQuery = q;
+      live.send(JSON.stringify({ t: 'query', q: 'live=1' + (q ? '&' + q : '') }));
     }
-  } catch (e) {}
+    if (Date.now() - lastPing > 4000) { lastPing = Date.now(); live.send('{"t":"ping"}'); }
+  } else if (!live || live.readyState > 1) {
+    if (!connectLive()) {
+      try {
+        const asked = view ? view.join(':') : '';
+        const q = currentQuery();
+        const res = await fetch('/state' + (q ? '?' + q : ''), { cache: 'no-store' });
+        gotState(await res.json(), asked);
+      } catch (e) {}
+    }
+  }
   const ok = Date.now() - lastOk < 2500;
   $('offline').style.display = ok ? 'none' : 'block';
   $('light').className = 'light ' + (ok ? 'ok' : 'bad');

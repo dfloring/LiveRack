@@ -41,6 +41,8 @@ public:
     void scrollToRack (int rack);
     float getMaxGainReduction (int rack) const;
     float getOutputLevel (int rack) const;      // 0..1 on the meter's scale
+    float getInputLevel (int rack) const;       // 0..1 on the meter's scale
+    float getSlotGainReduction (int rack, int slot) const; // dB, -1 = not shown, 60 = muted
     float getLevel (int rack, bool output) const;
    #if LIVERACK_PREVIEW_HOOKS
     void previewMenu (int which, int rack);

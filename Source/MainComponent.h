@@ -156,6 +156,10 @@ private:
     static juce::File getShowsFolder();     // Documents/LiveRack Shows
     juce::Array<juce::File> getRemoteShowFolders() const;
     std::shared_ptr<PluginViewCapture> openRemoteView (const juce::String& query, juce::String& error);
+    void addLiveState (juce::DynamicObject&);
+    juce::var buildDeviceOptions();
+    juce::String buildWebMeters();
+    bool handleServerCommand (const juce::String& cmd, const juce::var&);
     void closeRemoteView (std::shared_ptr<PluginViewCapture>);
 
     struct RemoteView

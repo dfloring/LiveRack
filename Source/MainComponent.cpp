@@ -508,6 +508,7 @@ MainComponent::MainComponent()
     osc.onMessage = [this] (const juce::String& a, const juce::Array<juce::var>& args) { handleOsc (a, args); };
     webRemote.buildState = [this] (const juce::String& q) { return buildWebState (q); };
     webRemote.onCommand  = [this] (const juce::var& c) { handleWebCommand (c); };
+    webRemote.buildMeters = [this] { return buildWebMeters(); };
     {
         juce::Component::SafePointer<MainComponent> safe (this);
         webRemote.openPluginView = [safe] (const juce::String& q, juce::String& error) -> std::shared_ptr<PluginViewCapture>
@@ -586,6 +587,7 @@ MainComponent::~MainComponent()
     webRemote.setEnabled (false, webRemote.getPort());
     webRemote.buildState = nullptr;
     webRemote.onCommand = nullptr;
+    webRemote.buildMeters = nullptr;
     webRemote.openPluginView = nullptr;
     webRemote.closePluginView = nullptr;
     for (auto& v : remoteViews)
@@ -2894,6 +2896,9 @@ juce::String MainComponent::buildWebState (const juce::String& query)
     const auto visible = engine.getVisibleRacks();
     juce::Array<juce::var> racks;
 
+    // Live clients get levels separately ("meters"), so the state only changes when something does
+    const bool live = juce::StringArray::fromTokens (query, "&", "").contains ("live=1");
+
     for (int i = 0; i < engine.getNumRacks(); ++i)
     {
         const auto cfg = engine.getRackConfig (i);
@@ -2905,8 +2910,11 @@ juce::String MainComponent::buildWebState (const juce::String& query)
         ro->setProperty ("safe", cfg.recallSafe);
         ro->setProperty ("format", cfg.formatName());
         ro->setProperty ("group", RackConfig::groupName (cfg.latencyGroup));
-        ro->setProperty ("gr", strips.getMaxGainReduction (i));
-        ro->setProperty ("level", strips.getOutputLevel (i));
+        if (! live)
+        {
+            ro->setProperty ("gr", strips.getMaxGainReduction (i));
+            ro->setProperty ("level", strips.getOutputLevel (i));
+        }
         ro->setProperty ("visible", std::find (visible.begin(), visible.end(), i) != visible.end());
         ro->setProperty ("stereo", cfg.stereo);
         ro->setProperty ("m2s", cfg.isMonoToStereo());
@@ -2993,6 +3001,180 @@ juce::String MainComponent::buildWebState (const juce::String& query)
 }
 
 //==============================================================================
+// The server protocol (/live): what a full client needs besides the remote's state
+void MainComponent::addLiveState (juce::DynamicObject& r)
+{
+    auto obj = [] { return juce::var (new juce::DynamicObject()); };
+
+    // Audio drivers and how they're doing
+    juce::Array<juce::var> drivers;
+    for (int d = 0; d < engine.getNumDrivers(); ++d)
+    {
+        const auto st = engine.getDriverStatus (d);
+        auto dv = obj();
+        auto* o = dv.getDynamicObject();
+        o->setProperty ("name", st.open ? st.deviceName : "Driver " + juce::String (d + 1) + " (no device)");
+        o->setProperty ("open", st.open);
+        o->setProperty ("type", st.typeName);
+        o->setProperty ("device", st.deviceName);
+        o->setProperty ("waitingFor", engine.getDriverWaitingFor (d));
+        o->setProperty ("rate", st.sampleRate);
+        o->setProperty ("buffer", st.bufferSize);
+        o->setProperty ("ioLatency", st.ioLatency);
+        o->setProperty ("dropouts", st.dropouts);
+        o->setProperty ("lastDropout", st.dropouts > 0 ? st.lastDropout.toISO8601 (true) : juce::String());
+        o->setProperty ("threads", st.threads);
+        o->setProperty ("racks", st.numRacks);
+
+        juce::Array<juce::var> ins, outs;
+        if (auto* dev = engine.getDeviceManager (d).getCurrentAudioDevice())
+        {
+            for (auto& n : dev->getInputChannelNames())  ins.add (n);
+            for (auto& n : dev->getOutputChannelNames()) outs.add (n);
+        }
+        o->setProperty ("ins", ins);
+        o->setProperty ("outs", outs);
+        drivers.add (dv);
+    }
+    r.setProperty ("drivers", drivers);
+
+    // Consoles
+    juce::Array<juce::var> consoleList;
+    for (auto& c : consoles)
+    {
+        auto cv = obj();
+        cv.getDynamicObject()->setProperty ("name", c->getSettings().name);
+        cv.getDynamicObject()->setProperty ("connected", c->isConnected());
+        consoleList.add (cv);
+    }
+    r.setProperty ("consoles", consoleList);
+
+    // Snapshots
+    juce::Array<juce::var> snaps;
+    for (auto& sn : engine.getSnapshots())
+    {
+        auto sv = obj();
+        sv.getDynamicObject()->setProperty ("number", sn.number);
+        sv.getDynamicObject()->setProperty ("name", sn.name);
+        snaps.add (sv);
+    }
+    r.setProperty ("snapshots", snaps);
+
+    // Hot plugins: [rack, slot] each
+    juce::Array<juce::var> hot;
+    for (int id : engine.getHotPlugins())
+    {
+        int hr = -1, hs = -1;
+        if (engine.findSlot (id, hr, hs))
+            hot.add (juce::Array<juce::var> { hr, hs });
+    }
+    r.setProperty ("hot", hot);
+
+    // Per rack: latency and which slots run in their own process
+    juce::Array<juce::var> extra;
+    for (int i = 0; i < engine.getNumRacks(); ++i)
+    {
+        auto ev = obj();
+        auto* o = ev.getDynamicObject();
+        o->setProperty ("latencyMs", engine.getRackTotalLatencyMs (i));
+        o->setProperty ("group", engine.getRackConfig (i).latencyGroup);
+        juce::Array<juce::var> isolated;
+        for (int sl = 0; sl < engine.getNumSlots (i); ++sl)
+            isolated.add (engine.isSlotIsolated (i, sl));
+        o->setProperty ("isolated", isolated);
+        extra.add (ev);
+    }
+    r.setProperty ("rackInfo", extra);
+
+    // Server settings
+    auto server = obj();
+    auto* so = server.getDynamicObject();
+    so->setProperty ("name", webRemote.getServerName());
+    so->setProperty ("multiCore", engine.isMultiCore());
+    so->setProperty ("cores", RackEngine::getNumRackThreads());
+    so->setProperty ("startAtLogin", ServerMode::startsAtLogin());
+    so->setProperty ("restartAfterCrash", ServerMode::restartsAfterCrash());
+    so->setProperty ("restartedAfterCrash", ServerMode::wasRestartedAfterCrash());
+    r.setProperty ("server", server);
+}
+
+// Device choices for each driver, so a server can be set up from a client
+juce::var MainComponent::buildDeviceOptions()
+{
+    juce::Array<juce::var> list;
+
+    for (int d = 0; d < engine.getNumDrivers(); ++d)
+    {
+        auto& dm = engine.getDeviceManager (d);
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("type", dm.getCurrentAudioDeviceType());
+
+        juce::Array<juce::var> types;
+        for (auto* type : dm.getAvailableDeviceTypes())
+        {
+            auto* t = new juce::DynamicObject();
+            t->setProperty ("name", type->getTypeName());
+            juce::Array<juce::var> names;
+            for (auto& n : type->getDeviceNames (false))
+                names.add (n);
+            t->setProperty ("devices", names);
+            types.add (juce::var (t));
+        }
+        o->setProperty ("types", types);
+
+        if (auto* dev = dm.getCurrentAudioDevice())
+        {
+            o->setProperty ("device", dev->getName());
+            juce::Array<juce::var> rates, buffers;
+            for (auto rate : dev->getAvailableSampleRates()) rates.add (rate);
+            for (auto b : dev->getAvailableBufferSizes()) buffers.add (b);
+            o->setProperty ("rates", rates);
+            o->setProperty ("buffers", buffers);
+            o->setProperty ("rate", dev->getCurrentSampleRate());
+            o->setProperty ("buffer", dev->getCurrentBufferSizeSamples());
+        }
+        list.add (juce::var (o));
+    }
+
+    return list;
+}
+
+// Levels, gain reduction and timing, about 20 times a second
+juce::String MainComponent::buildWebMeters()
+{
+    juce::Array<juce::var> racks;
+    for (int i = 0; i < engine.getNumRacks(); ++i)
+    {
+        juce::Array<juce::var> gr;
+        for (int sl = 0; sl < engine.getNumSlots (i); ++sl)
+            gr.add (std::round ((double) strips.getSlotGainReduction (i, sl) * 10.0) / 10.0);
+
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("in", std::round ((double) strips.getInputLevel (i) * 1000.0) / 1000.0);
+        o->setProperty ("out", std::round ((double) strips.getOutputLevel (i) * 1000.0) / 1000.0);
+        o->setProperty ("gr", gr);
+        o->setProperty ("load", std::round ((double) engine.getRackLoad (i).peak * 1000.0) / 1000.0);
+        racks.add (juce::var (o));
+    }
+
+    juce::Array<juce::var> drivers;
+    for (int d = 0; d < engine.getNumDrivers(); ++d)
+    {
+        const auto st = engine.getDriverStatus (d);
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("dsp", std::round (st.cpu * 1000.0) / 1000.0);
+        o->setProperty ("longest", std::round (st.worstBlock * 1000.0) / 1000.0);
+        drivers.add (juce::var (o));
+    }
+
+    auto* root = new juce::DynamicObject();
+    root->setProperty ("racks", racks);
+    root->setProperty ("drivers", drivers);
+    root->setProperty ("bpm", engine.getBpm());
+    return juce::JSON::toString (juce::var (root), true);
+}
+
+//==============================================================================
 // Building the show from the web remote, for a server nobody sits at
 juce::File MainComponent::getShowsFolder()
 {
@@ -3020,7 +3202,13 @@ void MainComponent::addWebEditState (juce::DynamicObject& r, const juce::String&
 
     auto obj = [] { return juce::var (new juce::DynamicObject()); };
 
-    if (has ("edit"))
+    if (has ("live"))
+        addLiveState (r);
+
+    if (has ("devices"))
+        r.setProperty ("devices", buildDeviceOptions());
+
+    if (has ("edit") || has ("shows"))
     {
         juce::Array<juce::var> drivers;
         for (int d = 0; d < engine.getNumDrivers(); ++d)
@@ -3042,7 +3230,8 @@ void MainComponent::addWebEditState (juce::DynamicObject& r, const juce::String&
             o->setProperty ("outs", outs);
             drivers.add (dv);
         }
-        r.setProperty ("drivers", drivers);
+        if (! r.hasProperty ("drivers")) // live clients already have the fuller list
+            r.setProperty ("drivers", drivers);
 
         // Shows the remote can open: the shows folder, and the current show's folder
         juce::Array<juce::var> shows;
@@ -3080,6 +3269,104 @@ void MainComponent::addWebEditState (juce::DynamicObject& r, const juce::String&
         }
         r.setProperty ("library", lib);
     }
+}
+
+// Commands a full client needs to run a server with nobody at it
+bool MainComponent::handleServerCommand (const juce::String& cmd, const juce::var& c)
+{
+    const int rack = c.hasProperty ("rack") ? (int) c["rack"] : -1;
+    const int slot = c.hasProperty ("slot") ? (int) c["slot"] : -1;
+
+    if (cmd == "sceneStore")
+    {
+        storeScene ((int) c["number"], c["name"].toString());
+    }
+    else if (cmd == "sceneRename")
+    {
+        engine.renameSnapshot ((int) c["number"], c["name"].toString());
+    }
+    else if (cmd == "sceneDelete")
+    {
+        engine.deleteSnapshot ((int) c["number"]);
+    }
+    else if (cmd == "hot")
+    {
+        const int id = engine.getPlugin (rack, slot) != nullptr ? engine.getSlotId (rack, slot) : 0;
+        if (id > 0)
+        {
+            const bool pinned = engine.isHot (id);
+            const bool want = c.hasProperty ("on") ? (bool) c["on"] : ! pinned;
+            if (want && ! pinned) engine.pinHot (id);
+            if (! want && pinned) engine.unpinHot (id);
+        }
+    }
+    else if (cmd == "latencyGroup" && juce::isPositiveAndBelow (rack, engine.getNumRacks()))
+    {
+        engine.setRackLatencyGroup (rack, juce::jlimit (0, 8, (int) c["group"]));
+    }
+    else if (cmd == "isolate" && engine.getPlugin (rack, slot) != nullptr)
+    {
+        const bool want = c.hasProperty ("on") ? (bool) c["on"] : ! engine.isSlotIsolated (rack, slot);
+        if (want != engine.isSlotIsolated (rack, slot))
+        {
+            const auto name = engine.getPlugin (rack, slot)->getName();
+            dock.releaseEditor();
+            closeEditorFor (engine.getPlugin (rack, slot));
+            juce::String error;
+            consoleNote = engine.setSlotIsolated (rack, slot, want, error)
+                            ? name + (want ? " now runs in its own process" : " now runs inside LiveRack")
+                            : "Couldn't change " + name + ": " + error;
+            refreshAll();
+        }
+    }
+    else if (cmd == "server")
+    {
+        if (c.hasProperty ("multiCore"))         engine.setMultiCore ((bool) c["multiCore"]);
+        if (c.hasProperty ("startAtLogin"))      ServerMode::setStartAtLogin ((bool) c["startAtLogin"]);
+        if (c.hasProperty ("restartAfterCrash")) ServerMode::setRestartAfterCrash ((bool) c["restartAfterCrash"]);
+    }
+    else if (cmd == "driverAdd")
+    {
+        if (engine.addDriver() < 0)
+            consoleNote = "No more audio drivers can be added";
+    }
+    else if (cmd == "driverRemove")
+    {
+        const int d = (int) c["driver"];
+        if (d > 0 && d < engine.getNumDrivers())
+            engine.removeDriver (d);
+    }
+    else if (cmd == "driverSet")
+    {
+        const int d = (int) c["driver"];
+        if (! juce::isPositiveAndBelow (d, engine.getNumDrivers()))
+            return true;
+
+        auto& dm = engine.getDeviceManager (d);
+        if (c.hasProperty ("type") && c["type"].toString() != dm.getCurrentAudioDeviceType())
+            dm.setCurrentAudioDeviceType (c["type"].toString(), true);
+
+        auto setup = dm.getAudioDeviceSetup();
+        if (c.hasProperty ("device"))
+        {
+            setup.outputDeviceName = setup.inputDeviceName = c["device"].toString();
+            setup.useDefaultInputChannels = setup.useDefaultOutputChannels = true;
+        }
+        if (c.hasProperty ("rate"))   setup.sampleRate = (double) c["rate"];
+        if (c.hasProperty ("buffer")) setup.bufferSize = (int) c["buffer"];
+
+        const auto error = dm.setAudioDeviceSetup (setup, true);
+        consoleNote = error.isNotEmpty() ? "Audio driver " + juce::String (d + 1) + ": " + error
+                                         : "Audio driver " + juce::String (d + 1) + " set to " + engine.getDriverLabel (d);
+        engine.saveSettings();
+    }
+    else
+    {
+        return false;
+    }
+
+    engine.sendChangeMessage();
+    return true;
 }
 
 bool MainComponent::handleWebEditCommand (const juce::String& cmd, const juce::var& c)
@@ -3415,6 +3702,8 @@ void MainComponent::handleWebCommand (const juce::var& c)
         stepScene ((int) c["dir"]);
     else if (cmd == "scene")
         recallScene ((int) c["number"]);
-    else
+    else if (cmd == "rackStep")
+        stepRack ((int) c["dir"] >= 0 ? 1 : -1);
+    else if (! handleServerCommand (cmd, c))
         handleWebEditCommand (cmd, c);
 }

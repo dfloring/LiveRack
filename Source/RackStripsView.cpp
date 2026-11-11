@@ -986,6 +986,21 @@ float RackStripsView::getOutputLevel (int rack) const
     return juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f);
 }
 
+float RackStripsView::getInputLevel (int rack) const
+{
+    if (! juce::isPositiveAndBelow (rack, (int) content->levels.size()))
+        return 0.0f;
+    const float db = juce::Decibels::gainToDecibels (content->levels[(size_t) rack][0], -60.0f);
+    return juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f);
+}
+
+float RackStripsView::getSlotGainReduction (int rack, int slot) const
+{
+    if (auto it = content->slotMeters.find (content->engine.getPlugin (rack, slot)); it != content->slotMeters.end() && it->second.show)
+        return std::isinf (it->second.gr) ? 60.0f : it->second.gr;
+    return -1.0f;
+}
+
 float RackStripsView::getMaxGainReduction (int rack) const
 {
     float gr = 0.0f;
