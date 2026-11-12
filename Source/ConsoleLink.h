@@ -10,7 +10,8 @@
 //    Scene recalls arrive as "NOTIFY sscurrent_ex MIXER:Lib/Scene <n>".
 //  - Yamaha DM7: the same protocol, but the scene lists are "scene_a" and
 //    "scene_b" (B is the second side in Split mode), and scene numbers have
-//    two decimals ("4.00"). Point scenes like 4.10 recall snapshot 4.
+//    two decimals ("4.00"). A point scene like 4.10 recalls the snapshot
+//    linked to it (Snapshots screen), otherwise snapshot 4.
 //  - Behringer X32: OSC on UDP port 10023, kept alive with /xremote.
 //    Scene: /-show/prepos/current, selected channel: /-stat/selidx.
 //
@@ -78,7 +79,9 @@ public:
     int getLogCounter() const        { return logCounter; }
 
     // Called on the message thread
-    std::function<void (int scene)> onSceneRecalled;
+    // scene: the whole number; exact: as the console has it ("4.10", "12")
+    std::function<void (int scene, const juce::String& exact)> onSceneRecalled;
+    juce::String getLastSceneText() const { return lastSceneText; }
     std::function<void (int channel)> onChannelSelected; // 1-based input channel
 
     // Scene snapshot files: any "*.liverack" in the scene folder whose name
@@ -102,7 +105,8 @@ private:
     void oscMessageReceived (const juce::OSCMessage&) override;
     void handleRcpLine (const juce::String&);
     void sendX32 (const juce::String& address);
-    void sceneChanged (int scene);
+    void sceneChanged (int scene, const juce::String& exact = {});
+    juce::String lastSceneText;
     void addLog (const juce::String&);
     void post (const juce::String&); // from the network thread
 

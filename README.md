@@ -27,7 +27,7 @@ Get the latest build from [Releases](../../releases): the Mac app (Apple silicon
 - **Mac:** unzip, then right-click `LiveRack.app` > **Open** the first time (it isn't notarised).
 - **Windows:** unzip and run `LiveRack.exe`. If Windows warns about an unknown publisher: **More info > Run anyway**. Pick your ASIO driver (Dante Virtual Soundcard, SoundGrid) in Devices > driver Settings.
 
-# User guide (v0.19)
+# User guide (v0.20)
 
 Any number of independent racks of VST3/AU plugins on one or more audio drivers at once (Dante Virtual Soundcard, a Dante interface, the Waves SoundGrid Driver). Everything lives in one **show file** (`.liverack`) with its snapshots inside it, and the open show comes back automatically on launch.
 
@@ -114,7 +114,7 @@ Give racks a group letter (A–H) with the badge on the strip. Every rack in a g
 
 ## Show file and snapshots
 
-- The **show** holds everything: racks, plugins and their settings, routing, latency groups, pages, Hot Plugins, User Keys, BPM, scope, the rack window, and all the snapshots. **Save** (Cmd+S) writes it; the folder button has **Save As**, **Open** (Cmd+O) and **New Show**. The window title shows the show's name and "(edited)" when it has unsaved changes; opening another show asks first. An edited show is also kept automatically every minute and on quit, and comes back on launch. Each save first copies the previous version into a "<Show> Backups" folder next to the show file (the newest 20 are kept). Storing over an existing snapshot from the Store dialog, and deleting one, ask first.
+- The **show** holds everything: racks, plugins and their settings, routing, latency groups, pages, Hot Plugins, User Keys, BPM, scope, the rack window, and all the snapshots. **Save** (Cmd+S) writes it; the folder button has **Save As**, **Open** (Cmd+O), **Open Recent** (the last 10 shows) and **New Show**. The window title shows the show's name and "(edited)" when it has unsaved changes; opening another show asks first. An edited show is also kept automatically every minute and on quit, and comes back on launch. Each save first copies the previous version into a "<Show> Backups" folder next to the show file (the newest 20 are kept). Storing over an existing snapshot from the Store dialog, and deleting one, ask first.
 - A **snapshot** is a numbered (and optionally named) set of plugin settings stored in the show. **STORE** stores one; console scene numbers map to snapshot numbers.
 - Recalling a snapshot **never adds, removes or moves plugins or racks**. It sets the settings and bypass of the plugins already in the show, and (if in scope) rack bypass and BPM. A plugin added after the snapshot was stored is left as it is (the status bar says how many); a plugin that was deleted is skipped.
 - **Scope:** each snapshot has its own: what its recall changes (plugin settings, plugin bypass, rack bypass, BPM) and which plugins it touches. Edit it on the Snapshots screen (below), or from a plugin's right-click menu (**Recalled by new snapshots / by snapshot N**). With plugin bypass out of scope, a recall keeps the plugin's current bypass even if its saved settings include a bypass switch.
@@ -144,7 +144,7 @@ The plugin panel shows the selected rack: its colour, name, console channel, lat
 ## Console Link (follow the console, like Waves ProLink)
 
 - **Yamaha CL/QL:** Remote Control Protocol, TCP port 49280. Use the console's IP from SETUP > NETWORK (FOR MIXER CONTROL).
-- **Yamaha DM7:** the same protocol and port, using the For Mixer Control IP. Pick scene list A, or B for the second side in Split mode. Scene 4.00 recalls snapshot 4; point scenes such as 4.10 also recall snapshot 4. (Not yet tested on a real DM7: the console link log shows what it sends.)
+- **Yamaha DM7:** the same protocol and port, using the For Mixer Control IP. Pick scene list A, or B for the second side in Split mode. Scene 4.00 recalls snapshot 4. A point scene such as 4.10 recalls snapshot 4 too, unless a snapshot is linked to it: pick the snapshot on the Snapshots screen, **Console scene…**, and type 4.10 (one snapshot per scene; Duplicate doesn't copy the link). (Not yet tested on a real DM7: the console link log shows what it sends.)
 - **Behringer X32:** OSC on UDP port 10023. Choose whether LiveRack follows **Scenes, Snippets or Cues**, press **Learn**, then recall one on the X32.
 
 Workflow: set up racks, then **STORE** a snapshot with the console's scene number. When the console recalls scene 12, LiveRack recalls snapshot 12. Give racks a console channel (**CH** on the strip) so selecting that channel on the console selects the rack.
@@ -180,19 +180,24 @@ Tap **Edit** at the top of the remote. Then:
 
 Scanning for plugins, choosing audio devices and installing plugins still happen on the LiveRack computer itself (or over screen sharing).
 
-### Plugin windows on the iPad (Mac)
+### Plugin windows on the iPad (Mac and Windows)
 
 Tapping a plugin shows **its own window, live**, and you work it with your fingers. LiveRack opens the window on the Mac if it isn't open, keeps it in front while the iPad uses it, and closes it again when you're done.
 
 - **Tap** = click, **drag** = click-drag (knobs, faders, EQ points), **double-tap** = double-click (resets many controls)
 - **Two-finger drag** = scroll wheel, **two-finger tap** = right-click
+- **Pinch** zooms the picture (up to 4×) for small controls; while zoomed, two fingers move it around. **Fit** goes back to the whole window
 - **Shift / Option / Cmd / Ctrl** stay on until tapped again: Shift-drag for fine adjust, Option-click to reset, as each plugin does it
 - **Right-click** makes the next tap a right-click; **Keyboard** types into the plugin's value boxes
 - The plugin's preset and option menus open as a touch list
 - **Sharp / Fast** picks picture quality; **Sliders** goes back to the parameter list
 - **First time:** macOS asks for **Screen Recording** permission for LiveRack (System Settings > Privacy & Security > Screen & System Audio Recording). Turn it on and reopen LiveRack. Because builds aren't signed with an Apple developer ID, each new LiveRack version needs the switch turned off and on again.
 
-On Windows the iPad shows the sliders for now.
+- **Windows:** the LiveRack computer must be signed in, unlocked and have a display on (a dummy HDMI plug works on a server). Taps move its real mouse pointer.
+
+### Other apps on the iPad (Windows)
+
+**Apps** at the top of the remote shows the windows of the apps in **Start these apps too** (Devices > Server mode), such as QRec, and you work them the same way as a plugin window. That way the SoundGrid driver's settings can be changed on a server with no screen. If the app isn't running, LiveRack starts it: tap Try again after a few seconds. A minimised window is brought back, and it's kept in front while the iPad shows it. Not yet on Mac.
 
 ## Companion
 

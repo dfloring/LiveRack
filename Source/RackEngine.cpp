@@ -2225,6 +2225,8 @@ bool RackEngine::duplicateSnapshot (int from, int to)
     snap.number = to;
     snap.name = src->name.isNotEmpty() ? src->name + " copy" : juce::String();
     snap.data = src->data != nullptr ? std::make_shared<juce::XmlElement> (*src->data) : nullptr;
+    if (snap.data != nullptr)
+        snap.data->removeAttribute ("consoleScene"); // one snapshot per console scene
     putSnapshot (snapshots, std::move (snap));
     sendChangeMessage();
     return true;
@@ -2251,6 +2253,56 @@ int RackEngine::nextFreeSnapshotNumber (int after) const
     while (getSnapshotInfo (n) != nullptr)
         ++n;
     return n;
+}
+
+juce::String RackEngine::normaliseConsoleScene (const juce::String& scene)
+{
+    const auto t = scene.trim();
+    if (t.isEmpty() || ! t.containsOnly ("0123456789."))
+        return {};
+    return juce::String (t.getDoubleValue(), 2);
+}
+
+juce::String RackEngine::getSnapshotConsoleScene (int number) const
+{
+    auto* snap = getSnapshotInfo (number);
+    return snap != nullptr && snap->data != nullptr ? snap->data->getStringAttribute ("consoleScene") : juce::String();
+}
+
+void RackEngine::setSnapshotConsoleScene (int number, const juce::String& scene)
+{
+    const auto wanted = normaliseConsoleScene (scene);
+    for (auto& s : snapshots)
+    {
+        if (s.data == nullptr)
+            continue;
+        if (s.number == number)
+        {
+            auto data = std::make_shared<juce::XmlElement> (*s.data);
+            if (wanted.isEmpty()) data->removeAttribute ("consoleScene");
+            else                  data->setAttribute ("consoleScene", wanted);
+            s.data = data;
+        }
+        else if (wanted.isNotEmpty() && s.data->getStringAttribute ("consoleScene") == wanted)
+        {
+            // One snapshot per console scene
+            auto data = std::make_shared<juce::XmlElement> (*s.data);
+            data->removeAttribute ("consoleScene");
+            s.data = data;
+        }
+    }
+    sendChangeMessage();
+}
+
+int RackEngine::findSnapshotForConsoleScene (const juce::String& scene) const
+{
+    const auto wanted = normaliseConsoleScene (scene);
+    if (wanted.isEmpty())
+        return -1;
+    for (auto& s : snapshots)
+        if (s.data != nullptr && s.data->getStringAttribute ("consoleScene") == wanted)
+            return s.number;
+    return -1;
 }
 
 juce::Time RackEngine::getSnapshotStoredTime (int number) const

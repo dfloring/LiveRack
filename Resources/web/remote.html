@@ -93,7 +93,7 @@
   .gbar button { flex: 0 0 auto; padding: 0 12px; }
   .gbar .sepv { width: 1px; align-self: stretch; background: var(--border); margin: 4px 2px; flex: 0 0 1px; }
   .stage { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-  .stage canvas { touch-action: none; background: #000; box-shadow: 0 0 0 1px var(--border); image-rendering: auto; }
+  .stage canvas { touch-action: none; background: #000; box-shadow: 0 0 0 1px var(--border); image-rendering: auto; transform-origin: 0 0; }
   .gmsg { position: absolute; inset: 0; display: none; flex-direction: column; gap: 14px; align-items: center; justify-content: center; text-align: center; padding: 40px; color: var(--text); font-size: 16px; line-height: 1.45; background: rgba(11,12,14,.85); }
   .gmsg.show { display: flex; }
   .gmsg p { max-width: 640px; margin: 0; }
@@ -140,6 +140,7 @@
   <div class="chip"><span class="light" id="light"></span><span id="scene">Scene -</span></div>
   <button id="prev">&lsaquo; Scene</button><button id="next">Scene &rsaquo;</button>
   <div class="spacer"></div>
+  <button id="appsBtn" style="display:none">Apps</button>
   <button class="showbtn" id="showBtn">Show</button>
   <button class="edit" id="editBtn">Edit</button>
   <div class="bpm"><div><small>BPM</small><b id="bpm">120</b></div><button id="tap">TAP</button></div>
@@ -172,6 +173,7 @@
     <button id="gRight">Right-click</button>
     <button id="gKbd">Keyboard</button>
     <div class="sepv"></div>
+    <button id="gFit" style="display:none">Fit</button>
     <button id="gQual">Sharp</button>
     <button id="gByp">Bypass</button>
     <button id="gDone">Done</button>
@@ -254,6 +256,7 @@ function render() {
 
   // Show name and the edit button
   $('showBtn').innerHTML = esc(s.show || 'Show') + (s.edited ? ' <span class="dot">\u25CF</span>' : '');
+  $('appsBtn').style.display = s.appWindows && s.apps && s.apps.length ? '' : 'none';
   if (s.note && s.note !== lastNote) { if (lastNote !== null) toast(s.note); lastNote = s.note; }
   else if (lastNote === null) lastNote = s.note || '';
 
@@ -263,6 +266,7 @@ function render() {
 function renderParams() {
   let v = state && state.view;
   if (v && view && (v.rack !== view[0] || v.slot !== view[1])) v = null; // from before this plugin was tapped
+  if (gui && gui.app !== undefined) { $('sheet').classList.remove('show'); return; }   // another app's window is open
   if (!view) { $('sheet').classList.remove('show'); if (gui) closeGui(); return; }
   if (!v) { if (!gui) $('sheet').classList.remove('show'); return; }
   if (gui) {
@@ -456,12 +460,35 @@ function openGui() {
   if (!view) return;
   prefs.window = true; savePrefs();
   gui = { rack: view[0], slot: view[1], ended: false, frames: 0, bytes: 0, statT: performance.now() };
+  $('gSliders').style.display = ''; $('gByp').style.display = '';
   $('gui').classList.add('show');
   $('sheet').classList.remove('show');
   $('gQual').textContent = quality().label;
   showMsg('Opening the plugin window\u2026', false);
   connectGui(gui);
 }
+
+// Another app on the LiveRack computer (QRec, say), shown like a plugin window
+function openApp(i) {
+  if (gui) closeGui();
+  view = null; $('sheet').classList.remove('show');
+  const name = (state && state.apps && state.apps[i]) || 'App';
+  gui = { app: i, name, ended: false, frames: 0, bytes: 0, statT: performance.now() };
+  $('gSliders').style.display = 'none'; $('gByp').style.display = 'none';
+  $('gtitle').textContent = name;
+  $('gui').classList.add('show');
+  $('gQual').textContent = quality().label;
+  showMsg('Opening ' + name + '\u2026', false);
+  connectGui(gui);
+}
+$('appsBtn').addEventListener('click', () => {
+  const apps = (state && state.apps) || [];
+  if (apps.length === 1) { openApp(0); return; }
+  openSheet('Apps', '');
+  $('eBody').innerHTML = apps.map((a, i) => `<div class="mitem" data-app="${i}"><span style="flex:1">${esc(a)}</span><span class="ar">&rsaquo;</span></div>`).join('')
+    + '<div class="hint" style="margin-top:10px">These are the apps set to start with LiveRack (Devices, Server mode). Their windows show here like a plugin window.</div>';
+  $('eBody').onclick = (ev) => { const b = ev.target.closest('[data-app]'); if (b) { closeSheet(); openApp(+b.dataset.app); } };
+});
 
 function closeGui() {
   const g = gui;
@@ -480,7 +507,8 @@ function showMsg(text, retry) {
 
 function connectGui(g) {
   const q = quality();
-  const ws = new WebSocket(`ws://${location.host}/view?view=${g.rack}:${g.slot}&scale=${q.scale}&q=${q.q}`);
+  const what = g.app !== undefined ? `app=${g.app}` : `view=${g.rack}:${g.slot}`;
+  const ws = new WebSocket(`ws://${location.host}/view?${what}&scale=${q.scale}&q=${q.q}`);
   ws.binaryType = 'blob';
   g.ws = ws;
   g.ended = false;
@@ -537,7 +565,23 @@ function drawFrame(bmp) {
   if (bmp.close) bmp.close();
 }
 
+// Pinch to zoom: the picture is scaled and moved; taps still land on the right spot
+let zoom = { z: 1, x: 0, y: 0 };
+function applyZoom() {
+  if (zoom.z <= 1.01) zoom = { z: 1, x: 0, y: 0 };
+  else {
+    // Keep some of the picture on screen
+    const w = cv.offsetWidth, h = cv.offsetHeight;
+    zoom.x = Math.min(w * 0.5, Math.max(-w * zoom.z + w * 0.5, zoom.x));
+    zoom.y = Math.min(h * 0.5, Math.max(-h * zoom.z + h * 0.5, zoom.y));
+  }
+  cv.style.transform = zoom.z === 1 ? '' : `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.z})`;
+  $('gFit').style.display = zoom.z === 1 ? 'none' : '';
+}
+$('gFit').addEventListener('click', () => { zoom = { z: 1, x: 0, y: 0 }; applyZoom(); });
+
 function fitCanvas() {
+  zoom = { z: 1, x: 0, y: 0 }; applyZoom();
   const st = $('stage').getBoundingClientRect();
   const s = Math.min((st.width - 16) / cv.width, (st.height - 16) / cv.height);
   cv.style.width = Math.max(1, Math.floor(cv.width * s)) + 'px';
@@ -602,9 +646,15 @@ cv.addEventListener('pointerdown', (e) => {
     pendTimer = setTimeout(beginDrag, 70);   // wait briefly: a second finger means scroll or right-click
   } else if (pointers.size === 2 && mode === 'pending') {
     clearTimeout(pendTimer); pendTimer = null;
-    mode = 'two'; twoMoved = false; twoLast = mid();
+    mode = 'two'; twoMoved = false; twoLast = mid(); twoStart = { dist: spread(), mid: mid(), zoom: { ...zoom } };
   }
 });
+
+let twoStart = null;
+function spread() {
+  const ps = [...pointers.values()];
+  return Math.max(1, Math.hypot(ps[0].cx - ps[1].cx, ps[0].cy - ps[1].cy));
+}
 
 function mid() {
   const ps = [...pointers.values()];
@@ -621,9 +671,22 @@ cv.addEventListener('pointermove', (e) => {
     if (Math.hypot(p.cx - startPos.cx, p.cy - startPos.cy) > 6) beginDrag();
   } else if (mode === 'drag' && e.pointerId === primary) {
     lastPos = p; moveQueued = p; queueFlush();
+  } else if (mode === 'two' && pointers.size === 2 && !twoMoved
+             && (Math.abs(spread() / twoStart.dist - 1) > 0.12
+                 || (zoom.z > 1 && Math.hypot(mid().cx - twoStart.mid.cx, mid().cy - twoStart.mid.cy) > 10))) {
+    // Fingers spreading or pinching, or moving while zoomed in: zoom and pan the picture rather than scroll the plugin
+    mode = 'zoom';
+  } else if (mode === 'zoom' && pointers.size === 2) {
+    const m = mid(), s0 = twoStart.zoom;
+    const z = Math.min(4, Math.max(1, s0.z * spread() / twoStart.dist));
+    const r = cv.getBoundingClientRect();
+    const left = r.left - zoom.x, top = r.top - zoom.y;               // where the unzoomed picture sits
+    const px = (twoStart.mid.cx - left - s0.x) / s0.z, py = (twoStart.mid.cy - top - s0.y) / s0.z;
+    zoom = { z, x: m.cx - left - px * z, y: m.cy - top - py * z };    // the point under the fingers stays under them
+    applyZoom();
   } else if (mode === 'two' && pointers.size === 2) {
     const m = mid(), dx = m.cx - twoLast.cx, dy = m.cy - twoLast.cy;
-    if (Math.abs(m.cx - startPos.cx) + Math.abs(m.cy - startPos.cy) > 10) twoMoved = true;
+    if (Math.abs(m.cx - twoStart.mid.cx) + Math.abs(m.cy - twoStart.mid.cy) > 10) twoMoved = true;
     if (twoMoved) {
       const prev = wheelQueued || { dx: 0, dy: 0 };
       wheelQueued = { t: 'wheel', x: m.x, y: m.y, dx: prev.dx + dx * 2, dy: prev.dy + dy * 2, mods: modString() };
@@ -639,6 +702,7 @@ function pointerEnd(e) {
   pointers.delete(e.pointerId);
   if (mode === 'pending' && e.pointerId === primary) { beginDrag(); endDrag(p); mode = 'idle'; }
   else if (mode === 'drag' && e.pointerId === primary) { endDrag(p); mode = 'idle'; }
+  else if (mode === 'zoom') { if (pointers.size === 0) mode = 'idle'; }
   else if (mode === 'two' && pointers.size === 0) {
     flush();
     if (!twoMoved && performance.now() - startT < 500) {
@@ -647,7 +711,7 @@ function pointerEnd(e) {
     }
     mode = 'idle';
   }
-  if (pointers.size === 0 && mode !== 'idle' && mode !== 'two') mode = 'idle';
+  if (pointers.size === 0 && mode !== 'idle' && mode !== 'two' && mode !== 'zoom') mode = 'idle';
 }
 cv.addEventListener('pointerup', pointerEnd);
 cv.addEventListener('pointercancel', pointerEnd);
@@ -664,7 +728,7 @@ $('gSliders').addEventListener('click', () => { prefs.window = false; savePrefs(
 $('pwin').addEventListener('click', () => openGui());
 $('gDone').addEventListener('click', () => { closeGui(); view = null; paramKey = ''; $('sheet').classList.remove('show'); });
 $('gByp').addEventListener('click', () => view && post({ cmd: 'slotBypass', rack: view[0], slot: view[1], value: -1 }));
-$('gRetry').addEventListener('click', () => { if (gui) { showMsg('Opening the plugin window\u2026', false); connectGui(gui); } });
+$('gRetry').addEventListener('click', () => { if (gui) { showMsg(gui.app !== undefined ? 'Opening ' + gui.name + '\u2026' : 'Opening the plugin window\u2026', false); connectGui(gui); } });
 $('gQual').addEventListener('click', () => {
   prefs.quality = prefs.quality === 'fast' ? 'sharp' : 'fast'; savePrefs();
   const q = quality();
@@ -880,8 +944,12 @@ function rackSheet(r) {
 
 // Shows: save, save as, new, open
 async function showSheet() {
-  let shows = [];
-  try { shows = (await (await fetch('/state?edit=1', { cache: 'no-store' })).json()).shows || []; } catch (e) {}
+  let shows = [], recent = [];
+  try {
+    const st = await (await fetch('/state?edit=1', { cache: 'no-store' })).json();
+    shows = st.shows || [];
+    recent = st.recent || [];
+  } catch (e) {}
   let pending = null; // an action waiting for "save first?"
 
   const draw = () => {
@@ -894,6 +962,7 @@ async function showSheet() {
       <div class="row"><input type="text" id="sName" placeholder="Show name" autocomplete="off" style="height:46px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);padding:0 12px;font:inherit;font-size:16px">
         <button data-sh="saveas" style="flex:0 0 auto">${state.hasShowFile ? 'Save as' : 'Save'}</button></div>
       <button data-sh="new">New show</button>
+      ${recent.length ? `<label style="margin-top:6px">Recent</label>` + recent.map((x, i) => `<div class="mitem" data-open-recent="${i}"><span class="ck">${x.current ? '\u2713' : ''}</span><span style="flex:1">${esc(x.name)}</span><span style="color:var(--dim);font-size:13px">${esc(x.folder)}</span></div>`).join('') : ''}
       <label style="margin-top:6px">Open</label>
       ${shows.length ? shows.map((x, i) => `<div class="mitem" data-open-show="${i}"><span class="ck">${x.current ? '\u2713' : ''}</span><span style="flex:1">${esc(x.name)}</span></div>`).join('')
                      : '<div class="hint">No shows saved yet. Shows are saved in Documents/LiveRack Shows on the LiveRack computer.</div>'}
@@ -901,7 +970,7 @@ async function showSheet() {
   };
 
   const run = (action, save) => {
-    if (action.cmd === 'showOpen' || action.cmd === 'showNew') action.save = !!save;
+    if (action.cmd === 'showOpen' || action.cmd === 'showOpenRecent' || action.cmd === 'showNew') action.save = !!save;
     post(action);
     closeSheet();
   };
@@ -913,7 +982,7 @@ async function showSheet() {
   openSheet(state.show || 'Show', '');
   draw();
   $('eBody').onclick = (ev) => {
-    const b = ev.target.closest('[data-sh],[data-ans],[data-open-show]');
+    const b = ev.target.closest('[data-sh],[data-ans],[data-open-show],[data-open-recent]');
     if (!b) return;
     if (b.dataset.ans) {
       const a = pending; pending = null;
@@ -921,6 +990,7 @@ async function showSheet() {
       run(a, b.dataset.ans === 'save');
       return;
     }
+    if (b.dataset.openRecent !== undefined) { const x = recent[+b.dataset.openRecent]; guarded({ cmd: 'showOpenRecent', index: x.index }); return; }
     if (b.dataset.openShow !== undefined) { const x = shows[+b.dataset.openShow]; guarded({ cmd: 'showOpen', folder: x.folder, name: x.name }); return; }
     const sh = b.dataset.sh;
     if (sh === 'save') { post({ cmd: 'showSave' }); closeSheet(); }

@@ -101,6 +101,9 @@ private:
     void newShow();
     void startNewShow();                 // without asking about unsaved changes
     void openShowFile (const juce::File&);
+    juce::StringArray getRecentShows() const;
+    void addRecentShow (const juce::File&);
+    void openRecentShow (int index);
     void showShowMenu();
     void afterShowLoaded();
     void checkUnsavedThen (std::function<void()>);

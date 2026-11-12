@@ -2042,12 +2042,22 @@ void MainComponent::showScope()
         {
             if (safe == nullptr) return {};
             juce::StringArray parts;
+            auto linked = safe->engine.getSnapshotConsoleScene (n);
+            // Scene N is taken over by a snapshot linked to "N.00"
+            if (linked.isEmpty() && safe->engine.findSnapshotForConsoleScene (juce::String (n)) >= 0)
+                return {};
             for (auto& c : safe->consoles)
                 if (c->getSettings().type != ConsoleLink::Type::off && c->getSettings().recallScenes)
-                    parts.add (c->getSettings().name + " scene " + juce::String (n));
+                    parts.add (c->getSettings().name + " scene " + (linked.isNotEmpty() ? linked : juce::String (n)));
             return parts.joinIntoString (", ");
         },
-        [safe] (const juce::String& text) { if (safe != nullptr) { safe->consoleNote = text; safe->repaint(); } } };
+        [safe] (const juce::String& text) { if (safe != nullptr) { safe->consoleNote = text; safe->repaint(); } },
+        [safe]
+        {
+            if (safe != nullptr && juce::isPositiveAndBelow (safe->activeConsole, (int) safe->consoles.size()))
+                return safe->consoles[(size_t) safe->activeConsole]->getLastSceneText();
+            return juce::String();
+        } };
 
     scopeEditor = new SnapshotsPanel (std::move (h));
     scopeWindow = std::make_unique<ToolWindow> (*this, "Snapshots", scopeEditor, "snapshotsWindow", [safe]
@@ -2147,6 +2157,7 @@ void MainComponent::saveShow (bool askForFile)
         engine.setShowFile (f);
         engine.setShowEdited (false);
         engine.saveSession();
+        addRecentShow (f);
         ignoreEditsUntil = juce::Time::getMillisecondCounter() + 500;
         consoleNote = "Saved " + f.getFileName();
         updateWindowTitle();
@@ -2281,6 +2292,7 @@ void MainComponent::openShowFile (const juce::File& f)
         showError ("Show opened with problems", error);
 
     engine.setShowFile (f);
+    addRecentShow (f);
     afterShowLoaded();
     applyWindowLayout (engine.getShowExtra ("WINDOWS"));
 
@@ -2329,6 +2341,22 @@ void MainComponent::showShowMenu()
     m.addItem (1, "Save", true);
     m.addItem (2, "Save As...");
     m.addItem (3, "Open...");
+
+    juce::PopupMenu recent;
+    const auto recentShows = getRecentShows();
+    for (int i = 0; i < recentShows.size(); ++i)
+    {
+        const juce::File f (recentShows[i]);
+        recent.addItem (100 + i, f.getFileNameWithoutExtension() + "   " + f.getParentDirectory().getFileName(),
+                        true, f == engine.getShowFile());
+    }
+    if (! recentShows.isEmpty())
+    {
+        recent.addSeparator();
+        recent.addItem (5, "Clear the list");
+    }
+    m.addSubMenu ("Open Recent", recent, ! recentShows.isEmpty());
+
     m.addSeparator();
     m.addItem (4, "New Show");
     m.addSeparator();
@@ -2342,7 +2370,42 @@ void MainComponent::showShowMenu()
         if (r == 2) safe->saveShow (true);
         if (r == 3) safe->openShow();
         if (r == 4) safe->newShow();
+        if (r == 5) AppSettings::set ("recentShows", {});
+        if (r >= 100) safe->openRecentShow (r - 100);
     });
+}
+
+// Recent shows: the last ten opened or saved, newest first
+juce::StringArray MainComponent::getRecentShows() const
+{
+    juce::StringArray list;
+    list.addLines (AppSettings::get ("recentShows"));
+    list.removeEmptyStrings();
+    for (int i = list.size(); --i >= 0;)
+        if (! juce::File (list[i]).existsAsFile())
+            list.remove (i);
+    return list;
+}
+
+void MainComponent::addRecentShow (const juce::File& f)
+{
+    auto list = getRecentShows();
+    list.removeString (f.getFullPathName());
+    list.insert (0, f.getFullPathName());
+    while (list.size() > 10)
+        list.remove (list.size() - 1);
+    AppSettings::set ("recentShows", list.joinIntoString ("\n"));
+}
+
+void MainComponent::openRecentShow (int index)
+{
+    const auto list = getRecentShows();
+    if (! juce::isPositiveAndBelow (index, list.size()))
+        return;
+
+    const juce::File f (list[index]);
+    juce::Component::SafePointer<MainComponent> safe (this);
+    checkUnsavedThen ([safe, f] { if (safe != nullptr) safe->openShowFile (f); });
 }
 
 // Snapshots: click the scene chip
@@ -2451,13 +2514,20 @@ void MainComponent::wireConsole (int i)
     auto* c = consoles[(size_t) i].get();
     juce::Component::SafePointer<MainComponent> safe (this);
 
-    c->onSceneRecalled = [safe, c] (int scene)
+    c->onSceneRecalled = [safe, c] (int scene, const juce::String& exact)
     {
         if (safe == nullptr) return;
         for (int k = 0; k < (int) safe->consoles.size(); ++k)
             if (safe->consoles[(size_t) k].get() == c)
                 safe->activeConsole = k;
-        if (c->getSettings().recallScenes)
+        if (! c->getSettings().recallScenes)
+            return;
+
+        // A snapshot linked to this exact scene (point scenes: 4.10), else scene N
+        const int linked = safe->engine.findSnapshotForConsoleScene (exact);
+        if (linked >= 0)
+            safe->recallScene (linked);
+        else
             safe->recallScene (scene);
     };
 
@@ -2950,6 +3020,15 @@ juce::String MainComponent::buildWebState (const juce::String& query)
     r->setProperty ("selected", selectedRack);
     r->setProperty ("selectedSlot", selectedSlot);
     r->setProperty ("pluginWindows", PluginViewCapture::isSupported());
+
+    // The apps LiveRack starts with it, for showing their windows on the remote
+    {
+        juce::Array<juce::var> apps;
+        for (auto& path : ServerMode::getStartApps())
+            apps.add (juce::File (path).getFileNameWithoutExtension());
+        r->setProperty ("apps", apps);
+        r->setProperty ("appWindows", PluginViewCapture::appsSupported());
+    }
     r->setProperty ("note", consoleNote);
     r->setProperty ("edited", engine.isShowEdited());
     r->setProperty ("hasShowFile", engine.getShowFile() != juce::File());
@@ -3125,6 +3204,7 @@ void MainComponent::addLiveState (juce::DynamicObject& r)
         const auto stored = engine.getSnapshotStoredTime (sn.number);
         sv.getDynamicObject()->setProperty ("stored", stored.toMilliseconds() > 0 ? stored.toISO8601 (true) : juce::String());
         sv.getDynamicObject()->setProperty ("midi", midi->describeTriggerFor (sn.number));
+        sv.getDynamicObject()->setProperty ("consoleScene", engine.getSnapshotConsoleScene (sn.number));
         snaps.add (sv);
     }
     r.setProperty ("snapshots", snaps);
@@ -3388,6 +3468,20 @@ void MainComponent::addWebEditState (juce::DynamicObject& r, const juce::String&
         }
         r.setProperty ("shows", shows);
         r.setProperty ("showsFolder", getShowsFolder().getFullPathName());
+
+        juce::Array<juce::var> recent;
+        const auto recentShows = getRecentShows();
+        for (int i = 0; i < recentShows.size(); ++i)
+        {
+            const juce::File f (recentShows[i]);
+            auto rv = obj();
+            rv.getDynamicObject()->setProperty ("name", f.getFileNameWithoutExtension());
+            rv.getDynamicObject()->setProperty ("folder", f.getParentDirectory().getFileName());
+            rv.getDynamicObject()->setProperty ("index", i);
+            rv.getDynamicObject()->setProperty ("current", f == engine.getShowFile());
+            recent.add (rv);
+        }
+        r.setProperty ("recent", recent);
     }
 
     if (has ("lib"))
@@ -3455,6 +3549,10 @@ bool MainComponent::handleServerCommand (const juce::String& cmd, const juce::va
         if (c.hasProperty ("rackBypass"))     sc.rackBypass = (bool) c["rackBypass"];
         if (c.hasProperty ("bpm"))            sc.bpm = (bool) c["bpm"];
         engine.setScopeFor (number, sc);
+    }
+    else if (cmd == "sceneLink" && engine.getSnapshotInfo ((int) c["number"]) != nullptr)
+    {
+        engine.setSnapshotConsoleScene ((int) c["number"], c["scene"].toString());
     }
     else if (cmd == "midiSnapshots")
     {
@@ -3693,6 +3791,17 @@ bool MainComponent::handleWebEditCommand (const juce::String& cmd, const juce::v
         return true;
     }
 
+    if (cmd == "showOpenRecent")
+    {
+        const auto list = getRecentShows();
+        const int index = (int) c["index"];
+        if (! juce::isPositiveAndBelow (index, list.size()))
+            return true;
+        saveFirst();
+        openShowFile (juce::File (list[index]));
+        return true;
+    }
+
     if (cmd == "showOpen")
     {
         const auto folders = getRemoteShowFolders();
@@ -3728,6 +3837,36 @@ std::shared_ptr<PluginViewCapture> MainComponent::openRemoteView (const juce::St
                 return juce::URL::removeEscapeChars (part.fromFirstOccurrenceOf ("=", false, false));
         return juce::String();
     };
+
+    // Another app's window (one of "Start these apps too")
+    if (const auto appText = param ("app"); appText.isNotEmpty())
+    {
+        const auto apps = ServerMode::getStartApps();
+        const int index = appText.getIntValue();
+        if (! juce::isPositiveAndBelow (index, apps.size()))
+        {
+            error = "That app isn't in the list any more.";
+            return nullptr;
+        }
+
+        const juce::File program (apps[index]);
+        PluginViewCapture::Options options;
+        if (auto s = param ("scale"); s.isNotEmpty())
+            options.scale = juce::jlimit (0.5f, 3.0f, s.getFloatValue());
+        if (auto q = param ("q"); q.isNotEmpty())
+            options.quality = juce::jlimit (0.2f, 0.95f, q.getFloatValue());
+
+        auto capture = PluginViewCapture::createForApp (program, options, error);
+        if (capture == nullptr && PluginViewCapture::appsSupported() && ! ServerMode::isAppRunning (program))
+        {
+            program.startAsProcess();
+            error = program.getFileNameWithoutExtension() + " wasn't running, so LiveRack is starting it. Try again in a few seconds.";
+        }
+
+        if (capture != nullptr)
+            remoteViews.push_back ({ capture, nullptr, false });
+        return capture;
+    }
 
     const auto viewText = param ("view");
     const int rack = viewText.upToFirstOccurrenceOf (":", false, false).getIntValue();

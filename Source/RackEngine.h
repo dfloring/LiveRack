@@ -256,6 +256,13 @@ public:
     bool renumberSnapshot (int from, int to);               // false if 'to' is taken
     int  nextFreeSnapshotNumber (int after) const;
     juce::Time getSnapshotStoredTime (int number) const;    // invalid for snapshots from before 0.17
+
+    // A console scene that recalls this snapshot instead of its own number,
+    // for point scenes ("4.10"). Empty: scene N recalls snapshot N.
+    juce::String getSnapshotConsoleScene (int number) const;
+    void setSnapshotConsoleScene (int number, const juce::String& scene);
+    int findSnapshotForConsoleScene (const juce::String& scene) const;   // -1: none linked
+    static juce::String normaliseConsoleScene (const juce::String&);     // "4.1" -> "4.10"
     // What recalling it would change now (in scope, not Recall Safe)
     std::vector<SnapshotDifference> differencesFromNow (int number) const;
     bool recallSnapshot (int number, juce::String& note);   // false = no such snapshot

@@ -269,11 +269,9 @@ void ConsoleLink::handleRcpLine (const juce::String& line)
             return;
 
         const int scene = number.getIntValue();
-        if (number.contains (".") && number.fromFirstOccurrenceOf (".", false, false).getIntValue() != 0)
-            addLog ("Point scene " + number + ": recalling snapshot " + juce::String (scene));
 
         if (t[0] == "NOTIFY")
-            sceneChanged (scene);
+            sceneChanged (scene, number);
         else if (t[0] == "OK")
             currentScene = scene;
     }
@@ -350,20 +348,22 @@ void ConsoleLink::oscMessageReceived (const juce::OSCMessage& m)
     }
 }
 
-void ConsoleLink::sceneChanged (int scene)
+void ConsoleLink::sceneChanged (int scene, const juce::String& exactText)
 {
     const auto now = juce::Time::getMillisecondCounter();
+    const auto exact = exactText.isNotEmpty() ? exactText : juce::String (scene);
 
     // A recall can be reported twice (recall started + current changed)
-    if (scene == currentScene && now - lastSceneEventMs < 1000)
+    if (scene == currentScene && exact == lastSceneText && now - lastSceneEventMs < 1000)
         return;
 
     currentScene = scene;
+    lastSceneText = exact;
     lastSceneEventMs = now;
-    addLog ("Scene " + juce::String (scene) + " recalled on the console");
+    addLog ("Scene " + exact + " recalled on the console");
 
     if (onSceneRecalled != nullptr)
-        onSceneRecalled (scene);
+        onSceneRecalled (scene, exact);
 }
 
 void ConsoleLink::addLog (const juce::String& s)

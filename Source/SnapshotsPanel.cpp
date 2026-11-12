@@ -561,6 +561,11 @@ SnapshotsPanel::SnapshotsPanel (Host h) : host (std::move (h)), engine (host.eng
     for (auto* b : { &recallButton, &storeOverButton, &duplicateButton, &renumberButton, &deleteButton })
         addAndMakeVisible (b);
 
+    consoleSceneButton.setButtonText (juce::String::fromUTF8 ("Console scene" "\xe2\x80\xa6"));
+    consoleSceneButton.setTooltip ("Which console scene recalls this snapshot: its own number, or a point scene such as 4.10");
+    consoleSceneButton.onClick = [this] { linkConsoleScene(); };
+    addAndMakeVisible (consoleSceneButton);
+
     // What it recalls
     for (auto& def : pillDefs)
     {
@@ -675,7 +680,7 @@ void SnapshotsPanel::updateHeader()
     if (! nameEdit.hasKeyboardFocus (true))
         nameEdit.setText (info != nullptr ? info->name : juce::String(), false);
     nameEdit.setEnabled (has);
-    for (auto* b : { &recallButton, &storeOverButton, &duplicateButton, &renumberButton, &deleteButton })
+    for (auto* b : { &recallButton, &storeOverButton, &duplicateButton, &renumberButton, &deleteButton, &consoleSceneButton })
         b->setEnabled (has);
 
     const auto sc = engine.getScopeFor (selected);
@@ -888,6 +893,40 @@ void SnapshotsPanel::finishPicking (bool store)
     scope->repaint();
 }
 
+void SnapshotsPanel::linkConsoleScene()
+{
+    if (! hasSelection())
+        return;
+
+    const int number = selected;
+    auto current = engine.getSnapshotConsoleScene (number);
+    if (current.isEmpty())
+    {
+        // Offer the point scene the console just recalled, if there is one
+        const auto last = host.lastConsoleScene != nullptr ? RackEngine::normaliseConsoleScene (host.lastConsoleScene()) : juce::String();
+        current = last.isNotEmpty() && ! last.endsWith (".00") ? last : juce::String (number);
+    }
+
+    auto* w = new juce::AlertWindow ("Console scene for snapshot " + juce::String (number),
+                                     "The console scene that recalls this snapshot. Use a point scene (4.10) to give it its own; "
+                                     "the scene's whole number (" + juce::String (number) + ") goes back to the usual link.",
+                                     juce::MessageBoxIconType::NoIcon);
+    w->addTextEditor ("scene", current, "Scene");
+    w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<SnapshotsPanel> safe (this);
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, w, number] (int res)
+    {
+        if (safe == nullptr || res != 1)
+            return;
+        auto scene = RackEngine::normaliseConsoleScene (w->getTextEditorContents ("scene"));
+        if (scene == RackEngine::normaliseConsoleScene (juce::String (number)))
+            scene.clear(); // its own number: no link needed
+        safe->engine.setSnapshotConsoleScene (number, scene);
+        safe->refresh();
+    }), true);
+}
+
 void SnapshotsPanel::renumber()
 {
     if (! hasSelection())
@@ -953,7 +992,8 @@ void SnapshotsPanel::paint (juce::Graphics& g)
         }
         g.setColour (Theme::textDim);
         g.setFont (juce::FontOptions (12.0f));
-        g.drawText (infoLine, headerPanel.reduced (16, 12).removeFromBottom (18), juce::Justification::centredLeft, true);
+        g.drawText (infoLine, headerPanel.reduced (16, 12).removeFromBottom (18).withTrimmedRight (consoleSceneButton.getWidth() + 10),
+                    juce::Justification::centredLeft, true);
     }
 
     // Panel titles
@@ -1053,6 +1093,7 @@ void SnapshotsPanel::resized()
         top.removeFromLeft (80);
         auto buttons = top.removeFromRight (juce::jmin (top.getWidth() - 200, 470));
         nameEdit.setBounds (top.withTrimmedRight (12).withSizeKeepingCentre (top.getWidth() - 12, 36));
+        consoleSceneButton.setBounds (h.removeFromBottom (24).removeFromRight (140));
         const int bw = (buttons.getWidth() - 4 * 6) / 5;
         for (auto* b : { &recallButton, &storeOverButton, &duplicateButton, &renumberButton, &deleteButton })
         {

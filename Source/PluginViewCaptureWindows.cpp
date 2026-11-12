@@ -22,8 +22,62 @@
 //
 // The screen must be on and Windows signed in and unlocked: a locked screen
 // can't be copied.
+//
+// Other apps (QRec, say) are shown the same way: their main window is found
+// by the program's file, brought back if minimised and kept on top.
 namespace
 {
+juce::String processPath (DWORD pid)
+{
+    juce::String result;
+    if (HANDLE h = OpenProcess (PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid))
+    {
+        WCHAR buffer[1024];
+        DWORD size = (DWORD) juce::numElementsInArray (buffer);
+        if (QueryFullProcessImageNameW (h, 0, buffer, &size))
+            result = juce::String (buffer, (size_t) size);
+        CloseHandle (h);
+    }
+    return result;
+}
+
+// The biggest ordinary window of the program at this path
+HWND findAppWindow (const juce::File& app)
+{
+    struct Search { juce::String path; HWND best = nullptr; long bestArea = 0; } search { app.getFullPathName() };
+
+    EnumWindows ([] (HWND h, LPARAM lp) -> BOOL
+    {
+        auto& s = *reinterpret_cast<Search*> (lp);
+        if (! IsWindowVisible (h) || GetWindow (h, GW_OWNER) != nullptr
+            || (GetWindowLongW (h, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) != 0)
+            return TRUE;
+
+        DWORD pid = 0;
+        GetWindowThreadProcessId (h, &pid);
+        if (pid == 0)
+            return TRUE;
+        // The same program file (or one of the same name, for apps that start a copy elsewhere)
+        const auto path = processPath (pid);
+        if (! path.equalsIgnoreCase (s.path)
+            && ! path.fromLastOccurrenceOf ("\\", false, false).equalsIgnoreCase (s.path.fromLastOccurrenceOf ("\\", false, false)))
+            return TRUE;
+
+        WINDOWPLACEMENT place { sizeof (WINDOWPLACEMENT) };
+        GetWindowPlacement (h, &place);   // the normal size, even when minimised
+        const auto& r = place.rcNormalPosition;
+        const long area = (long) (r.right - r.left) * (long) (r.bottom - r.top);
+        if (s.best == nullptr || area > s.bestArea)
+        {
+            s.best = h;
+            s.bestArea = area;
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM> (&search));
+
+    return search.best;
+}
+
 class WindowsViewCapture final : public PluginViewCapture,
                                  private juce::Timer
 {
@@ -34,6 +88,17 @@ public:
         w.setAlwaysOnTop (true);
         keepOnScreen();
         w.toFront (false);
+        startTimerHz (25);
+    }
+
+    // Another program's window
+    WindowsViewCapture (const juce::File& program, HWND h, Options o) : options (o), appFile (program), appWindow (h)
+    {
+        if (IsIconic (h))
+            ShowWindow (h, SW_RESTORE);
+        wasOnTop = (GetWindowLongW (h, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+        SetWindowPos (h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        keepOnScreen();
         startTimerHz (25);
     }
 
@@ -51,7 +116,11 @@ public:
         if (window != nullptr && ! wasOnTop)
             window->setAlwaysOnTop (false);
 
+        if (appWindow != nullptr && IsWindow (appWindow) && ! wasOnTop)
+            SetWindowPos (appWindow, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
         window = nullptr;
+        appWindow = nullptr;
     }
 
     //==========================================================================
@@ -150,8 +219,13 @@ public:
 
 private:
     //==========================================================================
+    bool isApp() const { return appFile != juce::File(); }
+
     HWND windowHandle() const
     {
+        if (isApp())
+            return appWindow;
+
         auto* peer = window != nullptr ? window->getPeer() : nullptr;
         return peer != nullptr ? (HWND) peer->getNativeHandle() : nullptr;
     }
@@ -159,6 +233,17 @@ private:
     // The plugin's part of the window, in screen pixels
     bool contentRect (RECT& r) const
     {
+        if (isApp())
+        {
+            RECT client;
+            if (appWindow == nullptr || IsIconic (appWindow) || ! GetClientRect (appWindow, &client))
+                return false;
+            POINT origin { 0, 0 };
+            ClientToScreen (appWindow, &origin);
+            r = { origin.x, origin.y, origin.x + client.right, origin.y + client.bottom };
+            return r.right > r.left && r.bottom > r.top;
+        }
+
         auto* content = window != nullptr ? window->getContentComponent() : nullptr;
         const auto hwnd = windowHandle();
 
@@ -186,6 +271,22 @@ private:
     // Only what's on screen can be copied: move the window fully onto its display
     void keepOnScreen()
     {
+        if (isApp())
+        {
+            RECT w;
+            MONITORINFO info { sizeof (MONITORINFO) };
+            if (appWindow == nullptr || ! GetWindowRect (appWindow, &w)
+                || ! GetMonitorInfoW (MonitorFromWindow (appWindow, MONITOR_DEFAULTTONEAREST), &info))
+                return;
+            const auto& a = info.rcWork;
+            const int width = w.right - w.left, height = w.bottom - w.top;
+            const int x = juce::jlimit ((int) a.left, juce::jmax ((int) a.left, (int) a.right - width), (int) w.left);
+            const int y = juce::jlimit ((int) a.top, juce::jmax ((int) a.top, (int) a.bottom - height), (int) w.top);
+            if (x != w.left || y != w.top)
+                SetWindowPos (appWindow, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            return;
+        }
+
         if (window == nullptr)
             return;
 
@@ -201,10 +302,11 @@ private:
 
     void bringToFront()
     {
-        if (window == nullptr)
+        if (window == nullptr && appWindow == nullptr)
             return;
 
-        window->toFront (true);
+        if (window != nullptr)
+            window->toFront (true);
 
         if (const auto hwnd = windowHandle(); hwnd != nullptr && GetForegroundWindow() != hwnd)
         {
@@ -219,11 +321,26 @@ private:
     //==========================================================================
     void timerCallback() override
     {
-        if (window == nullptr || ended.load())
+        if (isApp() && ! ended.load() && (appWindow == nullptr || ! IsWindow (appWindow)))
+        {
+            // The app closed its window, or swapped it for another
+            appWindow = findAppWindow (appFile);
+            if (appWindow == nullptr)
+            {
+                windowClosed (appFile.getFileNameWithoutExtension() + " closed on the LiveRack computer.");
+                return;
+            }
+            SetWindowPos (appWindow, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+
+        if ((window == nullptr && ! isApp()) || ended.load())
         {
             stopTimer();
             return;
         }
+
+        if (isApp() && IsIconic (appWindow))
+            ShowWindow (appWindow, SW_RESTORE);   // minimised on the computer: it can't be copied
 
         {
             const juce::ScopedLock sl (lock);
@@ -245,8 +362,19 @@ private:
         failures = 0;
 
         // Smaller pictures when the remote asked for them
-        const auto area = window->getLocalArea (window->getContentComponent(), window->getContentComponent()->getLocalBounds());
-        const int wantedWidth = juce::roundToInt (area.getWidth() * options.scale);
+        int wantedWidth = 0;
+        if (isApp())
+        {
+            HDC screen = GetDC (nullptr);
+            const double dpiScale = juce::jmax (1, GetDeviceCaps (screen, LOGPIXELSX)) / 96.0;
+            ReleaseDC (nullptr, screen);
+            wantedWidth = juce::roundToInt ((r.right - r.left) / dpiScale * options.scale);
+        }
+        else
+        {
+            const auto area = window->getLocalArea (window->getContentComponent(), window->getContentComponent()->getLocalBounds());
+            wantedWidth = juce::roundToInt (area.getWidth() * options.scale);
+        }
         if (wantedWidth > 0 && image.getWidth() > wantedWidth * 1.05)
             image = image.rescaled (wantedWidth, juce::roundToInt (image.getHeight() * (double) wantedWidth / image.getWidth()),
                                     juce::Graphics::mediumResamplingQuality);
@@ -413,6 +541,8 @@ private:
     //==========================================================================
     juce::Component::SafePointer<juce::DocumentWindow> window;
     Options options;
+    juce::File appFile;
+    HWND appWindow = nullptr;
     std::atomic<float> quality { options.quality };
     bool wasOnTop = false, buttonDown = false, rightButton = false;
     bool held[3] { false, false, false };
@@ -428,5 +558,15 @@ std::shared_ptr<PluginViewCapture> createWindowsViewCapture (juce::DocumentWindo
                                                              juce::String&)
 {
     return std::make_shared<WindowsViewCapture> (window, options);
+}
+
+std::shared_ptr<PluginViewCapture> createWindowsAppCapture (const juce::File& app, PluginViewCapture::Options options,
+                                                            juce::String& error)
+{
+    if (auto h = findAppWindow (app))
+        return std::make_shared<WindowsViewCapture> (app, h, options);
+
+    error = app.getFileNameWithoutExtension() + " has no window open on the LiveRack computer.";
+    return nullptr;
 }
 #endif

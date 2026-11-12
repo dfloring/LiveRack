@@ -50,6 +50,30 @@ int PluginViewCapture::modifierFlagsFrom (const juce::String& mods)
     return f;
 }
 
+#if JUCE_WINDOWS
+std::shared_ptr<PluginViewCapture> createWindowsAppCapture (const juce::File&, PluginViewCapture::Options, juce::String&);
+#endif
+
+bool PluginViewCapture::appsSupported()
+{
+   #if JUCE_WINDOWS
+    return true;
+   #else
+    return false;
+   #endif
+}
+
+std::shared_ptr<PluginViewCapture> PluginViewCapture::createForApp (const juce::File& program, Options options, juce::String& error)
+{
+   #if JUCE_WINDOWS
+    return createWindowsAppCapture (program, options, error);
+   #else
+    juce::ignoreUnused (program, options);
+    error = "Showing other apps on the remote works on Windows for now.";
+    return nullptr;
+   #endif
+}
+
 #if ! JUCE_MAC
 //==============================================================================
 // JUCE-only capture: draws the window's components into an image and sends

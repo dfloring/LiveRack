@@ -558,6 +558,30 @@ struct PreviewHooks
                 });
             });
 
+        if (open == "pointscenes")
+            juce::Timer::callAfterDelay (600, [&m]
+            {
+                m.storeScene (4, "Four");
+                m.storeScene (5, "Five");
+                m.storeScene (20, "Four point one");
+                m.engine.setSnapshotConsoleScene (20, "4.1");
+                std::cerr << "POINT link of 20: " << m.engine.getSnapshotConsoleScene (20)
+                          << ", find 4.10 -> " << m.engine.findSnapshotForConsoleScene ("4.10") << std::endl;
+                m.engine.duplicateSnapshot (20, 21);
+                std::cerr << "POINT duplicate keeps no link: '" << m.engine.getSnapshotConsoleScene (21) << "'" << std::endl;
+                ConsoleLink::Settings s;
+                s.type = ConsoleLink::Type::yamahaDm7;
+                s.address = "127.0.0.1";
+                s.recallScenes = true;
+                m.consoles[0]->setSettings (s);
+                for (int t : { 2500, 3500, 4500 })
+                    juce::Timer::callAfterDelay (t, [&m, t]
+                    {
+                        std::cerr << "POINT at " << t << " ms: current snapshot " << m.currentScene
+                                  << ", console said " << m.consoles[0]->getLastSceneText() << std::endl;
+                    });
+            });
+
         if (open == "multicore")
             juce::Timer::callAfterDelay (600, [&m]
             {

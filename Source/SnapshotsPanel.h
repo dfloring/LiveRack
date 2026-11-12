@@ -21,6 +21,7 @@ public:
                             const juce::String& okText, std::function<void()> onOk)> confirm;
         std::function<juce::String (int)> consoleSceneFor;   // "FOH CL5 scene 3", or empty
         std::function<void (const juce::String&)> note;      // a line for the status bar
+        std::function<juce::String()> lastConsoleScene;      // as the console last reported it ("4.10")
     };
 
     explicit SnapshotsPanel (Host);
@@ -70,6 +71,8 @@ private:
     juce::TextButton recallButton { "Recall" }, storeOverButton { "Store over" }, duplicateButton { "Duplicate" },
                      renumberButton { "Renumber" }, deleteButton { "Delete" };
     juce::String infoLine;
+    juce::TextButton consoleSceneButton { "Console scene" };
+    void linkConsoleScene();
 
     // What it recalls
     juce::OwnedArray<juce::TextButton> pills;

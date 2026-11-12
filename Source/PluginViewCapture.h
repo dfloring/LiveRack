@@ -25,6 +25,10 @@ public:
     static std::shared_ptr<PluginViewCapture> create (juce::DocumentWindow& window, Options, juce::String& error);
     static bool isSupported();
 
+    // Another program's main window (QRec, say). Windows only for now.
+    static std::shared_ptr<PluginViewCapture> createForApp (const juce::File& program, Options, juce::String& error);
+    static bool appsSupported();
+
     virtual ~PluginViewCapture() = default;
 
     //==========================================================================
