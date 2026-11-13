@@ -40,7 +40,7 @@ private:
     bool dragging = false;
 };
 
-PluginDock::PluginDock (RackEngine& e) : engine (e)
+PluginDock::PluginDock (LiveConnection& c) : engine (c)
 {
     for (auto* b : { &rackBypassButton, &bypassButton, &popOutButton, &removeButton })
         addAndMakeVisible (b);
@@ -163,7 +163,8 @@ void PluginDock::show (int newRack, int newSlot)
     rack = newRack;
     slot = newSlot;
 
-    auto* plugin = engine.getPlugin (rack, slot);
+    auto* plugin = engine.getLocalPlugin (rack, slot);
+    const bool hasSlot = engine.getSlot (rack, slot).exists;
     const int heightBefore = getPreferredHeight();
 
     if (plugin != shownProcessor)
@@ -177,6 +178,11 @@ void PluginDock::show (int newRack, int newSlot)
         message = fullViewAvailable && ! fullView
                     ? "This plugin is too big for this panel. Rack (top bar) shows it in the whole window, or Pop Out opens it in its own window."
                     : "This plugin is too big for this panel. Pop Out opens it in its own window, or make the window bigger.";
+    }
+    else if (plugin == nullptr && hasSlot)
+    {
+        // Running on the server
+        message = "The plugin's window is on " + engine.getServerName() + ".";
     }
     else if (plugin == nullptr)
     {
@@ -222,8 +228,8 @@ void PluginDock::rebuildTabs()
 
     for (int s = 0; s < engine.getNumSlots (rack); ++s)
     {
-        auto* plugin = engine.getPlugin (rack, s);
-        auto* tab = tabs.add (new TabButton (juce::String (s + 1) + ". " + (plugin != nullptr ? plugin->getName() : "?"), rack, s));
+        const auto plugin = engine.getSlot (rack, s);
+        auto* tab = tabs.add (new TabButton (juce::String (s + 1) + ". " + (plugin.exists ? plugin.name : "?"), rack, s));
         tab->setToggleState (s == slot, juce::dontSendNotification);
         tab->setColour (juce::TextButton::buttonOnColourId, Theme::accentDeep);
         juce::ignoreUnused (colour);
@@ -234,10 +240,10 @@ void PluginDock::rebuildTabs()
 
 void PluginDock::updateHeader()
 {
-    auto* plugin = engine.getPlugin (rack, slot);
-    const bool hasPlugin = plugin != nullptr;
+    const auto plugin = engine.getSlot (rack, slot);
+    const bool hasPlugin = plugin.exists;
 
-    const bool bypassed = engine.isSlotBypassed (rack, slot);
+    const bool bypassed = plugin.bypassed;
     bypassButton.setColour (juce::TextButton::buttonColourId,
                             bypassed ? Theme::amber : getLookAndFeel().findColour (juce::TextButton::buttonColourId));
     bypassButton.setColour (juce::TextButton::textColourOffId, bypassed ? Theme::background : Theme::text);
@@ -326,9 +332,9 @@ void PluginDock::updateMeters()
     {
         for (int s = 0; s < tabs.size() && s < engine.getNumSlots (rack); ++s)
         {
-            auto* plugin = engine.getPlugin (rack, s);
-            const int pc = (int) std::ceil (engine.getSlotLoad (rack, s).peak * 100.0f);
-            const auto text = juce::String (s + 1) + ". " + (plugin != nullptr ? plugin->getName() : "?")
+            const auto plugin = engine.getSlot (rack, s);
+            const int pc = (int) std::ceil (engine.getSlotLoad (rack, s) * 100.0f);
+            const auto text = juce::String (s + 1) + ". " + (plugin.exists ? plugin.name : "?")
                             + (pc >= 1 ? "   " + juce::String (pc) + "%" : juce::String());
             if (tabs[s]->getButtonText() != text)
                 tabs[s]->setButtonText (text);

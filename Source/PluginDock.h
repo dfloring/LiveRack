@@ -1,5 +1,5 @@
 #pragma once
-#include "RackEngine.h"
+#include "LiveConnection.h"
 #include "Theme.h"
 
 // Shows the selected plugin's editor docked under the strips, with a tab for
@@ -10,7 +10,7 @@ class PluginDock : public juce::Component,
                    private juce::ComponentListener
 {
 public:
-    explicit PluginDock (RackEngine&);
+    explicit PluginDock (LiveConnection&);   // the show, on this computer or a server
     ~PluginDock() override;
 
     void show (int rack, int slot);
@@ -54,7 +54,7 @@ private:
     void layoutEditor();
     void componentMovedOrResized (juce::Component&, bool wasMoved, bool wasResized) override;
 
-    RackEngine& engine;
+    LiveConnection& engine;
     int rack = -1, slot = -1;
 
     juce::AudioProcessor* shownProcessor = nullptr;

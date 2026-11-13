@@ -1,5 +1,5 @@
 #pragma once
-#include "RackEngine.h"
+#include "LiveConnection.h"
 class PluginLibrary;
 
 // Racks shown side by side as channel strips, SuperRack-style: a coloured
@@ -9,7 +9,7 @@ class RackStripsView : public juce::Component,
                        public juce::DragAndDropContainer
 {
 public:
-    explicit RackStripsView (RackEngine&);
+    explicit RackStripsView (LiveConnection&);   // the show, on this computer or a server
     ~RackStripsView() override;
 
     std::function<void (int rack, int slot)> onSelect;    // slot -1 = the rack itself
@@ -43,6 +43,7 @@ public:
     float getOutputLevel (int rack) const;      // 0..1 on the meter's scale
     float getInputLevel (int rack) const;       // 0..1 on the meter's scale
     float getSlotGainReduction (int rack, int slot) const; // dB, -1 = not shown, 60 = muted
+    bool isSlotGainReductionEstimated (int rack, int slot) const;
     float getLevel (int rack, bool output) const;
    #if LIVERACK_PREVIEW_HOOKS
     void previewMenu (int which, int rack);
@@ -56,6 +57,7 @@ public:
     static juce::Colour colourForIndex (int index);
     static juce::String colourName (int index);
     static juce::Colour colourFor (const RackEngine&, int rack);
+    static juce::Colour colourFor (LiveConnection&, int rack);
 
 #if LIVERACK_PREVIEW_HOOKS
     friend struct PreviewHooks;

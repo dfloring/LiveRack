@@ -210,8 +210,10 @@ private:
     class BpmDisplay;
     std::unique_ptr<BpmDisplay> bpmDisplay;
 
-    RackStripsView strips { engine };
-    PluginDock dock { engine };
+    // How the screens reach the show: here, this computer's engine
+    LocalConnection live { engine };
+    RackStripsView strips { live };
+    PluginDock dock { live };
     HotPluginsBar hotBar { engine, *this };
     PageTabs pageTabs { engine };
     std::vector<Shortcut> extraShortcuts = Shortcuts::loadExtras();

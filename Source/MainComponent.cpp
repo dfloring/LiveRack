@@ -3041,8 +3041,16 @@ juce::String MainComponent::buildWebState (const juce::String& query)
     const auto visible = engine.getVisibleRacks();
     juce::Array<juce::var> racks;
 
+    // The current page's racks, in their order
+    {
+        juce::Array<juce::var> order;
+        for (int v : visible)
+            order.add (v);
+        r->setProperty ("order", order);
+    }
+
     // Live clients get levels separately ("meters"), so the state only changes when something does
-    const bool live = juce::StringArray::fromTokens (query, "&", "").contains ("live=1");
+    const bool liveClient = juce::StringArray::fromTokens (query, "&", "").contains ("live=1");
 
     for (int i = 0; i < engine.getNumRacks(); ++i)
     {
@@ -3051,11 +3059,12 @@ juce::String MainComponent::buildWebState (const juce::String& query)
         auto* ro = rack.getDynamicObject();
         ro->setProperty ("name", cfg.name);
         ro->setProperty ("colour", "#" + RackStripsView::colourFor (engine, i).toDisplayString (false));
+        ro->setProperty ("colourIndex", cfg.colourIndex);
         ro->setProperty ("bypass", engine.isRackBypassed (i));
         ro->setProperty ("safe", cfg.recallSafe);
         ro->setProperty ("format", cfg.formatName());
         ro->setProperty ("group", RackConfig::groupName (cfg.latencyGroup));
-        if (! live)
+        if (! liveClient)
         {
             ro->setProperty ("gr", strips.getMaxGainReduction (i));
             ro->setProperty ("level", strips.getOutputLevel (i));
@@ -3078,6 +3087,7 @@ juce::String MainComponent::buildWebState (const juce::String& query)
             so->setProperty ("name", p != nullptr ? p->getName() : juce::String ("?"));
             so->setProperty ("bypass", engine.isSlotBypassed (i, s));
             so->setProperty ("sp", s == point);
+            so->setProperty ("key", PluginLibrary::familyKey (engine.getSlotDescription (i, s)));
             slots.add (slot);
         }
         ro->setProperty ("slots", slots);
@@ -3235,6 +3245,12 @@ void MainComponent::addLiveState (juce::DynamicObject& r)
     }
     r.setProperty ("rackInfo", extra);
 
+    // What each latency group is aligned to (0 = no group)
+    juce::Array<juce::var> groupMs;
+    for (int g = 0; g <= 8; ++g)
+        groupMs.add (g == 0 ? 0.0 : engine.getGroupLatencyMs (g));
+    r.setProperty ("groupLatencyMs", groupMs);
+
     // Server settings
     auto server = obj();
     auto* so = server.getDynamicObject();
@@ -3312,10 +3328,11 @@ juce::String MainComponent::buildWebMeters()
     juce::Array<juce::var> racks;
     for (int i = 0; i < engine.getNumRacks(); ++i)
     {
-        juce::Array<juce::var> gr, loads;
+        juce::Array<juce::var> gr, est, loads;
         for (int sl = 0; sl < engine.getNumSlots (i); ++sl)
         {
             gr.add (std::round ((double) strips.getSlotGainReduction (i, sl) * 10.0) / 10.0);
+            est.add (strips.isSlotGainReductionEstimated (i, sl));
             loads.add (std::round ((double) engine.getSlotLoad (i, sl).peak * 1000.0) / 1000.0);
         }
 
@@ -3323,6 +3340,7 @@ juce::String MainComponent::buildWebMeters()
         o->setProperty ("in", std::round ((double) strips.getInputLevel (i) * 1000.0) / 1000.0);
         o->setProperty ("out", std::round ((double) strips.getOutputLevel (i) * 1000.0) / 1000.0);
         o->setProperty ("gr", gr);
+        o->setProperty ("est", est);
         o->setProperty ("loads", loads);
         o->setProperty ("load", std::round ((double) engine.getRackLoad (i).peak * 1000.0) / 1000.0);
         racks.add (juce::var (o));
@@ -3687,6 +3705,8 @@ bool MainComponent::handleWebEditCommand (const juce::String& cmd, const juce::v
             cfg.consoleChannel = juce::jmax (0, (int) c["console"]);
         if (c.hasProperty ("safe"))
             cfg.recallSafe = (bool) c["safe"];
+        if (c.hasProperty ("colour"))
+            cfg.colourIndex = juce::jlimit (-1, RackStripsView::numColours - 1, (int) c["colour"]);
     };
 
     if (cmd == "addRack")
@@ -3730,9 +3750,11 @@ bool MainComponent::handleWebEditCommand (const juce::String& cmd, const juce::v
 
     if (cmd == "addPlugin" && validRack)
     {
+        // A plugin family from the library ("key"), or an exact plugin ("id", as dragged from the plugin list)
         const int at = c.hasProperty ("index") ? (int) c["index"] : engine.getNumSlots (rack);
+        const auto pluginId = c.hasProperty ("id") ? c["id"].toString() : "family:" + c["key"].toString();
         juce::String error;
-        if (insertPlugin ("family:" + c["key"].toString(), rack, juce::jlimit (0, engine.getNumSlots (rack), at), error))
+        if (insertPlugin (pluginId, rack, juce::jlimit (0, engine.getNumSlots (rack), at), error))
             consoleNote = "Added " + engine.getPlugin (rack, juce::jlimit (0, engine.getNumSlots (rack) - 1, at))->getName();
         else
             consoleNote = "Couldn't add the plugin" + (error.isNotEmpty() ? ": " + error : juce::String());
@@ -3746,6 +3768,13 @@ bool MainComponent::handleWebEditCommand (const juce::String& cmd, const juce::v
     {
         consoleNote = "Removed " + engine.getPlugin (rack, slot)->getName();
         removeSlot (rack, slot);
+        return true;
+    }
+
+    // A plugin dragged to another place, in its rack or another one; "copy" keeps the original
+    if (cmd == "slotDrop" && validSlot)
+    {
+        handleSlotDrop (rack, slot, (int) c["toRack"], (int) c["to"], (bool) c["copy"]);
         return true;
     }
 

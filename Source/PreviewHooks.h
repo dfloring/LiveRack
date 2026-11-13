@@ -3,6 +3,7 @@
 #include "ServerMode.h"
 #include "SocketUtil.h"
 #include "ServerCheck.h"
+#include "RemoteConnection.h"
 // Only compiled into Linux preview builds (LIVERACK_PREVIEW_HOOKS=1), used to
 // set up a sample session, feed a test signal through it, and open dialogs
 // for UI screenshots. Never part of the Mac app.
@@ -46,6 +47,125 @@ struct PreviewHooks
 
     static inline std::unique_ptr<TestSignal> testSignal;
 
+    // The rack strips and plugin panel in a second window, reaching this same
+    // LiveRack over the network (/live): what LiveRack Client will show
+    struct RemoteView : public juce::Component, private juce::ChangeListener, private juce::Timer
+    {
+        explicit RemoteView (int port) : live ("127.0.0.1", port)
+        {
+            addAndMakeVisible (strips);
+            addAndMakeVisible (dock);
+            live.addChangeListener (this);
+            strips.onSelect = [this] (int r, int s) { rack = r; slot = s; strips.setSelection (r, s); dock.show (r, juce::jmax (0, s)); };
+            dock.onSelectSlot = strips.onSelect;
+            dock.levelFor = [this] (int r, bool out) { return strips.getLevel (r, out); };
+            startTimerHz (30);
+        }
+        ~RemoteView() override { live.removeChangeListener (this); }
+
+        void changeListenerCallback (juce::ChangeBroadcaster*) override
+        {
+            strips.refresh();
+            strips.setSelection (rack, slot);
+            dock.show (rack, slot);
+        }
+        void timerCallback() override { strips.updateMeters(); dock.updateMeters(); }
+        void resized() override
+        {
+            auto b = getLocalBounds().reduced (8);
+            strips.setBounds (b.removeFromTop (b.getHeight() / 2));
+            b.removeFromTop (8);
+            dock.setBounds (b);
+        }
+        void paint (juce::Graphics& g) override { g.fillAll (Theme::background); }
+
+        RemoteConnection live;
+        RackStripsView strips { live };
+        PluginDock dock { live };
+        int rack = 0, slot = 0;
+    };
+
+    struct RemoteWindow : public juce::DocumentWindow
+    {
+        explicit RemoteWindow (int port) : juce::DocumentWindow ("LiveRack Client (test)", Theme::background, 0)
+        {
+            setUsingNativeTitleBar (true);
+            view = new RemoteView (port);
+            setContentOwned (view, false);
+            setBounds (0, 0, 1440, 960);
+            setVisible (true);
+        }
+        RemoteView* view = nullptr;
+    };
+
+    static inline std::unique_ptr<RemoteWindow> remoteWindow;
+
+    static void openRemoteWindow (MainComponent& m)
+    {
+        remoteWindow = std::make_unique<RemoteWindow> (m.webRemote.getPort());
+        auto& live = remoteWindow->view->live;
+        auto& e = m.engine;
+
+        // Compare what the remote copy says with the engine, then change things through it
+        juce::Timer::callAfterDelay (3000, [&m, &live, &e]
+        {
+            std::cerr << "REMOTE connected " << live.isConnected() << " server " << live.getServerName() << std::endl;
+            bool same = live.getNumRacks() == e.getNumRacks() && live.getVisibleRacks() == e.getVisibleRacks();
+            for (int r = 0; r < e.getNumRacks(); ++r)
+            {
+                const auto a = live.getRackConfig (r), b = e.getRackConfig (r);
+                same = same && a.name == b.name && a.stereo == b.stereo && a.monoToStereo == b.monoToStereo && a.driver == b.driver
+                       && a.input[0] == b.input[0] && a.input[1] == b.input[1] && a.output[0] == b.output[0] && a.output[1] == b.output[1]
+                       && a.consoleChannel == b.consoleChannel && a.recallSafe == b.recallSafe && a.colourIndex == b.colourIndex
+                       && a.latencyGroup == b.latencyGroup && live.isRackBypassed (r) == e.isRackBypassed (r)
+                       && live.getNumSlots (r) == e.getNumSlots (r) && live.getStereoPoint (r) == e.getStereoPoint (r)
+                       && std::abs (live.getRackTotalLatencyMs (r) - e.getRackTotalLatencyMs (r)) < 0.01;
+                for (int s = 0; s < e.getNumSlots (r); ++s)
+                    same = same && live.getSlot (r, s).name == e.getPlugin (r, s)->getName() && live.getSlot (r, s).bypassed == e.isSlotBypassed (r, s)
+                           && live.getSlot (r, s).key == PluginLibrary::familyKey (e.getSlotDescription (r, s));
+                if (! same) { std::cerr << "REMOTE differs at rack " << r << std::endl; break; }
+            }
+            for (int g = 1; g <= 8; ++g)
+                same = same && std::abs (live.getGroupLatencyMs (g) - e.getGroupLatencyMs (g)) < 0.01;
+            std::cerr << "REMOTE racks " << live.getNumRacks() << " same as the engine " << same << std::endl;
+            std::cerr << "REMOTE meters: rack 0 in " << live.getMeter (0, false) << " out " << live.getMeter (0, true)
+                      << " load " << live.getRackLoad (0) << " gr slot0 " << live.getGainReduction (0, 0) << std::endl;
+
+            live.setRackBypassed (1, true);
+            live.setRackRecallSafe (2, true);
+            live.setRackLatencyGroup (3, 2);
+            live.setRackColour (4, 6);
+            live.setRackName (5, "Renamed remotely");
+            live.setSlotBypassed (0, 0, true);
+            m.select (0, 0);
+
+            // A plugin copied to the last rack, as a drag with Option would
+            auto* drop = new juce::DynamicObject();
+            drop->setProperty ("cmd", "slotDrop");
+            drop->setProperty ("rack", 0); drop->setProperty ("slot", 1);
+            drop->setProperty ("toRack", 6); drop->setProperty ("to", 0); drop->setProperty ("copy", true);
+            std::cerr << "REMOTE last rack before the copy: " << e.getNumSlots (6) << " plugins" << std::endl;
+            live.sendCommand (juce::var (drop));
+        });
+
+        juce::Timer::callAfterDelay (4500, [&live, &e, &m]
+        {
+            auto& rs = remoteWindow->view->strips;
+            std::cerr << "REMOTE GR snare: server " << live.getGainReduction (2, 0) << " / " << live.getGainReduction (2, 1)
+                      << " shown remotely " << rs.getSlotGainReduction (2, 0) << " / " << rs.getSlotGainReduction (2, 1)
+                      << " here " << m.strips.getSlotGainReduction (2, 0) << " / " << m.strips.getSlotGainReduction (2, 1) << std::endl;
+            std::cerr << "REMOTE changes reached the engine: bypass " << e.isRackBypassed (1) << " safe " << e.getRackConfig (2).recallSafe
+                      << " group " << e.getRackConfig (3).latencyGroup << " colour " << e.getRackConfig (4).colourIndex
+                      << " name '" << e.getRackConfig (5).name << "' slot bypass " << e.isSlotBypassed (0, 0) << std::endl;
+            std::cerr << "REMOTE last rack after the copy: " << e.getNumSlots (6) << " plugins, first "
+                      << (e.getPlugin (6, 0) != nullptr ? e.getPlugin (6, 0)->getName() : juce::String ("-")) << "; the copy sees "
+                      << live.getNumSlots (6) << ", first " << live.getSlot (6, 0).name << std::endl;
+            std::cerr << "REMOTE and back in the copy: bypass " << live.isRackBypassed (1) << " safe " << live.getRackConfig (2).recallSafe
+                      << " group " << live.getRackConfig (3).latencyGroup << " colour " << live.getRackConfig (4).colourIndex
+                      << " name '" << live.getRackConfig (5).name << "' slot bypass " << live.getSlot (0, 0).bypassed << std::endl;
+        });
+    }
+
     static void pump (RackEngine& e, juce::AudioBuffer<float>& in, juce::AudioBuffer<float>& out)
     {
         e.previewProcess (in, out);
@@ -72,6 +192,7 @@ struct PreviewHooks
                                   m.select (0, 1); m.stepRack (-1);
                                   std::cerr << "STEP wrap " << m.selectedRack << " (expect " << m.engine.getNumRacks() - 1 << ")" << std::endl; m.stepRack (1); }
         if (open == "plugins")  m.showPluginScanner();
+        if (open == "remote")   openRemoteWindow (m);
         if (open == "timing")
         {
             // Keep the audio going so plugin timing shows

@@ -98,13 +98,18 @@ juce::Colour RackStripsView::colourFor (const RackEngine& engine, int rack)
     return colourForIndex (engine.getRackConfig (rack).effectiveColour (rack));
 }
 
+juce::Colour RackStripsView::colourFor (LiveConnection& live, int rack)
+{
+    return colourForIndex (live.getRackConfig (rack).effectiveColour (rack));
+}
+
 //==============================================================================
 class RackStripsView::Content : public juce::Component,
                                 public juce::DragAndDropTarget,
                                 public juce::TooltipClient
 {
 public:
-    Content (RackStripsView& o, RackEngine& e) : owner (o), engine (e) {}
+    Content (RackStripsView& o, LiveConnection& c) : owner (o), engine (c) {}
 
     // Hovering a plugin: how long it takes; hovering a rack's figure: the rack's
     juce::String getTooltip() override
@@ -119,16 +124,16 @@ public:
 
         for (int sl = 0; sl < (int) l.slots.size() && sl < engine.getNumSlots (r); ++sl)
             if (l.slots[(size_t) sl].contains (pos))
-                if (auto* p = engine.getPlugin (r, sl))
-                    return p->getName() + ": " + pc (engine.getSlotLoad (r, sl).peak)
+                if (const auto p = engine.getSlot (r, sl); p.exists)
+                    return p.name + ": " + pc (engine.getSlotLoad (r, sl))
                          + " of each audio block at most (last few seconds)";
 
         if (l.latency.contains (pos))
         {
-            juce::String t = engine.getRackConfig (r).name + ": " + pc (engine.getRackLoad (r).peak) + " of each audio block at most.";
+            juce::String t = engine.getRackConfig (r).name + ": " + pc (engine.getRackLoad (r)) + " of each audio block at most.";
             for (int sl = 0; sl < engine.getNumSlots (r); ++sl)
-                if (auto* p = engine.getPlugin (r, sl))
-                    t << "\n  " << p->getName() << "  " << pc (engine.getSlotLoad (r, sl).peak);
+                if (const auto p = engine.getSlot (r, sl); p.exists)
+                    t << "\n  " << p.name << "  " << pc (engine.getSlotLoad (r, sl));
             return t;
         }
         return {};
@@ -181,6 +186,22 @@ public:
         bool show = false, estimated = false;
     };
     std::map<juce::AudioProcessor*, SlotMeter> slotMeters;
+    std::map<std::pair<int, int>, SlotMeter> remoteMeters;   // from the server, by (rack, slot)
+
+    // The gain reduction shown on a slot, if any
+    const SlotMeter* shownMeter (int rack, int slot) const
+    {
+        if (engine.isLocal())
+        {
+            if (auto it = slotMeters.find (engine.getLocalPlugin (rack, slot)); it != slotMeters.end() && it->second.show)
+                return &it->second;
+        }
+        else if (auto it = remoteMeters.find ({ rack, slot }); it != remoteMeters.end() && it->second.show)
+        {
+            return &it->second;
+        }
+        return nullptr;
+    }
 
     SlotMeter& meterFor (juce::AudioPluginInstance& plugin, int rack, int slot)
     {
@@ -402,7 +423,7 @@ public:
         // Processing time: the longest block in the last few seconds, as a share of the block
         if (! bypassed)
         {
-            const auto load = engine.getRackLoad (r).peak;
+            const auto load = engine.getRackLoad (r);
             const auto pc = (int) std::ceil (load * 100.0f);
             const auto loadArea = latArea.removeFromRight (30);
             g.setColour (load > 0.5f ? Theme::red : load > 0.25f ? Theme::amber : juce::Colours::white.withAlpha (0.35f));
@@ -418,8 +439,8 @@ public:
 
     void paintSlot (juce::Graphics& g, int r, int s, juce::Rectangle<int> area, juce::Colour colour, bool rackBypassed)
     {
-        auto* plugin = engine.getPlugin (r, s);
-        const bool slotBypassed = engine.isSlotBypassed (r, s);
+        const auto plugin = engine.getSlot (r, s);
+        const bool slotBypassed = plugin.bypassed;
         const bool isSelected = r == selectedRack && s == selectedSlot;
         const float dim = (rackBypassed || slotBypassed) ? 0.45f : 1.0f;
 
@@ -455,12 +476,12 @@ public:
             g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
             g.drawText ("BYP", text.removeFromRight (26), juce::Justification::centredRight);
         }
-        else if (auto it = slotMeters.find (plugin); it != slotMeters.end() && it->second.show)
+        else if (const auto* shown = shownMeter (r, s))
         {
             // Gain reduction: a bar growing from the right along the slot's
             // bottom edge (full width = 20 dB) and the value in dB.
             // Estimates are paler and marked with "~".
-            const auto& m = it->second;
+            const auto& m = *shown;
             const bool isMuted = std::isinf (m.gr);
             const bool active = isMuted || m.gr > 0.05f;
             const auto grColour = m.estimated ? juce::Colour (0xffc8a878) : juce::Colour (0xffe8a23a);
@@ -489,7 +510,7 @@ public:
 
         g.setColour (juce::Colours::white.withAlpha (0.92f * dim));
         g.setFont (juce::FontOptions (13.0f));
-        g.drawText (plugin != nullptr ? plugin->getName() : "?", text, juce::Justification::centredLeft, true);
+        g.drawText (plugin.exists ? plugin.name : "?", text, juce::Justification::centredLeft, true);
     }
 
     // Segmented meter, -60 to 0 dB: green, amber from -18, red from -6;
@@ -846,12 +867,12 @@ public:
     }
 
     RackStripsView& owner;
-    RackEngine& engine;
+    LiveConnection& engine;   // the show, here or on a server
 };
 
 //==============================================================================
-RackStripsView::RackStripsView (RackEngine& e)
-    : content (std::make_unique<Content> (*this, e))
+RackStripsView::RackStripsView (LiveConnection& c)
+    : content (std::make_unique<Content> (*this, c))
 {
     viewport.setViewedComponent (content.get(), false);
     viewport.setScrollBarsShown (false, true);
@@ -877,6 +898,7 @@ void RackStripsView::setLibrary (PluginLibrary* lib)
 void RackStripsView::forgetMeters()
 {
     content->slotMeters.clear();
+    content->remoteMeters.clear();
 }
 
 void RackStripsView::setStackRows (bool shouldStack)
@@ -890,6 +912,7 @@ bool RackStripsView::getStackRows() const { return content->stackRows; }
 void RackStripsView::refresh()
 {
     // Plugins may have been added or removed: look the GR meters up again
+    // (a server's readings are replaced on each meter update anyway)
     content->slotMeters.clear();
     content->order = content->engine.getVisibleRacks();
 
@@ -921,7 +944,10 @@ void RackStripsView::updateMeters()
 
         for (int io = 0; io < 2; ++io)
         {
-            const float peak = juce::jmax (engine.consumePeak (r, io == 1, 0), engine.consumePeak (r, io == 1, 1));
+            // From a server: its meter reading (0..1 over -60..0 dB) back to a level
+            const float served = engine.isLocal() ? 0.0f : engine.getMeter (r, io == 1);
+            const float peak = engine.isLocal() ? juce::jmax (engine.consumePeak (r, io == 1, 0), engine.consumePeak (r, io == 1, 1))
+                                                : (served > 0.0f ? juce::Decibels::decibelsToGain (served * 60.0f - 60.0f) : 0.0f);
             auto& level = content->levels[(size_t) r][(size_t) io];
             level = juce::jmax (peak, level * 0.82f); // fast attack, smooth fall
 
@@ -936,11 +962,27 @@ void RackStripsView::updateMeters()
                 rackInput = peak;
         }
 
+        if (! engine.isLocal())
+        {
+            // The server works out gain reduction itself
+            if (r == 0)
+                content->remoteMeters.clear();
+            for (int s = 0; s < engine.getNumSlots (r); ++s)
+            {
+                const float gr = engine.getGainReduction (r, s);
+                auto& m = content->remoteMeters[{ r, s }];
+                m.show = gr >= 0.0f;
+                m.gr = gr >= 60.0f ? GainReduction::muted : gr;
+                m.estimated = engine.isGainReductionEstimated (r, s);
+            }
+            continue;
+        }
+
         float intoSlot = rackInput; // the level going into each plugin
 
         for (int s = 0; s < engine.getNumSlots (r); ++s)
         {
-            auto* plugin = engine.getPlugin (r, s);
+            auto* plugin = engine.getLocalPlugin (r, s);
             const float outOfSlot = engine.consumeSlotOutputPeak (r, s);
 
             if (plugin == nullptr)
@@ -958,7 +1000,7 @@ void RackStripsView::updateMeters()
                 m.show = true;
                 m.estimated = false;
             }
-            else if (m.estimateAllowed && ! engine.isSlotBypassed (r, s))
+            else if (m.estimateAllowed && ! engine.getSlot (r, s).bypassed)
             {
                 // No GR reported: estimate from the level drop across the plugin.
                 // Makeup gain hides some reduction, hence the "~".
@@ -1025,9 +1067,15 @@ float RackStripsView::getInputLevel (int rack) const
 
 float RackStripsView::getSlotGainReduction (int rack, int slot) const
 {
-    if (auto it = content->slotMeters.find (content->engine.getPlugin (rack, slot)); it != content->slotMeters.end() && it->second.show)
-        return std::isinf (it->second.gr) ? 60.0f : it->second.gr;
+    if (const auto* m = content->shownMeter (rack, slot))
+        return std::isinf (m->gr) ? 60.0f : m->gr;
     return -1.0f;
+}
+
+bool RackStripsView::isSlotGainReductionEstimated (int rack, int slot) const
+{
+    const auto* m = content->shownMeter (rack, slot);
+    return m != nullptr && m->estimated;
 }
 
 float RackStripsView::getMaxGainReduction (int rack) const
@@ -1035,8 +1083,8 @@ float RackStripsView::getMaxGainReduction (int rack) const
     float gr = 0.0f;
     auto& engine = content->engine;
     for (int s = 0; s < engine.getNumSlots (rack); ++s)
-        if (auto it = content->slotMeters.find (engine.getPlugin (rack, s)); it != content->slotMeters.end() && it->second.show)
-            gr = juce::jmax (gr, std::isinf (it->second.gr) ? 60.0f : it->second.gr);
+        if (const auto* m = content->shownMeter (rack, s))
+            gr = juce::jmax (gr, std::isinf (m->gr) ? 60.0f : m->gr);
     return gr;
 }
 

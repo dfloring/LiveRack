@@ -1,0 +1,81 @@
+#pragma once
+#include "LiveConnection.h"
+
+// A LiveRack server over the network, through its /live protocol (the same
+// one the iPad remote uses). Keeps a copy of the server's state, updated as
+// the server sends it, and sends changes as commands.
+//
+// The network runs on its own thread; the state and meters are swapped in on
+// the message thread, so the screens read them like the local engine.
+class RemoteConnection : public LiveConnection,
+                         private juce::Thread
+{
+public:
+    RemoteConnection (const juce::String& host, int port);
+    ~RemoteConnection() override;
+
+    bool isLocal() const override     { return false; }
+    bool isConnected() const override { return connected; }
+    juce::String getServerName() const override;
+
+    int getNumRacks() override;
+    RackConfig getRackConfig (int rack) override;
+    bool isRackBypassed (int rack) override;
+    int getNumSlots (int rack) override;
+    LiveSlot getSlot (int rack, int slot) override;
+    int getStereoPoint (int rack) override;
+    double getRackTotalLatencyMs (int rack) override;
+    double getGroupLatencyMs (int group) override;
+    int getNumDrivers() override;
+    std::vector<int> getVisibleRacks() override;
+    float getRackLoad (int rack) override;
+    float getSlotLoad (int rack, int slot) override;
+
+    float consumePeak (int, bool, int) override       { return 0.0f; }
+    float consumeSlotOutputPeak (int, int) override   { return 0.0f; }
+    float getMeter (int rack, bool output) override;
+    float getGainReduction (int rack, int slot) override;
+    bool isGainReductionEstimated (int rack, int slot) override;
+
+    juce::AudioPluginInstance* getLocalPlugin (int, int) override { return nullptr; }
+    juce::PluginDescription getSlotDescription (int rack, int slot) override;
+
+    void setRackBypassed (int rack, bool) override;
+    void setRackRecallSafe (int rack, bool) override;
+    void setRackLatencyGroup (int rack, int group) override;
+    void setRackColour (int rack, int colourIndex) override;
+    void setRackName (int rack, const juce::String&) override;
+    void setSlotBypassed (int rack, int slot, bool) override;
+
+    // Any command of the protocol ({"cmd": ...}), for what has no method yet
+    void sendCommand (const juce::var& command);
+
+    // The latest state, as the server sent it
+    const juce::var& getState() const { return state; }
+
+private:
+    void run() override;
+    bool connectAndRun();
+    void received (const juce::String& message);
+    bool sendQueued (juce::StreamingSocket&);
+
+    juce::var rackState (int rack) const;
+    juce::var slotState (int rack, int slot) const;
+    juce::var rackInfo (int rack) const;
+    juce::var rackMeters (int rack) const;
+
+    const juce::String host;
+    const int port;
+
+    // Message thread
+    juce::var state, meters;
+    juce::String serverName;
+    std::atomic<bool> connected { false };
+
+    juce::CriticalSection queueLock;
+    juce::StringArray outgoing;
+
+    std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>> (true);
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RemoteConnection)
+};
