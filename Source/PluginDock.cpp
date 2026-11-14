@@ -167,7 +167,7 @@ void PluginDock::show (int newRack, int newSlot)
     const bool hasSlot = engine.getSlot (rack, slot).exists;
     const int heightBefore = getPreferredHeight();
 
-    if (plugin != shownProcessor)
+    if (plugin != shownProcessor || ! editorsShown)
         releaseEditor();
 
     if (plugin != tooBig)
@@ -188,6 +188,10 @@ void PluginDock::show (int newRack, int newSlot)
     {
         message = rack >= 0 ? "No plugin in this rack yet. Click \"+ Add plugin\" in the strip."
                             : "Add a rack to get started.";
+    }
+    else if (! editorsShown)
+    {
+        message.clear();   // not on screen (Overview): no plugin window kept open behind it
     }
     else if (editor == nullptr)
     {
@@ -461,6 +465,15 @@ void PluginDock::resized()
             }
         });
     }
+}
+
+void PluginDock::setEditorsShown (bool shouldShow)
+{
+    if (editorsShown == shouldShow)
+        return;
+
+    editorsShown = shouldShow;
+    show (rack, slot);
 }
 
 void PluginDock::setFullView (bool isFull, bool isAvailable)

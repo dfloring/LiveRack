@@ -24,6 +24,10 @@ public:
 
     // Rack view: the panel fills the main window instead of sharing it with the strips
     void setFullView (bool isFull, bool isAvailable);
+
+    // Off while the panel isn't on screen (the main window's Overview): the
+    // plugin's window is closed rather than kept open out of sight
+    void setEditorsShown (bool);
     std::function<void (int fromRack, int fromSlot, int toRack, int toIndex, bool copy)> onSlotDropped;
 
     // Tabs can be dragged to reorder (or onto a rack strip)
@@ -44,6 +48,9 @@ public:
     void resized() override;
 
 private:
+   #ifdef LIVERACK_PREVIEW_HOOKS
+    friend struct PreviewHooks;
+   #endif
     class TabButton;
     int dropIndexAt (juce::Point<int>) const;
     int dropIndex = -1;
@@ -70,7 +77,7 @@ private:
                       nextRackButton { "Next rack", "next", "Next rack" };
     juce::TextButton rackBypassButton { "Rack Bypass" }, bypassButton { "Bypass" },
                      popOutButton { "Pop Out" }, removeButton { "Remove" };
-    bool fullView = false, fullViewAvailable = false;
+    bool fullView = false, fullViewAvailable = false, editorsShown = true;
     juce::OwnedArray<juce::TextButton> tabs;
     juce::Component editorHolder; // plugin editors are often native views: no scrolling container
 };

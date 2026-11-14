@@ -123,7 +123,7 @@ public:
         auto pc = [] (float load) { const int p = (int) std::ceil (load * 100.0f); return p <= 1 ? juce::String ("under 1%") : juce::String (p) + "%"; };
 
         for (int sl = 0; sl < (int) l.slots.size() && sl < engine.getNumSlots (r); ++sl)
-            if (l.slots[(size_t) sl].contains (pos))
+            if (l.hits (l.slots[(size_t) sl], pos))
                 if (const auto p = engine.getSlot (r, sl); p.exists)
                     return p.name + ": " + pc (engine.getSlotLoad (r, sl))
                          + " of each audio block at most (last few seconds)";
@@ -225,9 +225,15 @@ public:
     {
         juce::Rectangle<int> strip, header, chBadge, io, addRow, bypass, safe, latency, meterIn, meterOut;
         juce::Rectangle<int> formatBadge, groupBadge, safeBadge, swatch;
-        std::vector<juce::Rectangle<int>> slots;
-        bool overflow = false;
+        std::vector<juce::Rectangle<int>> slots;   // every plugin, scrolled; only those in "list" are on screen
+        juce::Rectangle<int> list;                  // where the plugins and the add row scroll
+        int scroll = 0, maxScroll = 0;
+
+        bool hits (const juce::Rectangle<int>& r, juce::Point<int> p) const { return list.contains (p) && r.contains (p); }
     };
+
+    // How far each rack's plugin list is scrolled, by rack
+    std::map<int, int> slotScroll;
 
     int contentWidth() const { return margin * 2 + cols * (stripWidth + gap); }
 
@@ -288,22 +294,18 @@ public:
         l.meterIn = area.removeFromRight (meterW);
         area.removeFromRight (6);
 
+        // The plugins and the add row, scrolling when they don't all fit
         const int n = engine.getNumSlots (rack);
+        const int step = slotH + slotGap;
+        l.list = area;
+        l.maxScroll = juce::jmax (0, n * step + slotH - area.getHeight());
+        const auto it = slotScroll.find (rack);
+        l.scroll = juce::jlimit (0, l.maxScroll, it != slotScroll.end() ? it->second : 0);
 
-        for (int s = 0; s < n; ++s)
-        {
-            if (area.getHeight() < slotH * 2 + slotGap) // keep room for the add row
-            {
-                l.overflow = true;
-                break;
-            }
-
-            l.slots.push_back (area.removeFromTop (slotH));
-            area.removeFromTop (slotGap);
-        }
-
-        if (area.getHeight() >= slotH)
-            l.addRow = area.removeFromTop (slotH);
+        int y = area.getY() - l.scroll;
+        for (int s = 0; s < n; ++s, y += step)
+            l.slots.push_back ({ area.getX(), y, area.getWidth(), slotH });
+        l.addRow = { area.getX(), y, area.getWidth(), slotH };
 
         return l;
     }
@@ -392,16 +394,36 @@ public:
         g.drawText (io, l.io, juce::Justification::centred, true);
 
         // Plugin slots
-        for (int s = 0; s < (int) l.slots.size(); ++s)
-            paintSlot (g, r, s, l.slots[(size_t) s], colour, bypassed);
-
-        if (! l.addRow.isEmpty())
         {
-            g.setColour (juce::Colours::white.withAlpha (0.12f));
-            g.drawRoundedRectangle (l.addRow.toFloat().reduced (0.5f), 5.0f, 1.0f);
-            g.setColour (juce::Colours::white.withAlpha (0.45f));
-            g.setFont (juce::FontOptions (13.0f));
-            g.drawText (l.overflow ? "more..." : "+  Add plugin", l.addRow, juce::Justification::centred);
+            juce::Graphics::ScopedSaveState save (g);
+            g.reduceClipRegion (l.list);
+
+            for (int s = 0; s < (int) l.slots.size(); ++s)
+                if (l.slots[(size_t) s].intersects (l.list))
+                    paintSlot (g, r, s, l.slots[(size_t) s], colour, bypassed);
+
+            if (l.addRow.intersects (l.list))
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.12f));
+                g.drawRoundedRectangle (l.addRow.toFloat().reduced (0.5f), 5.0f, 1.0f);
+                g.setColour (juce::Colours::white.withAlpha (0.45f));
+                g.setFont (juce::FontOptions (13.0f));
+                g.drawText ("+  Add plugin", l.addRow, juce::Justification::centred);
+            }
+
+            // More above or below: the list fades out at that edge
+            const auto list = l.list.toFloat();
+            const float fade = 22.0f;
+            if (l.scroll > 0)
+            {
+                g.setGradientFill (juce::ColourGradient (stripBack, 0.0f, list.getY(), stripBack.withAlpha (0.0f), 0.0f, list.getY() + fade, false));
+                g.fillRect (list.withHeight (fade));
+            }
+            if (l.scroll < l.maxScroll)
+            {
+                g.setGradientFill (juce::ColourGradient (stripBack.withAlpha (0.0f), 0.0f, list.getBottom() - fade, stripBack, 0.0f, list.getBottom(), false));
+                g.fillRect (list.withTrimmedTop (list.getHeight() - fade));
+            }
         }
 
         // Meters
@@ -613,7 +635,7 @@ public:
 
         for (int s = 0; s < (int) l.slots.size(); ++s)
         {
-            if (l.slots[(size_t) s].contains (pos))
+            if (l.hits (l.slots[(size_t) s], pos))
             {
                 if (! popup)
                 {
@@ -628,7 +650,7 @@ public:
             }
         }
 
-        if (l.addRow.contains (pos) && ! popup)
+        if (l.hits (l.addRow, pos) && ! popup)
         {
             if (owner.onSelect != nullptr)    owner.onSelect (r, -1);
             if (owner.onAddPlugin != nullptr) owner.onAddPlugin (r);
@@ -836,12 +858,13 @@ public:
             return;
 
         const auto l = layoutFor (dropRack);
-        int y = l.addRow.isEmpty() ? l.strip.getCentreY() : l.addRow.getY() - 2;
+        int y = l.addRow.getY() - 2;
 
         if (dropIndex < (int) l.slots.size())
             y = l.slots[(size_t) dropIndex].getY() - 2;
         else if (! l.slots.empty())
             y = l.slots.back().getBottom() + 1;
+        y = juce::jlimit (l.list.getY(), l.list.getBottom(), y);
 
         const auto x = l.slots.empty() ? l.addRow.getX() : l.slots.front().getX();
         const auto w = l.slots.empty() ? l.addRow.getWidth() : l.slots.front().getWidth();
@@ -861,9 +884,54 @@ public:
                 startRename (r);
 
             for (int s = 0; s < (int) l.slots.size() && s < engine.getNumSlots (r); ++s)
-                if (l.slots[(size_t) s].contains (e.getPosition()) && owner.onOpenSlot != nullptr)
+                if (l.hits (l.slots[(size_t) s], e.getPosition()) && owner.onOpenSlot != nullptr)
                     owner.onOpenSlot (r, s);
         }
+    }
+
+    // Over a rack's plugins that don't all fit: scroll them. Anywhere else: the strips scroll.
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
+    {
+        const auto pos = e.getPosition();
+        const int r = rackAt (pos);
+
+        if (juce::isPositiveAndBelow (r, engine.getNumRacks()))
+        {
+            const auto l = layoutFor (r);
+            if (l.list.contains (pos) && l.maxScroll > 0)
+            {
+                const float delta = std::abs (wheel.deltaY) > 0.0f ? wheel.deltaY : wheel.deltaX;
+                scrollSlots (r, l.scroll - juce::roundToInt (delta * 240.0f));
+                return;
+            }
+        }
+
+        juce::Component::mouseWheelMove (e, wheel);
+    }
+
+    void scrollSlots (int rack, int to)
+    {
+        const auto l = layoutFor (rack);
+        const int clamped = juce::jlimit (0, l.maxScroll, to);
+        if (clamped != l.scroll)
+        {
+            slotScroll[rack] = clamped;
+            repaint (l.list);
+        }
+    }
+
+    // Scroll a rack's list so this plugin shows
+    void revealSlot (int rack, int slot)
+    {
+        const auto l = layoutFor (rack);
+        if (! juce::isPositiveAndBelow (slot, (int) l.slots.size()))
+            return;
+
+        const auto s = l.slots[(size_t) slot];
+        if (s.getY() < l.list.getY())
+            scrollSlots (rack, l.scroll - (l.list.getY() - s.getY()));
+        else if (s.getBottom() > l.list.getBottom())
+            scrollSlots (rack, l.scroll + (s.getBottom() - l.list.getBottom()));
     }
 
     RackStripsView& owner;
@@ -926,8 +994,13 @@ void RackStripsView::refresh()
 
 void RackStripsView::setSelection (int rack, int slot)
 {
+    // A newly selected plugin is scrolled into view (not on every refresh: that
+    // would undo scrolling by hand)
+    const bool changed = rack != content->selectedRack || slot != content->selectedSlot;
     content->selectedRack = rack;
     content->selectedSlot = slot;
+    if (changed && rack >= 0 && slot >= 0)
+        content->revealSlot (rack, slot);
     content->repaint();
 }
 

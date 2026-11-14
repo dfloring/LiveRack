@@ -317,6 +317,16 @@ public:
 
         auto area = getLocalBounds().reduced (10, 4);
         auto& e = owner.engine;
+
+        // Which LiveRack this is, at the far right (the title bar is hidden in full screen)
+        {
+            const juce::String version ("LiveRack " JUCE_APPLICATION_VERSION_STRING);
+            g.setFont (juce::FontOptions (11.5f));
+            g.setColour (Theme::textDim);
+            g.drawText (version, area.removeFromRight (juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (11.5f), version) + 4),
+                        juce::Justification::centredRight);
+            area.removeFromRight (10);
+        }
         g.setFont (juce::FontOptions (12.0f));
 
         auto chip = [&g, &area] (juce::Colour light, const juce::String& bold, const juce::String& rest, bool fromRight)
@@ -417,7 +427,7 @@ MainComponent::MainComponent()
 
     for (juce::Button* b : { (juce::Button*) &devicesButton, (juce::Button*) &routingButton, (juce::Button*) &scopeButton,
                              (juce::Button*) &scanButton, (juce::Button*) &storeSceneButton, (juce::Button*) &addRackButton,
-                             (juce::Button*) &windowModeButton, (juce::Button*) &rackViewButton, (juce::Button*) &stackRowsButton, (juce::Button*) &saveButton,
+                             (juce::Button*) &windowModeButton, (juce::Button*) &rackViewButton, (juce::Button*) &overviewButton, (juce::Button*) &stackRowsButton, (juce::Button*) &saveButton,
                              (juce::Button*) &loadButton, (juce::Button*) &tapButton, (juce::Button*) &prevSceneButton,
                              (juce::Button*) &nextSceneButton })
         addAndMakeVisible (b);
@@ -448,6 +458,14 @@ MainComponent::MainComponent()
     storeSceneButton.onClick = [this] { showStoreSceneDialog(); };
     addRackButton.onClick    = [this] { addRack(); };
     windowModeButton.onClick = [this] { setTwoWindowMode (! isTwoWindowMode()); };
+    overviewButton.onClick   = [this]
+    {
+        // Every rack: closes a setup screen showing in the main window, and leaves Rack
+        const auto shown = tools;
+        for (auto* t : shown)
+            t->close();
+        setFullView (false);
+    };
     rackViewButton.onClick   = [this]
     {
         // The views share the main window: Rack closes a setup screen showing there
@@ -488,7 +506,7 @@ MainComponent::MainComponent()
     strips.onSlotMenu  = [this] (int r, int s) { showSlotMenu (r, s); };
     strips.onRackMenu  = [this] (int r) { showRackMenu (r); };
     strips.onEditRack  = [this] (int r) { showRackDialog (r); };
-    strips.onOpenSlot  = [this] (int r, int s) { select (r, s); if (! isTwoWindowMode()) setFullView (true); };
+    strips.onOpenSlot  = [this] (int r, int s) { select (r, s); openInRackView(); };
     strips.onAddRack   = [this] { addRack(); };
     strips.onOpenRouting = [this] (int r) { showRouting (r); };
     strips.onEditConsoleChannel = [this] (int r) { editConsoleChannel (r); };
@@ -504,6 +522,8 @@ MainComponent::MainComponent()
     dock.onPreferredHeightChanged = [this] { resized(); };
     dock.onStepRack     = [this] (int delta) { stepRack (delta); };
     dock.setFullView (false, true);
+    dock.setEditorsShown (false);   // the main window opens on Overview
+    updateViewButtons();
     dock.levelFor = [this] (int r, bool out) { return strips.getLevel (r, out); };
     dock.onSlotDropped = [this] (int fr, int fs, int tr, int ti, bool copy) { handleSlotDrop (fr, fs, tr, ti, copy); };
 
@@ -700,7 +720,7 @@ void MainComponent::resized()
 
     // Labels under the icons when there's room for them
     Theme::IconButton* labelled[] = { &saveButton, &loadButton, &devicesButton, &routingButton, &scanButton,
-                                      &scopeButton, &addRackButton, &rackViewButton, &windowModeButton, &stackRowsButton };
+                                      &scopeButton, &addRackButton, &overviewButton, &rackViewButton, &windowModeButton, &stackRowsButton };
     int labelledWidth = 0;
     for (auto* b : labelled)
         labelledWidth += b->getLabelledWidth() - 40;
@@ -732,7 +752,7 @@ void MainComponent::resized()
     group ({ { &saveButton, w (saveButton) }, { &loadButton, w (loadButton) } });
     group ({ { &prevSceneButton, 34 }, { nullptr, 168 }, { &nextSceneButton, 34 }, { &storeSceneButton, 64 } });
     // Views: what the main window shows. Then the rack controls.
-    group ({ { &rackViewButton, w (rackViewButton) }, { &devicesButton, w (devicesButton) }, { &routingButton, w (routingButton) },
+    group ({ { &overviewButton, w (overviewButton) }, { &rackViewButton, w (rackViewButton) }, { &devicesButton, w (devicesButton) }, { &routingButton, w (routingButton) },
              { &scanButton, w (scanButton) }, { &scopeButton, w (scopeButton) } });
     group ({ { &addRackButton, w (addRackButton) }, { &windowModeButton, w (windowModeButton) }, { &stackRowsButton, w (stackRowsButton) } });
     group ({ { bpmDisplay.get(), 84 }, { &tapButton, 60 } }, true);
@@ -773,20 +793,18 @@ void MainComponent::resized()
 
     strips.setVisible (! fullView);
     pageTabs.setVisible (! fullView);
+    dock.setVisible (fullView);
 
     if (fullView)
     {
-        // The rack's plugins get the whole window, under the Hot Plugins row
+        // Rack: the rack's plugins get the whole window, under the Hot Plugins row
         area.setTop (pageTabs.getY());
         dock.setBounds (area);
         return;
     }
 
-    // Give the plugin editor its full height; the strips take what's left
-    const int stripsHeight = juce::jlimit (300, 470, area.getHeight() - dock.getPreferredHeight() - 8);
-    strips.setBounds (area.removeFromTop (stripsHeight));
-    area.removeFromTop (8);
-    dock.setBounds (area);
+    // Overview: every rack, full height
+    strips.setBounds (area);
 }
 
 //==============================================================================
@@ -963,6 +981,20 @@ void MainComponent::openSlotId (int slotId)
     select (r, s);
     if (rackWindow != nullptr)
         rackWindow->toFront (false);
+    else
+        openInRackView();
+}
+
+// One window: show the selected plugin in Rack (closing a setup screen in front)
+void MainComponent::openInRackView()
+{
+    if (isTwoWindowMode())
+        return;
+
+    const auto shown = tools;
+    for (auto* t : shown)
+        t->close();
+    setFullView (true);
 }
 
 //==============================================================================
@@ -1739,7 +1771,8 @@ void MainComponent::setFullView (bool shouldBeFull)
 {
     fullView = shouldBeFull && ! isTwoWindowMode();
     dock.setFullView (fullView, ! isTwoWindowMode());
-    rackViewButton.setToggleState (fullView && tools.empty(), juce::dontSendNotification);
+    dock.setEditorsShown (fullView || isTwoWindowMode());
+    updateViewButtons();
     resized();
     repaint();
 }
@@ -1801,7 +1834,14 @@ void MainComponent::updateToolButtons()
     routingButton.setToggleState (front (routingWindow), juce::dontSendNotification);
     scopeButton.setToggleState (front (scopeWindow), juce::dontSendNotification);
     scanButton.setToggleState (front (pluginsWindow), juce::dontSendNotification);
+    updateViewButtons();
+}
+
+// Overview or Rack, lit when it's what the main window shows
+void MainComponent::updateViewButtons()
+{
     rackViewButton.setToggleState (isFullView() && tools.empty(), juce::dontSendNotification);
+    overviewButton.setToggleState (! isFullView() && tools.empty(), juce::dontSendNotification);
 }
 
 // A toolbar button opens its screen, or goes back to the racks if it's already in front
@@ -1878,8 +1918,9 @@ void MainComponent::setTwoWindowMode (bool shouldBeTwo)
     windowModeButton.setToggleState (shouldBeTwo, juce::dontSendNotification);
     AppSettings::set ("twoWindows", shouldBeTwo ? "1" : "0");
     dock.setFullView (false, ! shouldBeTwo); // Rack view is for the main window only
-    rackViewButton.setToggleState (false, juce::dontSendNotification);
+    dock.setEditorsShown (shouldBeTwo);      // the main window starts on Overview
     rackViewButton.setEnabled (! shouldBeTwo);
+    updateViewButtons();
     resized();
     refreshAll(); // shows the selected plugin again in its new home
 }

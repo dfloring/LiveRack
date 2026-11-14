@@ -566,7 +566,10 @@ void WebRemote::handle (std::unique_ptr<juce::StreamingSocket> socket)
     }
     else if (method == "GET" && (path == "/" || path == "/index.html"))
     {
-        respond (*socket, 200, "text/html; charset=utf-8", BinaryData::remote_html, (size_t) BinaryData::remote_htmlSize);
+        // The page knows which LiveRack it came from, so it can reload itself after an update
+        const auto page = juce::String::fromUTF8 (BinaryData::remote_html, BinaryData::remote_htmlSize)
+                              .replace ("%LIVERACK_VERSION%", JUCE_APPLICATION_VERSION_STRING);
+        respond (*socket, 200, "text/html; charset=utf-8", page.toRawUTF8(), page.getNumBytesAsUTF8());
     }
     else if (method == "GET" && path == "/icon.png")
     {

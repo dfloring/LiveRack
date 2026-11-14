@@ -324,8 +324,21 @@ function currentQuery() {
 }
 
 // A state arrived (live or polled)
+// The LiveRack this page came from. If it's talking to a different one (LiveRack
+// was updated while the iPad kept the old page open), load the new page, once.
+const PAGE_VERSION = '%LIVERACK_VERSION%';
+function checkVersion(v) {
+  if (!v || PAGE_VERSION.charAt(0) === '%' || v === PAGE_VERSION) return;
+  try {
+    if (sessionStorage.getItem('liverack-reloaded-for') === v) return;
+    sessionStorage.setItem('liverack-reloaded-for', v);
+  } catch (e) {}
+  location.reload();
+}
+
 function gotState(next, asked) {
   if (!next || !next.racks) return;
+  checkVersion(next.version);
   // Live states carry no levels: keep the last ones until the meters arrive
   if (state && state.racks) next.racks.forEach((r, i) => {
     if (r.level === undefined) r.level = state.racks[i] ? state.racks[i].level || 0 : 0;

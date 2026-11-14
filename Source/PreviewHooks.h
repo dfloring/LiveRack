@@ -166,6 +166,64 @@ struct PreviewHooks
         });
     }
 
+    // Overview / Rack and scrolling a long plugin list, with real mouse events
+    static juce::MouseEvent mouseAt (juce::Component& c, juce::Point<int> p, int clicks)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), p.toFloat(), {}, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                 &c, &c, now, p.toFloat(), now, clicks, false);
+    }
+
+    static void overviewTest (MainComponent& m)
+    {
+        if (auto* top = m.getTopLevelComponent())
+            top->setSize (1280, 720);
+
+        // A long chain on the first rack
+        juce::String error;
+        for (int i = 0; i < 9; ++i)
+            m.engine.copyPlugin (0, 0, 0, m.engine.getNumSlots (0), error);
+
+        juce::Timer::callAfterDelay (3500, [&m]
+        {
+            std::cerr << "OVERVIEW full view " << m.isFullView() << " strips shown " << m.strips.isVisible() << " panel shown " << m.dock.isVisible()
+                      << " strips height " << m.strips.getHeight() << " rack 0 plugins " << m.engine.getNumSlots (0)
+                      << " overview lit " << m.overviewButton.getToggleState() << " rack lit " << m.rackViewButton.getToggleState() << std::endl;
+            auto* content = m.strips.viewport.getViewedComponent();
+            const auto first = content->getLocalArea (nullptr, m.strips.getSlotScreenBounds (0, 0));
+            std::cerr << "OVERVIEW slot 0 at y " << first.getY() << std::endl;
+            content->mouseWheelMove (mouseAt (*content, first.getCentre(), 0), juce::MouseWheelDetails { 0.0f, -1.5f, false, false, false });
+            const auto after = content->getLocalArea (nullptr, m.strips.getSlotScreenBounds (0, 0));
+            std::cerr << "OVERVIEW after scrolling down, slot 0 at y " << after.getY() << std::endl;
+        });
+
+        juce::Timer::callAfterDelay (6500, [&m]
+        {
+            auto* content = m.strips.viewport.getViewedComponent();
+            const auto slot = content->getLocalArea (nullptr, m.strips.getSlotScreenBounds (1, 0));
+            content->mouseDown (mouseAt (*content, slot.getCentre(), 1));
+            content->mouseUp (mouseAt (*content, slot.getCentre(), 1));
+            std::cerr << "OVERVIEW single click: full view " << m.isFullView() << " selected " << m.selectedRack << ":" << m.selectedSlot << std::endl;
+            content->mouseDoubleClick (mouseAt (*content, slot.getCentre(), 2));
+            std::cerr << "OVERVIEW double click: full view " << m.isFullView() << " panel shown " << m.dock.isVisible()
+                      << " editor " << (m.dock.editor != nullptr) << " rack lit " << m.rackViewButton.getToggleState() << std::endl;
+        });
+
+        juce::Timer::callAfterDelay (9500, [&m]
+        {
+            m.overviewButton.triggerClick();
+            juce::Timer::callAfterDelay (300, [&m]
+            {
+                std::cerr << "OVERVIEW back: full view " << m.isFullView() << " editor kept " << (m.dock.editor != nullptr)
+                          << " overview lit " << m.overviewButton.getToggleState() << std::endl;
+                // A Hot Plugin / User Key opening a plugin goes to Rack
+                m.openSlotId (m.engine.getSlotId (2, 1));
+                std::cerr << "OVERVIEW open by id: full view " << m.isFullView() << " selected " << m.selectedRack << ":" << m.selectedSlot << std::endl;
+                m.setFullView (false);
+            });
+        });
+    }
+
     static void pump (RackEngine& e, juce::AudioBuffer<float>& in, juce::AudioBuffer<float>& out)
     {
         e.previewProcess (in, out);
@@ -193,6 +251,7 @@ struct PreviewHooks
                                   std::cerr << "STEP wrap " << m.selectedRack << " (expect " << m.engine.getNumRacks() - 1 << ")" << std::endl; m.stepRack (1); }
         if (open == "plugins")  m.showPluginScanner();
         if (open == "remote")   openRemoteWindow (m);
+        if (open == "overview") overviewTest (m);
         if (open == "timing")
         {
             // Keep the audio going so plugin timing shows

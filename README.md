@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/banner.png" alt="LiveRack: live audio plugin host for Mac" width="100%"></p>
 
-**LiveRack** hosts racks of VST3 and Audio Unit plugins for live mixing, in the spirit of Waves SuperRack and Fourier transform.engine. It runs on a Mac with Apple silicon, talks to your console over Dante or the Waves SoundGrid Driver, follows scene recalls and channel selection from Yamaha CL/QL/DM7 and Behringer X32 consoles, and can be driven from a Stream Deck through Bitfocus Companion.
+**LiveRack** hosts racks of VST3 and Audio Unit plugins for live mixing, in the spirit of Waves SuperRack and Fourier transform.engine. It runs on a Mac with Apple silicon, talks to your console over Dante or the Waves SoundGrid Driver, follows scene recalls from Yamaha CL/QL/DM7 and Behringer X32 consoles (and channel selection from the X32), and can be driven from a Stream Deck through Bitfocus Companion.
 
 <p align="center"><img src="docs/screenshot-main.png" alt="LiveRack main window" width="100%"></p>
 
@@ -9,7 +9,7 @@
 - **Several audio drivers at once** (Dante Virtual Soundcard, SoundGrid, any CoreAudio device), each on its own audio thread
 - **Console-style routing matrix** with automatic output patching
 - **Latency groups A–H** keep related inputs sample-aligned
-- **Console Link:** follows scene recalls and channel selection (Yamaha RCP, X32 scenes/snippets/cues)
+- **Console Link:** follows scene recalls (Yamaha RCP, X32 scenes/snippets/cues) and X32 channel selection
 - **Snapshots with scope** down to individual plugins, Recall Safe racks, in-place recall with no audio gap
 - **Custom pages, Hot Plugins, User Keys,** keyboard shortcuts, MIDI controllers with MIDI Learn, tap tempo
 - **iPad / web remote:** run racks and every plugin parameter from Safari on an iPad, including **the plugin's own window, live** (Mac)
@@ -27,7 +27,7 @@ Get the latest build from [Releases](../../releases): the Mac app (Apple silicon
 - **Mac:** unzip, then right-click `LiveRack.app` > **Open** the first time (it isn't notarised).
 - **Windows:** unzip and run `LiveRack.exe`. If Windows warns about an unknown publisher: **More info > Run anyway**. Pick your ASIO driver (Dante Virtual Soundcard, SoundGrid) in Devices > driver Settings.
 
-# User guide (v0.21)
+# User guide (v0.22)
 
 Any number of independent racks of VST3/AU plugins on one or more audio drivers at once (Dante Virtual Soundcard, a Dante interface, the Waves SoundGrid Driver). Everything lives in one **show file** (`.liverack`) with its snapshots inside it, and the open show comes back automatically on launch.
 
@@ -44,11 +44,12 @@ App: `build/LiveRack_artefacts/Release/LiveRack.app`
 
 ## The main window
 
-- **Top bar,** in groups: **Show** (save; open, save as, new), **Snapshots** (previous / next, the current snapshot: click it for the list, rename and delete; **STORE**), **Views** (Rack, Devices, Routing, Plugins, Snapshots: what the main window shows), **Rack controls** (add rack, rack window, stack rows), and **BPM** with **TAP**. Buttons are labelled when the window is wide enough; hover one for more. Click the BPM number to type a tempo. The window title shows the LiveRack version.
+- **Top bar,** in groups: **Show** (save; open, save as, new), **Snapshots** (previous / next, the current snapshot: click it for the list, rename and delete; **STORE**), **Views** (Overview, Rack, Devices, Routing, Plugins, Snapshots: what the main window shows), **Rack controls** (add rack, rack window, stack rows), and **BPM** with **TAP**. Buttons are labelled when the window is wide enough; hover one for more. Click the BPM number to type a tempo. The window title and the far right of the status bar show the LiveRack version.
+- **Overview and Rack:** **Overview** shows every rack's strip, full height. Click a plugin or rack to select it; **double-click** a plugin to open it in **Rack**, which gives the plugin panel the whole window. Opening a plugin from a Hot Plugin, a User Key, MIDI or OSC also goes to Rack. **Overview** (or Esc) goes back. With the rack window on (two windows), the main window stays on Overview and plugins open in the rack window.
 - **Setup screens** (Devices, Routing, Plugins, Snapshots, Keyboard shortcuts) open in the main window in place of the racks, so everything works on one screen. **‹ Racks**, Esc or the toolbar button again goes back. **Pop Out** moves a screen into its own window (for a second screen), and **Show in Main Window** brings it back; LiveRack remembers which way you like each one.
 - **Pages** (tabs above the strips): **All** shows every rack; **+ Page** makes a page (starting with the selected rack). Put racks on pages from a rack's right-click menu > **Pages** (a rack can be on several), or right-click a page tab > Add. New racks join the page you're on. Selecting a rack (from the console, a key, MIDI or OSC) switches to a page that has it. Pages are saved in the show, not in snapshots.
 - **Hot Plugins** (under the top bar): up to 12 pinned plugins. Right-click a plugin on a strip > **Pin to Hot Plugins**. Click a tile to open that plugin; drag tiles to reorder; right-click to unpin. Hot Plugins are saved in the show.
-- **Strips:** each rack's header shows its name and console channel (**CH**, click to set). Double-click the name to rename in place. The badges under it are buttons:
+- **Strips:** each rack's header shows its name and console channel (**CH**, click to set). When a rack has more plugins than fit, its list scrolls (trackpad or mouse wheel over it), fading out at the edge where there's more. Double-click the name to rename in place. The badges under it are buttons:
   - **MONO / M>S / ST**: switch format: mono, mono in with stereo out, or stereo (the rack drops out for a moment while its plugins switch over)
   - **A–H**: latency group (dashed = none)
   - **SAFE**: Recall Safe
@@ -139,7 +140,7 @@ Give racks a group letter (A–H) with the badge on the strip. Every rack in a g
 
 ## Rack window
 
-The plugin panel shows the selected rack: its colour, name, console channel, latency, in/out meters, **Rack Bypass**, and a tab for each plugin. A resizable plugin window is sized to fit the panel. One that can't resize and doesn't fit isn't squeezed in: use **Rack**, **Pop Out**, or make the window bigger and it comes back. **Rack** (View group in the top bar, or double-click a plugin in a strip) gives the panel the whole main window, below the Hot Plugins, so big plugins fit without a second window; click it again or press Esc to go back. The **‹ ›** arrows next to the rack's name step to the previous / next rack on the page shown (also available as User Key, MIDI and keyboard-shortcut actions, and over OSC). **Pop Out** opens a plugin in its own window. The rack window button (View group) moves it into its own window, e.g. on a second screen. Whether it's open and where are saved in the show.
+The plugin panel (in **Rack**, or the rack window) shows the selected rack: its colour, name, console channel, latency, in/out meters, **Rack Bypass**, and a tab for each plugin. A resizable plugin window is sized to fit the panel. One that can't resize and doesn't fit isn't squeezed in: use **Pop Out**, or make the window bigger and it comes back. **Rack** (View group in the top bar, or double-click a plugin in a strip) gives the panel the whole main window, below the Hot Plugins; **Overview** or Esc goes back. The **‹ ›** arrows next to the rack's name step to the previous / next rack on the page shown (also available as User Key, MIDI and keyboard-shortcut actions, and over OSC). **Pop Out** opens a plugin in its own window. The rack window button (View group) moves it into its own window, e.g. on a second screen. Whether it's open and where are saved in the show.
 
 ## Console Link (follow the console, like Waves ProLink)
 
@@ -147,7 +148,7 @@ The plugin panel shows the selected rack: its colour, name, console channel, lat
 - **Yamaha DM7:** the same protocol and port, using the For Mixer Control IP. Pick scene list A, or B for the second side in Split mode. Scene 4.00 recalls snapshot 4. A point scene such as 4.10 recalls snapshot 4 too, unless a snapshot is linked to it: pick the snapshot on the Snapshots screen, **Console scene…**, and type 4.10 (one snapshot per scene; Duplicate doesn't copy the link). (Not yet tested on a real DM7: the console link log shows what it sends.)
 - **Behringer X32:** OSC on UDP port 10023. Choose whether LiveRack follows **Scenes, Snippets or Cues**, press **Learn**, then recall one on the X32.
 
-Workflow: set up racks, then **STORE** a snapshot with the console's scene number. When the console recalls scene 12, LiveRack recalls snapshot 12. Give racks a console channel (**CH** on the strip) so selecting that channel on the console selects the rack.
+Workflow: set up racks, then **STORE** a snapshot with the console's scene number. When the console recalls scene 12, LiveRack recalls snapshot 12. Give racks a console channel (**CH** on the strip) so selecting that channel on the console selects the rack (X32 for now: Yamaha consoles don't report channel selection to LiveRack yet).
 
 ## MIDI controllers
 
@@ -161,7 +162,7 @@ Buttons (notes, CCs above 0, program changes) press; CCs move parameters. LiveRa
 
 LiveRack runs a small web server (port 8090 on new setups; one set to 8080 before keeps it. Devices > Controllers > **iPad / web remote** shows the address and turns it on or off). On an iPad on the same network, open that address in Safari, e.g. `http://192.168.1.20:8090`.
 
-**Network:** in the same settings, pick which network the remote answers on (each of this computer's network ports is listed with its address; "self-assigned" ones are usually Dante or SoundGrid). LiveRack then answers only devices on that network (and this computer itself), announces itself only there, and shows that network's address. Pick your control network to keep remote traffic off the audio networks. If that port isn't connected, the remote answers on every network so it can still be reached, and says so. The OSC remote has the same choice. **Share > Add to Home Screen** gives it an app-like icon that opens full screen.
+**Network:** in the same settings, pick which network the remote answers on (each of this computer's network ports is listed with its address; "self-assigned" ones are usually Dante or SoundGrid). LiveRack then answers only devices on that network (and this computer itself), announces itself only there, and shows that network's address. Pick your control network to keep remote traffic off the audio networks. If that port isn't connected, the remote answers on every network so it can still be reached, and says so. The OSC remote has the same choice. **Share > Add to Home Screen** gives it an app-like icon that opens full screen. After LiveRack is updated, an open remote page reloads itself to match.
 
 - Rack strips for the current page: tap the header to select, **BYPASS** to bypass, with level and gain reduction
 - Tap a plugin to open **all its parameters** as touch sliders (with filter and plugin bypass); meters like gain reduction show read-only
