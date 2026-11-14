@@ -97,7 +97,7 @@ public:
                     {
                         if (safe != nullptr && r == 1)
                         {
-                            auto& eng = safe->host.engine;
+                            auto& eng = safe->host.live;
                             const int idx = safe->index;
                             juce::MessageManager::callAsync ([&eng, idx] { eng.removeDriver (idx); });
                         }
@@ -112,7 +112,7 @@ public:
         fillCard (g, area);
         area = area.reduced (16);
 
-        const auto s = host.engine.getDriverStatus (index);
+        const auto s = host.live.getDriverStatus (index);
         const bool trouble = s.dropouts > 0 && juce::Time::getCurrentTime() - s.lastDropout < juce::RelativeTime::minutes (5);
         const auto light = ! s.open ? Theme::red : trouble ? Theme::amber : Theme::green;
 
@@ -165,12 +165,12 @@ public:
 
         // The plugins taking longest, so a heavy one is easy to find
         {
-            auto heavy = host.engine.getHeaviestPlugins (index, 3);
+            auto heavy = host.live.getHeaviestPlugins (index, 3);
             juce::StringArray names;
             for (auto& h : heavy)
                 if (h.load >= 0.01f)
-                    if (auto* p = host.engine.getPlugin (h.rack, h.slot))
-                        names.add (host.engine.getRackConfig (h.rack).name + " " + p->getName() + " "
+                    if (const auto p = host.live.getSlot (h.rack, h.slot); p.exists)
+                        names.add (host.live.getRackConfig (h.rack).name + " " + p.name + " "
                                    + juce::String ((int) std::ceil (h.load * 100.0f)) + "%");
             area.removeFromTop (4);
             g.setColour (Theme::textDim);
@@ -185,12 +185,12 @@ public:
         auto chips = area.removeFromTop (28);
         g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
         int shown = 0;
-        for (int r = 0; r < host.engine.getNumRacks(); ++r)
+        for (int r = 0; r < host.live.getNumRacks(); ++r)
         {
-            if (host.engine.getRackConfig (r).driver != index && ! (index == 0 && host.engine.getRackConfig (r).driver >= host.engine.getNumDrivers()))
+            if (host.live.getRackConfig (r).driver != index && ! (index == 0 && host.live.getRackConfig (r).driver >= host.live.getNumDrivers()))
                 continue;
 
-            const auto name = host.engine.getRackConfig (r).name;
+            const auto name = host.live.getRackConfig (r).name;
             const int w = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), name) + 16;
             if (w > chips.getWidth())
             {
@@ -199,7 +199,7 @@ public:
                 break;
             }
 
-            const auto c = RackStripsView::colourFor (host.engine, r);
+            const auto c = RackStripsView::colourFor (host.live, r);
             auto chip = chips.removeFromLeft (w).toFloat();
             chips.removeFromLeft (6);
             g.setColour (c.withAlpha (0.22f));
@@ -802,7 +802,15 @@ class DevicesPanel::Content : public juce::Component
 public:
     explicit Content (Host& h) : host (h)
     {
-        addDriver.onClick  = [this] { if (host.engine.addDriver() >= 0) { rebuild(); if (host.openDriverSettings) host.openDriverSettings (host.engine.getNumDrivers() - 1); } };
+        addDriver.onClick  = [this]
+        {
+            // On a server the new driver shows up with the next state
+            if (host.live.addDriver() && host.live.isLocal())
+            {
+                rebuild();
+                if (host.openDriverSettings) host.openDriverSettings (host.live.getNumDrivers() - 1);
+            }
+        };
         addConsole.onClick = [this] { if (host.addConsole) host.addConsole(); };
         addAndMakeVisible (addDriver);
         addAndMakeVisible (addConsole);
@@ -815,7 +823,7 @@ public:
         consoles.clear();
         controllers.clear();
 
-        for (int d = 0; d < host.engine.getNumDrivers(); ++d)
+        for (int d = 0; d < host.live.getNumDrivers(); ++d)
             addAndMakeVisible (drivers.add (new DriverCard (host, d)));
 
         for (int c = 0; c < (int) host.consoles.size(); ++c)
@@ -831,7 +839,7 @@ public:
         addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::serverCheck)));
         addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::server)));
 
-        addDriver.setEnabled (host.engine.getNumDrivers() < RackEngine::maxDrivers);
+        addDriver.setEnabled (host.live.getNumDrivers() < RackEngine::maxDrivers);
         layout();
     }
 
@@ -950,7 +958,7 @@ void DevicesPanel::refresh()
 void DevicesPanel::timerCallback()
 {
     // Devices plugged in or removed
-    if ((int) content->drivers.size() != host.engine.getNumDrivers()
+    if ((int) content->drivers.size() != host.live.getNumDrivers()
         || (int) content->consoles.size() != (int) host.consoles.size()
         || (int) content->controllers.size() != (int) host.midi.getDevices().size() + 7)
         refresh();

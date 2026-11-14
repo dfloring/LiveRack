@@ -1,5 +1,5 @@
 #pragma once
-#include "RackEngine.h"
+#include "LiveConnection.h"
 #include "ConsoleLink.h"
 #include "MidiControl.h"
 #include "OscRemote.h"
@@ -14,6 +14,7 @@ public:
     struct Host
     {
         RackEngine& engine;
+        LiveConnection& live;     // the show, here or on a server (the driver cards so far)
         std::vector<std::unique_ptr<ConsoleLink>>& consoles;
         MidiControl& midi;
         OscRemote& osc;

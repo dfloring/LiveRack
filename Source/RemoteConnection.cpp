@@ -276,6 +276,16 @@ void RemoteConnection::received (const juce::String& text)
                 meters = data;
         });
     }
+    else if (t == "reply" && message["what"].toString() == "devices")
+    {
+        juce::MessageManager::callAsync ([this, flag, data = message["data"]["devices"]]
+        {
+            if (! flag->load())
+                return;
+            deviceOptions = data;
+            sendChangeMessage();
+        });
+    }
     else if (t == "hello")
     {
         juce::MessageManager::callAsync ([this, flag, name = message["server"].toString()]
@@ -653,4 +663,108 @@ void RemoteConnection::setRackRouting (int rack, int driver, const int inputs[2]
     c.getDynamicObject()->setProperty ("in", juce::Array<juce::var> { inputs[0], inputs[1] });
     c.getDynamicObject()->setProperty ("out", juce::Array<juce::var> { outputs[0], outputs[1] });
     sendCommand (c);
+}
+
+//==============================================================================
+// Audio drivers
+DriverStatus RemoteConnection::getDriverStatus (int driver)
+{
+    DriverStatus st;
+    const auto v = at (state["drivers"], driver);
+    if (! v.isObject())
+        return st;
+
+    st.open = (bool) v["open"];
+    st.typeName = v["type"].toString();
+    st.deviceName = v["device"].toString();
+    st.sampleRate = (double) v["rate"];
+    st.bufferSize = (int) v["buffer"];
+    st.numIns = (int) v["numIns"];
+    st.numOuts = (int) v["numOuts"];
+    st.ioLatency = (int) v["ioLatency"];
+    st.dropouts = (int) v["dropouts"];
+    if (const auto last = v["lastDropout"].toString(); last.isNotEmpty())
+        st.lastDropout = juce::Time::fromISO8601 (last);
+    st.threads = juce::jmax (1, (int) v["threads"]);
+    st.numRacks = (int) v["racks"];
+
+    const auto m = at (meters["drivers"], driver);
+    st.cpu = (double) m["dsp"];
+    st.worstBlock = (double) m["longest"];
+    return st;
+}
+
+std::vector<RackEngine::HeavyPlugin> RemoteConnection::getHeaviestPlugins (int driver, int count)
+{
+    std::vector<RackEngine::HeavyPlugin> list;
+    for (int r = 0; r < getNumRacks(); ++r)
+    {
+        if (driver >= 0 && (int) rackState (r)["driver"] != driver)
+            continue;
+        for (int s = 0; s < getNumSlots (r); ++s)
+            list.push_back ({ r, s, getSlotLoad (r, s) });
+    }
+    std::sort (list.begin(), list.end(), [] (auto& a, auto& b) { return a.load > b.load; });
+    if ((int) list.size() > count)
+        list.resize ((size_t) count);
+    return list;
+}
+
+bool RemoteConnection::addDriver()
+{
+    if (getNumDrivers() >= RackEngine::maxDrivers)
+        return false;
+    sendCommand (make ("driverAdd", {}));
+    return true;
+}
+
+void RemoteConnection::removeDriver (int driver)
+{
+    sendCommand (make ("driverRemove", { { "driver", driver } }));
+}
+
+void RemoteConnection::refreshDriverOptions()
+{
+    const juce::ScopedLock sl (queueLock);
+    outgoing.add ("{\"t\":\"get\",\"what\":\"devices\",\"id\":1}");
+}
+
+LiveDriverOptions RemoteConnection::getDriverOptions (int driver)
+{
+    LiveDriverOptions o;
+    const auto v = at (deviceOptions, driver);
+    if (! v.isObject())
+        return o;
+
+    o.known = true;
+    o.type = v["type"].toString();
+    o.device = v["device"].toString();
+    if (auto* types = v["types"].getArray())
+        for (auto& t : *types)
+        {
+            LiveDriverOptions::Type type { t["name"].toString(), {} };
+            if (auto* names = t["devices"].getArray())
+                for (auto& n : *names)
+                    type.devices.add (n.toString());
+            o.types.push_back (type);
+        }
+    if (auto* rates = v["rates"].getArray())
+        for (auto& r : *rates) o.rates.add ((double) r);
+    if (auto* buffers = v["buffers"].getArray())
+        for (auto& b : *buffers) o.buffers.add ((int) b);
+    o.rate = (double) v["rate"];
+    o.buffer = (int) v["buffer"];
+    return o;
+}
+
+juce::String RemoteConnection::setDriver (int driver, const juce::String& type, const juce::String& device, double rate, int buffer)
+{
+    auto c = make ("driverSet", { { "driver", driver } });
+    auto* o = c.getDynamicObject();
+    if (type.isNotEmpty())   o->setProperty ("type", type);
+    if (device.isNotEmpty()) o->setProperty ("device", device);
+    if (rate > 0)            o->setProperty ("rate", rate);
+    if (buffer > 0)          o->setProperty ("buffer", buffer);
+    sendCommand (c);
+    return {};   // the server's status line says how it went
 }

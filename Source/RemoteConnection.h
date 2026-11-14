@@ -29,6 +29,13 @@ public:
     int getNumDrivers() override;
     LiveDriver getDriver (int driver) override;
     void setRackRouting (int rack, int driver, const int inputs[2], const int outputs[2]) override;
+    DriverStatus getDriverStatus (int driver) override;
+    std::vector<RackEngine::HeavyPlugin> getHeaviestPlugins (int driver, int count) override;
+    bool addDriver() override;
+    void removeDriver (int driver) override;
+    void refreshDriverOptions() override;
+    LiveDriverOptions getDriverOptions (int driver) override;
+    juce::String setDriver (int driver, const juce::String& type, const juce::String& device, double rate, int buffer) override;
     std::vector<int> getVisibleRacks() override;
     float getRackLoad (int rack) override;
     float getSlotLoad (int rack, int slot) override;
@@ -91,7 +98,7 @@ private:
     const int port;
 
     // Message thread
-    juce::var state, meters;
+    juce::var state, meters, deviceOptions;
     juce::String serverName;
     std::atomic<bool> connected { false };
 

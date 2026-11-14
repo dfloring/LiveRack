@@ -34,6 +34,19 @@ struct LiveDriver
     juce::StringArray blockLabels;      // console card slot for each block of 8 channels ("MY Slot 1"), or empty
 };
 
+// What an audio driver could be set to (its settings dialog)
+struct LiveDriverOptions
+{
+    bool known = false;                 // false until a server has answered
+    juce::String type, device;          // current
+    struct Type { juce::String name; juce::StringArray devices; };
+    std::vector<Type> types;
+    juce::Array<double> rates;
+    juce::Array<int> buffers;
+    double rate = 0;
+    int buffer = 0;
+};
+
 class LiveConnection : public juce::ChangeBroadcaster
 {
 public:
@@ -56,6 +69,16 @@ public:
     virtual double getGroupLatencyMs (int group) = 0;
     virtual int getNumDrivers() = 0;
     virtual LiveDriver getDriver (int driver) = 0;
+
+    // Audio drivers: how each is doing, and setting them up
+    virtual DriverStatus getDriverStatus (int driver) = 0;
+    virtual std::vector<RackEngine::HeavyPlugin> getHeaviestPlugins (int driver, int count) = 0;
+    virtual bool addDriver() = 0;                      // false: no more can be added
+    virtual void removeDriver (int driver) = 0;        // its racks move to driver 1
+    virtual void refreshDriverOptions() = 0;           // a server is asked again; a change message follows
+    virtual LiveDriverOptions getDriverOptions (int driver) = 0;
+    // Empty type / device, rate 0, buffer 0 = leave as it is. Returns an error (local), or empty.
+    virtual juce::String setDriver (int driver, const juce::String& type, const juce::String& device, double rate, int buffer) = 0;
     virtual std::vector<int> getVisibleRacks() = 0;        // the current page, in order
 
     // Processing time, as a share of the block: the longest in the last few seconds
@@ -163,6 +186,58 @@ public:
         for (int b = 0; b < numBlocks (st); ++b)
             v.blockLabels.add (slotLabelFor != nullptr ? slotLabelFor (d, b * 8 + 1) : juce::String());
         return v;
+    }
+
+    DriverStatus getDriverStatus (int d) override   { return engine.getDriverStatus (d); }
+    std::vector<RackEngine::HeavyPlugin> getHeaviestPlugins (int d, int n) override { return engine.getHeaviestPlugins (d, n); }
+    bool addDriver() override                       { return engine.addDriver() >= 0; }
+    void removeDriver (int d) override              { engine.removeDriver (d); }
+    void refreshDriverOptions() override            {}
+
+    LiveDriverOptions getDriverOptions (int d) override
+    {
+        LiveDriverOptions o;
+        if (! juce::isPositiveAndBelow (d, engine.getNumDrivers()))
+            return o;
+
+        auto& dm = engine.getDeviceManager (d);
+        o.known = true;
+        o.type = dm.getCurrentAudioDeviceType();
+        for (auto* type : dm.getAvailableDeviceTypes())
+            o.types.push_back ({ type->getTypeName(), type->getDeviceNames (false) });
+
+        if (auto* dev = dm.getCurrentAudioDevice())
+        {
+            o.device = dev->getName();
+            o.rates = dev->getAvailableSampleRates();
+            o.buffers = dev->getAvailableBufferSizes();
+            o.rate = dev->getCurrentSampleRate();
+            o.buffer = dev->getCurrentBufferSizeSamples();
+        }
+        return o;
+    }
+
+    juce::String setDriver (int d, const juce::String& type, const juce::String& device, double rate, int buffer) override
+    {
+        if (! juce::isPositiveAndBelow (d, engine.getNumDrivers()))
+            return "No such driver";
+
+        auto& dm = engine.getDeviceManager (d);
+        if (type.isNotEmpty() && type != dm.getCurrentAudioDeviceType())
+            dm.setCurrentAudioDeviceType (type, true);
+
+        auto setup = dm.getAudioDeviceSetup();
+        if (device.isNotEmpty())
+        {
+            setup.outputDeviceName = setup.inputDeviceName = device;
+            setup.useDefaultInputChannels = setup.useDefaultOutputChannels = true;
+        }
+        if (rate > 0)   setup.sampleRate = rate;
+        if (buffer > 0) setup.bufferSize = buffer;
+
+        const auto error = dm.setAudioDeviceSetup (setup, true);
+        engine.saveSettings();
+        return error;
     }
 
     void setRackRouting (int r, int driver, const int inputs[2], const int outputs[2]) override

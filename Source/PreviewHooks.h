@@ -4,6 +4,8 @@
 #include "SocketUtil.h"
 #include "ServerCheck.h"
 #include "RemoteConnection.h"
+#include "DriverSettingsPanel.h"
+#include "DevicesPanel.h"
 #include "RoutingMatrix.h"
 #include "SnapshotsPanel.h"
 // Only compiled into Linux preview builds (LIVERACK_PREVIEW_HOOKS=1), used to
@@ -388,6 +390,139 @@ struct PreviewHooks
         });
     }
 
+    // Devices (the driver cards) and a driver's settings, over the network
+    struct RemoteDevicesWindow : public juce::DocumentWindow, private juce::ChangeListener
+    {
+        RemoteDevicesWindow (MainComponent& m, int port)
+            : juce::DocumentWindow ("Devices over the network (test)", Theme::background, 0), live ("127.0.0.1", port)
+        {
+            setUsingNativeTitleBar (true);
+            DevicesPanel::Host h { m.engine, live, m.consoles, *m.midi, m.osc, m.webRemote,
+                [] (int) {}, [] (int) {}, [] {}, [] (int) {}, [] {},
+                [] (int, int) { return juce::String(); }, [] {}, [] { return 0; } };
+            panel = new DevicesPanel (std::move (h));
+            setContentOwned (panel, false);
+            setBounds (0, 0, 1440, 960);
+            setVisible (true);
+            live.addChangeListener (this);
+        }
+        ~RemoteDevicesWindow() override { live.removeChangeListener (this); }
+        void changeListenerCallback (juce::ChangeBroadcaster*) override { panel->refresh(); }
+
+        RemoteConnection live;
+        DevicesPanel* panel = nullptr;
+        std::unique_ptr<juce::DocumentWindow> settingsWindow;
+        DriverSettingsPanel* settings = nullptr;
+    };
+
+    static inline std::unique_ptr<RemoteDevicesWindow> remoteDevices;
+
+    static void openRemoteDevices (MainComponent& m)
+    {
+        remoteDevices = std::make_unique<RemoteDevicesWindow> (m, m.webRemote.getPort());
+        auto& live = remoteDevices->live;
+        auto& e = m.engine;
+
+        juce::Timer::callAfterDelay (2500, [&m, &live, &e]
+        {
+            const auto a = live.getDriverStatus (0), b = e.getDriverStatus (0);
+            std::cerr << "RDEV status same " << (a.open == b.open && a.deviceName == b.deviceName && a.typeName == b.typeName && a.bufferSize == b.bufferSize
+                                                 && a.numIns == b.numIns && a.numOuts == b.numOuts && a.dropouts == b.dropouts && a.threads == b.threads)
+                      << " open " << a.open << " type '" << a.typeName << "' threads " << a.threads << std::endl;
+            const auto h1 = live.getHeaviestPlugins (0, 3), h2 = e.getHeaviestPlugins (0, 3);
+            std::cerr << "RDEV heaviest " << h1.size() << " / " << h2.size() << (h1.empty() ? juce::String() : " first " + live.getSlot (h1[0].rack, h1[0].slot).name) << std::endl;
+
+            auto* w = new juce::DocumentWindow ("Audio driver 1 on " + live.getServerName(), Theme::panel, juce::DocumentWindow::closeButton);
+            remoteDevices->settings = new DriverSettingsPanel (live, 0);
+            w->setContentOwned (remoteDevices->settings, true);
+            w->setTopLeftPosition (460, 560);
+            w->setVisible (true);
+            remoteDevices->settingsWindow.reset (w);
+        });
+
+        juce::Timer::callAfterDelay (4000, [&m, &live, &e]
+        {
+            const auto a = live.getDriverOptions (0), b = m.live.getDriverOptions (0);
+            bool same = a.known && a.type == b.type && a.device == b.device && a.types.size() == b.types.size() && a.rates == b.rates && a.buffers == b.buffers;
+            juce::String types;
+            for (size_t i = 0; same && i < a.types.size(); ++i)
+                same = a.types[i].name == b.types[i].name && a.types[i].devices == b.types[i].devices;
+            for (auto& t : a.types) types << t.name << "(" << t.devices.size() << ") ";
+            std::cerr << "RDEV options known " << a.known << " same " << same << " type '" << a.type << "' types " << types
+                      << "; dialog shows " << remoteDevices->settings->type.getNumItems() << " types, picked '" << remoteDevices->settings->type.getText()
+                      << "', status '" << remoteDevices->settings->status << "'" << std::endl;
+            std::cerr << "RDEV add driver sent " << live.addDriver() << std::endl;
+            if (a.types.size() > 1)
+                live.setDriver (0, a.types[a.type == a.types[0].name ? 1 : 0].name, {}, 0, 0);
+        });
+
+        juce::Timer::callAfterDelay (5500, [&m, &live, &e]
+        {
+            std::cerr << "RDEV drivers now " << e.getNumDrivers() << " (expect 2), the copy sees " << live.getNumDrivers()
+                      << ", cards " << live.getNumDrivers() << "; driver 1 type now '" << e.getDeviceManager (0).getCurrentAudioDeviceType() << "'" << std::endl;
+            live.removeDriver (1);
+        });
+
+        juce::Timer::callAfterDelay (7000, [&live, &e]
+        {
+            std::cerr << "RDEV after remove: " << e.getNumDrivers() << " (expect 1), the copy sees " << live.getNumDrivers() << std::endl;
+        });
+    }
+
+    // The server driver dialog against made-up devices (this computer has none)
+    struct FakeServer : public LocalConnection
+    {
+        using LocalConnection::LocalConnection;
+        bool isLocal() const override { return false; }
+        juce::String getServerName() const override { return "dfproduction"; }
+        LiveDriverOptions getDriverOptions (int) override
+        {
+            LiveDriverOptions o;
+            o.known = true;
+            o.type = type; o.device = device;
+            o.types = { { "ASIO", { "Waves SoundGrid", "Dante Virtual Soundcard" } }, { "Windows Audio", { "Speakers" } } };
+            if (device.isNotEmpty()) { o.rates = { 44100.0, 48000.0, 96000.0 }; o.buffers = { 32, 64, 128, 256 }; o.rate = rate; o.buffer = buffer; }
+            return o;
+        }
+        juce::String setDriver (int, const juce::String& t, const juce::String& d, double r, int b) override
+        {
+            std::cerr << "DLG set type '" << t << "' device '" << d << "' rate " << r << " buffer " << b << std::endl;
+            if (t.isNotEmpty()) { type = t; device = {}; }
+            if (d.isNotEmpty()) device = d;
+            if (r > 0) rate = r;
+            if (b > 0) buffer = b;
+            return {};
+        }
+        DriverStatus getDriverStatus (int) override { DriverStatus s; s.open = device.isNotEmpty(); s.numIns = s.numOuts = 64; return s; }
+        juce::String type { "ASIO" }, device { "Waves SoundGrid" };
+        double rate = 48000.0; int buffer = 64;
+    };
+
+    static inline std::unique_ptr<FakeServer> fakeServer;
+    static inline std::unique_ptr<juce::DocumentWindow> dialogWindow;
+
+    static void driverDialogTest (MainComponent& m)
+    {
+        fakeServer = std::make_unique<FakeServer> (m.engine);
+        auto* panel = new DriverSettingsPanel (*fakeServer, 0);
+        dialogWindow = std::make_unique<juce::DocumentWindow> ("Audio driver 1 on dfproduction", Theme::panel, juce::DocumentWindow::closeButton);
+        dialogWindow->setContentOwned (panel, true);
+        dialogWindow->setTopLeftPosition (300, 200);
+        dialogWindow->setVisible (true);
+        dialogWindow->toFront (true);
+
+        auto show = [panel] (const char* when)
+        {
+            std::cerr << "DLG " << when << ": type '" << panel->type.getText() << "' device '" << panel->device.getText() << "' (" << panel->device.getNumItems()
+                      << " choices) rate '" << panel->rate.getText() << "' buffer '" << panel->buffer.getText() << "' status '" << panel->status << "'" << std::endl;
+        };
+        juce::Timer::callAfterDelay (1500, [panel, show] { show ("opened"); panel->buffer.setSelectedId (3); });           // 128
+        juce::Timer::callAfterDelay (3500, [panel, show] { show ("after buffer"); panel->rate.setSelectedId (3); });        // 96k
+        juce::Timer::callAfterDelay (5500, [panel, show] { show ("after rate"); panel->device.setSelectedId (2); });        // Dante
+        juce::Timer::callAfterDelay (7500, [panel, show] { show ("after device"); panel->type.setSelectedId (2); });        // Windows Audio
+        juce::Timer::callAfterDelay (9500, [show] { show ("after type"); });
+    }
+
     static void pump (RackEngine& e, juce::AudioBuffer<float>& in, juce::AudioBuffer<float>& out)
     {
         e.previewProcess (in, out);
@@ -417,6 +552,8 @@ struct PreviewHooks
         if (open == "remote")   openRemoteWindow (m);
         if (open == "overview") overviewTest (m);
         if (open == "remoterouting") openRemoteRouting (m);
+        if (open == "remotedevices") openRemoteDevices (m);
+        if (open == "driverdialog") driverDialogTest (m);
         if (open == "timing")
         {
             // Keep the audio going so plugin timing shows

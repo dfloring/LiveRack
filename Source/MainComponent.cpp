@@ -1982,7 +1982,7 @@ void MainComponent::showDevices()
 
     juce::Component::SafePointer<MainComponent> safe (this);
 
-    DevicesPanel::Host host { engine, consoles, *midi, osc, webRemote,
+    DevicesPanel::Host host { engine, live, consoles, *midi, osc, webRemote,
         [safe] (int d) { if (safe != nullptr) safe->showDriverSettings (d); },
         [safe] (int c) { if (safe != nullptr) safe->showConsoleSettings (c); },
         [safe] { if (safe != nullptr) safe->addConsole(); },
@@ -3340,33 +3340,33 @@ juce::var MainComponent::buildDeviceOptions()
 
     for (int d = 0; d < engine.getNumDrivers(); ++d)
     {
-        auto& dm = engine.getDeviceManager (d);
+        const auto opt = live.getDriverOptions (d);
         auto* o = new juce::DynamicObject();
-        o->setProperty ("type", dm.getCurrentAudioDeviceType());
+        o->setProperty ("type", opt.type);
 
         juce::Array<juce::var> types;
-        for (auto* type : dm.getAvailableDeviceTypes())
+        for (auto& type : opt.types)
         {
             auto* t = new juce::DynamicObject();
-            t->setProperty ("name", type->getTypeName());
+            t->setProperty ("name", type.name);
             juce::Array<juce::var> names;
-            for (auto& n : type->getDeviceNames (false))
+            for (auto& n : type.devices)
                 names.add (n);
             t->setProperty ("devices", names);
             types.add (juce::var (t));
         }
         o->setProperty ("types", types);
 
-        if (auto* dev = dm.getCurrentAudioDevice())
+        if (opt.device.isNotEmpty())
         {
-            o->setProperty ("device", dev->getName());
+            o->setProperty ("device", opt.device);
             juce::Array<juce::var> rates, buffers;
-            for (auto rate : dev->getAvailableSampleRates()) rates.add (rate);
-            for (auto b : dev->getAvailableBufferSizes()) buffers.add (b);
+            for (auto rate : opt.rates) rates.add (rate);
+            for (auto b : opt.buffers) buffers.add (b);
             o->setProperty ("rates", rates);
             o->setProperty ("buffers", buffers);
-            o->setProperty ("rate", dev->getCurrentSampleRate());
-            o->setProperty ("buffer", dev->getCurrentBufferSizeSamples());
+            o->setProperty ("rate", opt.rate);
+            o->setProperty ("buffer", opt.buffer);
         }
         list.add (juce::var (o));
     }
@@ -3697,20 +3697,8 @@ bool MainComponent::handleServerCommand (const juce::String& cmd, const juce::va
         if (! juce::isPositiveAndBelow (d, engine.getNumDrivers()))
             return true;
 
-        auto& dm = engine.getDeviceManager (d);
-        if (c.hasProperty ("type") && c["type"].toString() != dm.getCurrentAudioDeviceType())
-            dm.setCurrentAudioDeviceType (c["type"].toString(), true);
-
-        auto setup = dm.getAudioDeviceSetup();
-        if (c.hasProperty ("device"))
-        {
-            setup.outputDeviceName = setup.inputDeviceName = c["device"].toString();
-            setup.useDefaultInputChannels = setup.useDefaultOutputChannels = true;
-        }
-        if (c.hasProperty ("rate"))   setup.sampleRate = (double) c["rate"];
-        if (c.hasProperty ("buffer")) setup.bufferSize = (int) c["buffer"];
-
-        const auto error = dm.setAudioDeviceSetup (setup, true);
+        const auto error = live.setDriver (d, c["type"].toString(), c["device"].toString(),
+                                           c.hasProperty ("rate") ? (double) c["rate"] : 0.0, c.hasProperty ("buffer") ? (int) c["buffer"] : 0);
         consoleNote = error.isNotEmpty() ? "Audio driver " + juce::String (d + 1) + ": " + error
                                          : "Audio driver " + juce::String (d + 1) + " set to " + engine.getDriverLabel (d);
         engine.saveSettings();
