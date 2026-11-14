@@ -447,6 +447,7 @@ MainComponent::MainComponent()
     scanButton.setLabel ("Plugins");
     scopeButton.setLabel ("Snapshots");
     addRackButton.setLabel ("Add Rack");
+    overviewButton.setLabel ("Channels");
     rackViewButton.setLabel ("Rack");
     windowModeButton.setLabel ("Rack Window");
     stackRowsButton.setLabel ("Stack Rows");

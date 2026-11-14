@@ -202,8 +202,8 @@ private:
                       scanButton      { "Plugins", "plugins", "Plugin library and scanning" },
                       scopeButton     { "Snapshots", "snapshots", "Snapshots: recall, store and what each one recalls" },
                       addRackButton   { "Add Rack", "addrack", "Add a rack" },
-                      overviewButton  { "Overview", "overview", "All the racks (double-click a plugin to open it in Rack)" },
-                      rackViewButton  { "Rack", "rack", "The selected rack's plugins in the whole window (Esc goes back to Overview)" },
+                      overviewButton  { "Channels", "overview", "All the racks (double-click a plugin to open it in Rack)" },
+                      rackViewButton  { "Rack", "rack", "The selected rack's plugins in the whole window (Esc goes back to Channels)" },
                       windowModeButton { "Two Windows", "windows", "Rack window: the plugin panel in its own window" },
                       stackRowsButton { "Stack Rows", "stack", "Stack racks in rows to fit the window" };
     juce::TextButton storeSceneButton { "STORE" }, tapButton { "TAP" };
