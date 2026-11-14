@@ -274,6 +274,17 @@ void ConsoleLink::handleRcpLine (const juce::String& line)
             sceneChanged (scene, number);
         else if (t[0] == "OK")
             currentScene = scene;
+        return;
+    }
+
+    // Yamaha consoles don't report SEL presses over RCP, but they do report CUE:
+    // NOTIFY set MIXER:Current/Cue/InCh/On 3 0 1   (input channel 4 cued on)
+    if (t.size() >= 6 && t[0] == "NOTIFY" && t[1] == "set" && t[2].equalsIgnoreCase ("MIXER:Current/Cue/InCh/On")
+        && t[5].unquoted().getIntValue() == 1)
+    {
+        const int channel = t[3].getIntValue() + 1;
+        addLog ("Channel " + juce::String (channel) + " cued on the console");
+        channelSelected (channel);
     }
 }
 

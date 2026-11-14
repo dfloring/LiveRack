@@ -4,6 +4,7 @@
 #include "SocketUtil.h"
 #include "ServerCheck.h"
 #include "RemoteConnection.h"
+#include "SnapshotsPanel.h"
 // Only compiled into Linux preview builds (LIVERACK_PREVIEW_HOOKS=1), used to
 // set up a sample session, feed a test signal through it, and open dialogs
 // for UI screenshots. Never part of the Mac app.
@@ -224,6 +225,104 @@ struct PreviewHooks
         });
     }
 
+    // The Snapshots screen in a second window, over the network
+    struct RemoteSnapshotsWindow : public juce::DocumentWindow, private juce::ChangeListener
+    {
+        explicit RemoteSnapshotsWindow (int port)
+            : juce::DocumentWindow ("Snapshots over the network (test)", Theme::background, 0), live ("127.0.0.1", port)
+        {
+            setUsingNativeTitleBar (true);
+            SnapshotsPanel::Host h { live,
+                [this] { return (int) live.getState()["scene"]; },
+                [this] (int n) { auto* o = new juce::DynamicObject(); o->setProperty ("cmd", "scene"); o->setProperty ("number", n); live.sendCommand (juce::var (o)); },
+                [this] (int n, const juce::String& name, const SnapshotStoreFilter&)
+                {
+                    auto* o = new juce::DynamicObject(); o->setProperty ("cmd", "sceneStore"); o->setProperty ("number", n); o->setProperty ("name", name);
+                    live.sendCommand (juce::var (o));
+                },
+                [] (const juce::String&, const juce::String&, const juce::String&, std::function<void()> ok) { ok(); },
+                [] (int) { return juce::String(); },
+                [] (const juce::String&) {},
+                [] { return juce::String(); } };
+            panel = new SnapshotsPanel (std::move (h));
+            setContentOwned (panel, false);
+            setBounds (0, 0, 1440, 960);
+            setVisible (true);
+            live.addChangeListener (this);
+        }
+        ~RemoteSnapshotsWindow() override { live.removeChangeListener (this); }
+        void changeListenerCallback (juce::ChangeBroadcaster*) override { panel->refresh(); }
+
+        RemoteConnection live;
+        SnapshotsPanel* panel = nullptr;
+    };
+
+    static inline std::unique_ptr<RemoteSnapshotsWindow> remoteSnapshots;
+
+    static void openRemoteSnapshots (MainComponent& m)
+    {
+        remoteSnapshots = std::make_unique<RemoteSnapshotsWindow> (m.webRemote.getPort());
+        auto& live = remoteSnapshots->live;
+        auto& e = m.engine;
+
+        juce::Timer::callAfterDelay (2000, [&live] { remoteSnapshots->panel->select (2); live.watchSnapshot (2); });
+
+        juce::Timer::callAfterDelay (3500, [&m, &live, &e]
+        {
+            juce::String a, b;
+            for (auto& s : live.getSnapshots()) a << s.number << ":" << s.name << ":" << s.consoleScene << ":" << s.midi << " ";
+            for (auto& s : e.getSnapshots())    b << s.number << ":" << s.name << ":" << e.getSnapshotConsoleScene (s.number) << ":" << m.midi->describeTriggerFor (s.number) << " ";
+            std::cerr << "RSNAP list same " << (a == b) << " : " << a << std::endl;
+
+            const auto dl = live.differencesFromNow (2), de = e.differencesFromNow (2);
+            bool same = dl.size() == de.size();
+            for (size_t i = 0; same && i < dl.size(); ++i)
+                same = dl[i].rack == de[i].rack && dl[i].slot == de[i].slot && dl[i].changedSettings == de[i].changedSettings
+                       && dl[i].bypassDiffers == de[i].bypassDiffers && dl[i].details == de[i].details;
+            std::cerr << "RSNAP differences for 2: " << dl.size() << " same as the engine " << same << std::endl;
+
+            remoteSnapshots->panel->select (3);   // the screen asks the server for 3's details
+        });
+
+        juce::Timer::callAfterDelay (5000, [&m, &live, &e]
+        {
+            bool same = true;
+            for (int r = 0; r < e.getNumRacks(); ++r)
+                for (int s = 0; s < e.getNumSlots (r); ++s)
+                    same = same && live.isSlotInScopeFor (3, r, s) == e.isSlotInScopeFor (3, r, s) && live.snapshotHasSlot (3, r, s) == e.snapshotHasSlot (3, r, s);
+            const auto sl = live.getScopeFor (3), se = e.getScopeFor (3);
+            same = same && sl.pluginSettings == se.pluginSettings && sl.pluginBypass == se.pluginBypass && sl.rackBypass == se.rackBypass && sl.bpm == se.bpm;
+            const auto ll = live.getSnapshotLink(), le = m.midi->getSnapshotLink();
+            std::cerr << "RSNAP scope of 3 same " << same << " (kick in " << live.isSlotInScopeFor (3, 1, 0) << ")"
+                      << "; MIDI link same " << (ll.follow == le.follow && ll.channel == le.channel && ll.firstSnapshot == le.firstSnapshot)
+                      << " inputs " << live.getMidiInputNames().joinIntoString (",") << std::endl;
+
+            // Changes from the network
+            live.renameSnapshot (1, "Walk-in (remote)");
+            auto sc = live.getScopeFor (3); sc.bpm = false; live.setScopeFor (3, sc);
+            live.setSlotInScopeFor (3, 1, 0, true);
+            std::cerr << "RSNAP duplicate 3 -> 4 sent " << live.duplicateSnapshot (3, 4) << ", renumber 10 -> 1 refused " << ! live.renumberSnapshot (10, 1) << std::endl;
+            live.renumberSnapshot (10, 12);
+            live.setSnapshotConsoleScene (2, "5.10");
+            auto link = live.getSnapshotLink(); link.channel = 2; link.firstSnapshot = 5; live.setSnapshotLink (link);
+            auto dflt = live.getScopeFor (-1);
+            dflt.rackBypass = false; live.setScopeFor (-1, dflt);
+        });
+
+        juce::Timer::callAfterDelay (6500, [&m, &e, &live]
+        {
+            juce::String list;
+            for (auto& s : e.getSnapshots()) list << s.number << ":" << s.name << " ";
+            std::cerr << "RSNAP engine now: " << list << std::endl;
+            std::cerr << "RSNAP 3 bpm " << e.getScopeFor (3).bpm << " (expect 0), kick in 3 " << e.isSlotInScopeFor (3, 1, 0) << " (expect 1), 2 linked to '"
+                      << e.getSnapshotConsoleScene (2) << "', MIDI ch " << m.midi->getSnapshotLink().channel << " first " << m.midi->getSnapshotLink().firstSnapshot
+                      << ", new snapshots recall rack bypass " << e.getScopeFor (-1).rackBypass << " (expect 0)" << std::endl;
+            juce::String seen;
+            for (auto& s : live.getSnapshots()) seen << s.number << ":" << s.name << " ";
+            std::cerr << "RSNAP the copy sees: " << seen << std::endl;
+        });
+    }
+
     static void pump (RackEngine& e, juce::AudioBuffer<float>& in, juce::AudioBuffer<float>& out)
     {
         e.previewProcess (in, out);
@@ -306,6 +405,28 @@ struct PreviewHooks
             std::cerr << "NET missing: " << m.webRemote.getStatusText() << " listening " << m.webRemote.isListening() << std::endl;
             m.webRemote.setNetwork ({}, {});
         }
+        if (open == "remotesnapshots")
+            juce::Timer::callAfterDelay (600, [&m]
+            {
+                auto& e = m.engine;
+                m.storeScene (1, "Walk-in");
+                e.getPlugin (0, 1)->getParameters()[0]->setValueNotifyingHost (0.3f);
+                m.storeScene (2, "Worship Set");
+                m.storeScene (3, "Message");
+                m.storeScene (10, "Baptism");
+                e.setSlotInScopeFor (3, 1, 0, false);
+                e.setSlotInScopeFor (3, 2, 0, false);
+                e.setSnapshotConsoleScene (10, "4.10");
+                MidiControl::SnapshotLink link;
+                link.follow = true; link.channel = 1; link.firstSnapshot = 1;
+                m.midi->setSnapshotLink (link);
+                m.recallScene (1);
+                e.getPlugin (0, 1)->getParameters()[0]->setValueNotifyingHost (0.62f);
+                e.setSlotBypassed (2, 1, true);
+                e.setRackBypassed (3, true);
+                openRemoteSnapshots (m);
+            });
+
         if (open == "snapshots" || open == "snapshotspick")
             juce::Timer::callAfterDelay (600, [&m, open]
             {
@@ -735,6 +856,35 @@ struct PreviewHooks
                     std::cerr << "DM7 note: " << m.consoleNote << " | status " << m.consoles[0]->getStatusText() << std::endl;
                     for (auto& l : m.consoles[0]->getLog())
                         std::cerr << "DM7 log: " << l << std::endl;
+                });
+            });
+
+        if (open == "cuefollow")
+            juce::Timer::callAfterDelay (600, [&m]
+            {
+                // Racks on console channels 4 and 12; a fake CL5 cues them
+                auto c2 = m.engine.getRackConfig (2); c2.consoleChannel = 4; m.engine.setRackConfig (2, c2);
+                auto c5 = m.engine.getRackConfig (5); c5.consoleChannel = 12; m.engine.setRackConfig (5, c5);
+                m.select (0, 0);
+                ConsoleLink::Settings s;
+                s.type = ConsoleLink::Type::yamahaRcp;
+                s.address = "127.0.0.1";
+                s.recallScenes = true;
+                s.followSelection = true;
+                m.consoles[0]->setSettings (s);
+                for (int t : { 2500, 3500, 4500, 5500 })
+                    juce::Timer::callAfterDelay (t, [&m, t]
+                    {
+                        std::cerr << "CUE at " << t << " ms: selected rack " << m.selectedRack << " (" << m.engine.getRackConfig (m.selectedRack).name << ")" << std::endl;
+                        if (t == 4500)
+                        {
+                            auto st = m.consoles[0]->getSettings(); st.followSelection = false; m.consoles[0]->setSettings (st);
+                        }
+                    });
+                juce::Timer::callAfterDelay (6000, [&m]
+                {
+                    for (auto& l : m.consoles[0]->getLog())
+                        std::cerr << "CUE log: " << l << std::endl;
                 });
             });
 

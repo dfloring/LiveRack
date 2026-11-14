@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/banner.png" alt="LiveRack: live audio plugin host for Mac" width="100%"></p>
 
-**LiveRack** hosts racks of VST3 and Audio Unit plugins for live mixing, in the spirit of Waves SuperRack and Fourier transform.engine. It runs on a Mac with Apple silicon, talks to your console over Dante or the Waves SoundGrid Driver, follows scene recalls from Yamaha CL/QL/DM7 and Behringer X32 consoles (and channel selection from the X32), and can be driven from a Stream Deck through Bitfocus Companion.
+**LiveRack** hosts racks of VST3 and Audio Unit plugins for live mixing, in the spirit of Waves SuperRack and Fourier transform.engine. It runs on a Mac with Apple silicon, talks to your console over Dante or the Waves SoundGrid Driver, follows scene recalls and channel selection from Yamaha CL/QL/DM7 (by CUE) and Behringer X32 consoles, and can be driven from a Stream Deck through Bitfocus Companion.
 
 <p align="center"><img src="docs/screenshot-main.png" alt="LiveRack main window" width="100%"></p>
 
@@ -9,7 +9,7 @@
 - **Several audio drivers at once** (Dante Virtual Soundcard, SoundGrid, any CoreAudio device), each on its own audio thread
 - **Console-style routing matrix** with automatic output patching
 - **Latency groups A–H** keep related inputs sample-aligned
-- **Console Link:** follows scene recalls (Yamaha RCP, X32 scenes/snippets/cues) and X32 channel selection
+- **Console Link:** follows scene recalls (Yamaha RCP, X32 scenes/snippets/cues) and channel selection (X32 SEL, Yamaha CUE)
 - **Snapshots with scope** down to individual plugins, Recall Safe racks, in-place recall with no audio gap
 - **Custom pages, Hot Plugins, User Keys,** keyboard shortcuts, MIDI controllers with MIDI Learn, tap tempo
 - **iPad / web remote:** run racks and every plugin parameter from Safari on an iPad, including **the plugin's own window, live** (Mac)
@@ -27,7 +27,7 @@ Get the latest build from [Releases](../../releases): the Mac app (Apple silicon
 - **Mac:** unzip, then right-click `LiveRack.app` > **Open** the first time (it isn't notarised).
 - **Windows:** unzip and run `LiveRack.exe`. If Windows warns about an unknown publisher: **More info > Run anyway**. Pick your ASIO driver (Dante Virtual Soundcard, SoundGrid) in Devices > driver Settings.
 
-# User guide (v0.22)
+# User guide (v0.23)
 
 Any number of independent racks of VST3/AU plugins on one or more audio drivers at once (Dante Virtual Soundcard, a Dante interface, the Waves SoundGrid Driver). Everything lives in one **show file** (`.liverack`) with its snapshots inside it, and the open show comes back automatically on launch.
 
@@ -92,7 +92,7 @@ The web remote's server also speaks a fuller protocol for apps that control Live
 - Commands, besides everything the web remote already does: `rackStep` (dir), `sceneStore` (number, name, and optionally `slots` [[rack, slot]…] / `racks` [rack…] to store over only those), `sceneRename` / `sceneDelete` / `sceneDuplicate` (to) / `sceneRenumber` (to), `sceneScope` (number; rack, slot, in; and the four switches), `midiSnapshots` (follow, input, channel, first, send, output, outChannel), `hot` (rack, slot, on), `latencyGroup`, `isolate` (rack, slot, on), `server` (multiCore, startAtLogin, restartAfterCrash), `slotDrop` (rack, slot, toRack, to, copy: a plugin dragged within a rack or to another one), `addPlugin` with `id` (an exact plugin) as well as `key` (a library family), `rackConfig` with `colour` (0–7, -1 = automatic), and the audio drivers: `driverSet` (driver, type, device, rate, buffer), `driverAdd`, `driverRemove`. `get devices` lists each driver's device types, devices, sample rates and buffer sizes.
 - **Finding servers:** while the web remote is on, LiveRack announces itself every 2 s with a UDP broadcast on port 47810 (`{"liverack":1, "name", "port", "version"}`), so clients can list the LiveRack computers on the network by name.
 
-The iPad / web remote page now uses this connection too, so changes show up straight away; it falls back to polling where WebSockets aren't available. LiveRack's own rack strips and plugin panel now read the show the same way (in Native, straight from this computer's engine), the first step toward LiveRack Client.
+The iPad / web remote page now uses this connection too, so changes show up straight away; it falls back to polling where WebSockets aren't available. LiveRack's own rack strips, plugin panel and Snapshots screen now read the show the same way (in Native, straight from this computer's engine), on the way to LiveRack Client. The state also gives each rack's and plugin's `id`; `sceneScope` takes number -1 for the scope new snapshots start with.
 
 ## Routing
 
@@ -148,7 +148,7 @@ The plugin panel (in **Rack**, or the rack window) shows the selected rack: its 
 - **Yamaha DM7:** the same protocol and port, using the For Mixer Control IP. Pick scene list A, or B for the second side in Split mode. Scene 4.00 recalls snapshot 4. A point scene such as 4.10 recalls snapshot 4 too, unless a snapshot is linked to it: pick the snapshot on the Snapshots screen, **Console scene…**, and type 4.10 (one snapshot per scene; Duplicate doesn't copy the link). (Not yet tested on a real DM7: the console link log shows what it sends.)
 - **Behringer X32:** OSC on UDP port 10023. Choose whether LiveRack follows **Scenes, Snippets or Cues**, press **Learn**, then recall one on the X32.
 
-Workflow: set up racks, then **STORE** a snapshot with the console's scene number. When the console recalls scene 12, LiveRack recalls snapshot 12. Give racks a console channel (**CH** on the strip) so selecting that channel on the console selects the rack (X32 for now: Yamaha consoles don't report channel selection to LiveRack yet).
+Workflow: set up racks, then **STORE** a snapshot with the console's scene number. When the console recalls scene 12, LiveRack recalls snapshot 12. Give racks a console channel (**CH** on the strip) so selecting that channel on the console selects the rack. Yamaha consoles don't report SEL to LiveRack, so on a CL/QL/DM7 pressing **CUE** on an input channel selects its rack instead; switch **Follow CUE** off on the console's card if you use CUE for listening and don't want racks to follow. The console log (Settings) shows everything the console sends.
 
 ## MIDI controllers
 

@@ -532,6 +532,7 @@ MainComponent::MainComponent()
     pageTabs.onPageMenu = [this] (int p) { showPageMenu (p); };
 
     midi = std::make_unique<MidiControl> (engine, *this);
+    live.setMidi (midi.get());
     midi->onChanged = [this] { statusBar->repaint(); };
     keysBar.onMidiLearn = [this] (int key) { midi->learnAction (keysBar.getKey (key)); };
     keysBar.onSetShortcut = [this] (int key)
@@ -646,6 +647,7 @@ MainComponent::~MainComponent()
     sceneDialog.reset();
     pickerOverlay.reset();
     closeAllEditors(); // editors must die before their plugins
+    live.setMidi (nullptr);
     midi.reset();
 
     storeWindowLayout(); // the engine keeps the session as it closes
@@ -2071,7 +2073,7 @@ void MainComponent::showScope()
 
     juce::Component::SafePointer<MainComponent> safe (this);
 
-    SnapshotsPanel::Host h { engine, *midi,
+    SnapshotsPanel::Host h { live,
         [safe] { return safe != nullptr ? safe->currentScene : -1; },
         [safe] (int n) { if (safe != nullptr) safe->recallScene (n); },
         [safe] (int n, const juce::String& name, const SnapshotStoreFilter& filter) { if (safe != nullptr) safe->storeScene (n, name, filter); },
@@ -3101,6 +3103,7 @@ juce::String MainComponent::buildWebState (const juce::String& query)
         ro->setProperty ("name", cfg.name);
         ro->setProperty ("colour", "#" + RackStripsView::colourFor (engine, i).toDisplayString (false));
         ro->setProperty ("colourIndex", cfg.colourIndex);
+        ro->setProperty ("id", cfg.id);
         ro->setProperty ("bypass", engine.isRackBypassed (i));
         ro->setProperty ("safe", cfg.recallSafe);
         ro->setProperty ("format", cfg.formatName());
@@ -3128,6 +3131,7 @@ juce::String MainComponent::buildWebState (const juce::String& query)
             so->setProperty ("name", p != nullptr ? p->getName() : juce::String ("?"));
             so->setProperty ("bypass", engine.isSlotBypassed (i, s));
             so->setProperty ("sp", s == point);
+            so->setProperty ("id", engine.getSlotId (i, s));
             so->setProperty ("key", PluginLibrary::familyKey (engine.getSlotDescription (i, s)));
             slots.add (slot);
         }
@@ -3597,7 +3601,7 @@ bool MainComponent::handleServerCommand (const juce::String& cmd, const juce::va
         consoleNote = engine.renumberSnapshot (from, to) ? "Snapshot " + juce::String (from) + " is now " + juce::String (to)
                                                          : "Couldn't renumber: snapshot " + juce::String (to) + " exists";
     }
-    else if (cmd == "sceneScope" && engine.getSnapshotInfo ((int) c["number"]) != nullptr)
+    else if (cmd == "sceneScope" && ((int) c["number"] == -1 || engine.getSnapshotInfo ((int) c["number"]) != nullptr))
     {
         const int number = (int) c["number"];
         if (c.hasProperty ("rack") && c.hasProperty ("slot"))

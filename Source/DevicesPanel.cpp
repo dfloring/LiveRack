@@ -402,6 +402,13 @@ public:
     {
         recallPill.setToggleState (link().getSettings().recallScenes, juce::dontSendNotification);
         followPill.setToggleState (link().getSettings().followSelection, juce::dontSendNotification);
+
+        // Yamaha consoles report CUE presses, not SEL: their racks follow the cued channel
+        const auto type = link().getSettings().type;
+        const bool yamaha = type == ConsoleLink::Type::yamahaRcp || type == ConsoleLink::Type::yamahaDm7;
+        followPill.setButtonText (yamaha ? "Follow CUE" : "Follow selection");
+        followPill.setTooltip (yamaha ? "Pressing CUE on an input channel selects the rack with that console channel (the console doesn't report SEL)"
+                                      : "Selecting a channel on the console selects the rack with that console channel");
     }
 
     void mouseDown (const juce::MouseEvent& e) override

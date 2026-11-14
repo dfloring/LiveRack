@@ -210,6 +210,7 @@ bool RemoteConnection::connectAndRun()
         return false;
 
     connected = true;
+    sendQuery();   // a snapshot being watched, again after reconnecting
     auto lastPing = juce::Time::getMillisecondCounter();
     juce::MemoryBlock message;
 
@@ -285,6 +286,17 @@ void RemoteConnection::received (const juce::String& text)
     }
 }
 
+// What the state includes besides the basics: the live extras, and one snapshot in detail
+void RemoteConnection::sendQuery()
+{
+    juce::String q ("live=1");
+    if (const int n = watched.load(); n != std::numeric_limits<int>::min())
+        q << "&snapshot=" << n;
+
+    const juce::ScopedLock sl (queueLock);
+    outgoing.add ("{\"t\":\"query\",\"q\":\"" + q + "\"}");
+}
+
 void RemoteConnection::sendCommand (const juce::var& command)
 {
     auto copy = command.clone();
@@ -324,6 +336,7 @@ RackConfig RemoteConnection::getRackConfig (int rack)
     cfg.consoleChannel = (int) r["console"];
     cfg.recallSafe = (bool) r["safe"];
     cfg.colourIndex = r.hasProperty ("colourIndex") ? (int) r["colourIndex"] : -1;
+    cfg.id = (int) r["id"];
     cfg.latencyGroup = (int) rackInfo (rack)["group"];
     return cfg;
 }
@@ -338,6 +351,7 @@ LiveSlot RemoteConnection::getSlot (int rack, int slot)
     if (v.isObject())
     {
         s.exists = true;
+        s.id = (int) v["id"];
         s.name = v["name"].toString();
         s.key = v["key"].toString();
         s.bypassed = (bool) v["bypass"];
@@ -442,4 +456,175 @@ void RemoteConnection::setSlotBypassed (int rack, int slot, bool b)
     c.getDynamicObject()->setProperty ("slot", slot);
     c.getDynamicObject()->setProperty ("value", b ? 1 : 0);
     sendCommand (c);
+}
+
+//==============================================================================
+// Snapshots
+namespace
+{
+juce::var make (const char* name, std::initializer_list<std::pair<const char*, juce::var>> props)
+{
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("cmd", name);
+    for (auto& p : props)
+        o->setProperty (p.first, p.second);
+    return juce::var (o);
+}
+}
+
+std::vector<LiveConnection::Snapshot> RemoteConnection::getSnapshots()
+{
+    std::vector<Snapshot> list;
+    if (auto* a = state["snapshots"].getArray())
+        for (auto& v : *a)
+        {
+            Snapshot s;
+            s.number = (int) v["number"];
+            s.name = v["name"].toString();
+            if (const auto stored = v["stored"].toString(); stored.isNotEmpty())
+                s.stored = juce::Time::fromISO8601 (stored);
+            s.consoleScene = v["consoleScene"].toString();
+            s.midi = v["midi"].toString();
+            list.push_back (s);
+        }
+    return list;
+}
+
+void RemoteConnection::watchSnapshot (int number)
+{
+    if (watched.exchange (number) != number)
+        sendQuery();
+}
+
+juce::var RemoteConnection::watchedSnapshot (int number) const
+{
+    const auto v = state["snapshot"];
+    return v.isObject() && (int) v["number"] == number ? v : juce::var();
+}
+
+SnapshotScope RemoteConnection::getScopeFor (int number)
+{
+    SnapshotScope sc;
+    const auto v = watchedSnapshot (number)["scope"];
+    if (v.isObject())
+    {
+        sc.pluginSettings = (bool) v["pluginSettings"];
+        sc.pluginBypass = (bool) v["pluginBypass"];
+        sc.rackBypass = (bool) v["rackBypass"];
+        sc.bpm = (bool) v["bpm"];
+    }
+    return sc;
+}
+
+bool RemoteConnection::isSlotInScopeFor (int number, int rack, int slot)
+{
+    return (int) at (at (watchedSnapshot (number)["inScope"], rack), slot) == 1;
+}
+
+bool RemoteConnection::snapshotHasSlot (int number, int rack, int slot)
+{
+    const auto v = at (at (watchedSnapshot (number)["inScope"], rack), slot);
+    return ! v.isVoid() && (int) v != -1;
+}
+
+std::vector<SnapshotDifference> RemoteConnection::differencesFromNow (int number)
+{
+    std::vector<SnapshotDifference> list;
+    if (auto* a = watchedSnapshot (number)["differences"].getArray())
+        for (auto& v : *a)
+        {
+            SnapshotDifference d;
+            d.rack = (int) v["rack"];
+            d.slot = (int) v["slot"];
+            d.changedSettings = (int) v["settings"];
+            d.bypassDiffers = (bool) v["bypass"];
+            if (auto* details = v["details"].getArray())
+                for (auto& t : *details)
+                    d.details.add (t.toString());
+            list.push_back (d);
+        }
+    return list;
+}
+
+void RemoteConnection::setScopeFor (int number, const SnapshotScope& sc)
+{
+    sendCommand (make ("sceneScope", { { "number", number }, { "pluginSettings", sc.pluginSettings }, { "pluginBypass", sc.pluginBypass },
+                                       { "rackBypass", sc.rackBypass }, { "bpm", sc.bpm } }));
+}
+
+void RemoteConnection::setSlotInScopeFor (int number, int rack, int slot, bool in)
+{
+    sendCommand (make ("sceneScope", { { "number", number }, { "rack", rack }, { "slot", slot }, { "in", in } }));
+}
+
+void RemoteConnection::renameSnapshot (int number, const juce::String& name)
+{
+    sendCommand (make ("sceneRename", { { "number", number }, { "name", name } }));
+}
+
+void RemoteConnection::deleteSnapshot (int number)
+{
+    sendCommand (make ("sceneDelete", { { "number", number } }));
+}
+
+bool RemoteConnection::duplicateSnapshot (int from, int to)
+{
+    if (hasSnapshot (to))
+        return false;
+    sendCommand (make ("sceneDuplicate", { { "number", from }, { "to", to } }));
+    return true;
+}
+
+bool RemoteConnection::renumberSnapshot (int from, int to)
+{
+    if (hasSnapshot (to))
+        return false;
+    sendCommand (make ("sceneRenumber", { { "number", from }, { "to", to } }));
+    return true;
+}
+
+void RemoteConnection::setSnapshotConsoleScene (int number, const juce::String& scene)
+{
+    sendCommand (make ("sceneLink", { { "number", number }, { "scene", scene } }));
+}
+
+MidiControl::SnapshotLink RemoteConnection::getSnapshotLink()
+{
+    MidiControl::SnapshotLink link;
+    const auto v = state["midiSnapshots"];
+    if (v.isObject())
+    {
+        link.follow = (bool) v["follow"];
+        link.input = v["input"].toString();
+        link.channel = (int) v["channel"];
+        link.firstSnapshot = (int) v["first"];
+        link.send = (bool) v["send"];
+        link.output = v["output"].toString();
+        link.outChannel = (int) v["outChannel"];
+    }
+    return link;
+}
+
+void RemoteConnection::setSnapshotLink (const MidiControl::SnapshotLink& l)
+{
+    sendCommand (make ("midiSnapshots", { { "follow", l.follow }, { "input", l.input }, { "channel", l.channel }, { "first", l.firstSnapshot },
+                                          { "send", l.send }, { "output", l.output }, { "outChannel", l.outChannel } }));
+}
+
+juce::StringArray RemoteConnection::getMidiInputNames()
+{
+    juce::StringArray names;
+    if (auto* a = state["midiSnapshots"]["inputs"].getArray())
+        for (auto& n : *a)
+            names.add (n.toString());
+    return names;
+}
+
+juce::StringArray RemoteConnection::getMidiOutputNames()
+{
+    juce::StringArray names;
+    if (auto* a = state["midiSnapshots"]["outputs"].getArray())
+        for (auto& n : *a)
+            names.add (n.toString());
+    return names;
 }

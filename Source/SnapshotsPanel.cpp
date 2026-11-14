@@ -87,8 +87,8 @@ public:
             if (owner.host.consoleSceneFor != nullptr)
                 if (auto c = owner.host.consoleSceneFor (s.number); c.isNotEmpty())
                     triggers.add (c);
-            if (auto m = owner.host.midi.describeTriggerFor (s.number); m.isNotEmpty())
-                triggers.add (m);
+            if (s.midi.isNotEmpty())
+                triggers.add (s.midi);
 
             auto text = r;
             auto top = text.removeFromTop (text.getHeight() / 2 + (triggers.isEmpty() ? text.getHeight() / 2 : 2));
@@ -170,8 +170,8 @@ public:
             int x = 14 + nameW, lineY = y + padY;
             for (int s = 0; s < engine.getNumSlots (r); ++s)
             {
-                auto* p = engine.getPlugin (r, s);
-                const auto label = p != nullptr ? p->getName() : juce::String ("?");
+                const auto p = engine.getSlot (r, s);
+                const auto label = p.exists ? p.name : juce::String ("?");
                 const int w = juce::jlimit (90, 240, juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (12.5f, juce::Font::bold), label) + 40);
                 if (x + w > width - 14 && x > 14 + nameW)
                 {
@@ -230,7 +230,7 @@ public:
             const bool safe = engine.getRackConfig (c.rack).recallSafe;
             const bool absent = ! engine.snapshotHasSlot (target, c.rack, c.slot);
             const bool in = ! safe && ! absent && engine.isSlotInScopeFor (target, c.rack, c.slot);
-            const bool picked = owner.picking && owner.pickedSlots.count (engine.getSlotId (c.rack, c.slot)) > 0;
+            const bool picked = owner.picking && owner.pickedSlots.count (engine.getSlot (c.rack, c.slot).id) > 0;
             auto b = c.bounds.toFloat();
 
             if (owner.picking)
@@ -258,7 +258,7 @@ public:
                 g.fillPath (dashed);
             }
 
-            auto* p = engine.getPlugin (c.rack, c.slot);
+            const auto p = engine.getSlot (c.rack, c.slot);
             auto label = c.bounds.reduced (12, 0);
             const auto mark = owner.picking ? (picked ? juce::String::fromUTF8 ("\xe2\x9c\x93") : juce::String())
                                             : (in ? juce::String::fromUTF8 ("\xe2\x97\x8f") : juce::String::fromUTF8 ("\xe2\x97\x8b"));
@@ -266,7 +266,7 @@ public:
             g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
             if (mark.isNotEmpty())
                 g.drawText (mark, label.removeFromLeft (14), juce::Justification::centredLeft);
-            g.drawFittedText ((p != nullptr ? p->getName() : juce::String ("?")) + (absent ? "  (not stored)" : juce::String()),
+            g.drawFittedText ((p.exists ? p.name : juce::String ("?")) + (absent ? "  (not stored)" : juce::String()),
                               label, juce::Justification::centredLeft, 1, 0.75f);
         }
     }
@@ -285,7 +285,7 @@ public:
 
                 if (owner.picking)
                 {
-                    const int id = engine.getSlotId (c.rack, c.slot);
+                    const int id = engine.getSlot (c.rack, c.slot).id;
                     if (! owner.pickedSlots.erase (id))
                         owner.pickedSlots.insert (id);
                     owner.resized(); // the bar's count
@@ -312,7 +312,7 @@ public:
                     if (all) owner.pickedRacks.erase (rackId); else owner.pickedRacks.insert (rackId);
                     for (int s = 0; s < engine.getNumSlots (row.rack); ++s)
                     {
-                        const int id = engine.getSlotId (row.rack, s);
+                        const int id = engine.getSlot (row.rack, s).id;
                         if (all) owner.pickedSlots.erase (id); else owner.pickedSlots.insert (id);
                     }
                     owner.resized();
@@ -430,8 +430,8 @@ public:
             g.drawText (rackName, line.removeFromLeft (rw), juce::Justification::centredLeft, true);
             g.setColour (Theme::textDim);
             g.setFont (juce::FontOptions (13.0f));
-            auto* p = d.slot >= 0 ? engine.getPlugin (d.rack, d.slot) : nullptr;
-            g.drawText (p != nullptr ? p->getName() : juce::String ("Rack"), line, juce::Justification::centredLeft, true);
+            const auto p = d.slot >= 0 ? engine.getSlot (d.rack, d.slot) : LiveSlot();
+            g.drawText (p.exists ? p.name : juce::String ("Rack"), line, juce::Justification::centredLeft, true);
 
             g.setFont (juce::FontOptions (11.5f));
             for (auto& detail : d.details)
@@ -519,7 +519,7 @@ SnapshotsPanel::SnapshotsPanel (Host h) : host (std::move (h)), engine (host.eng
     auto rename = [this]
     {
         if (hasSelection())
-            if (auto* info = engine.getSnapshotInfo (selected); info != nullptr && info->name != nameEdit.getText().trim())
+            if (engine.hasSnapshot (selected) && engine.getSnapshotName (selected) != nameEdit.getText().trim())
                 engine.renameSnapshot (selected, nameEdit.getText());
     };
     nameEdit.onReturnKey = rename;
@@ -601,7 +601,7 @@ SnapshotsPanel::SnapshotsPanel (Host h) : host (std::move (h)), engine (host.eng
     setSize (1340, 700);
 
     const int current = host.currentSnapshot != nullptr ? host.currentSnapshot() : -1;
-    selected = engine.getSnapshotInfo (current) != nullptr ? current
+    selected = engine.hasSnapshot (current) ? current
              : ! engine.getSnapshots().empty() ? engine.getSnapshots().front().number : -1;
     refresh();
     startTimer (1000);
@@ -611,7 +611,7 @@ SnapshotsPanel::~SnapshotsPanel() = default;
 
 bool SnapshotsPanel::hasSelection() const
 {
-    return selected >= 0 && engine.getSnapshotInfo (selected) != nullptr;
+    return selected >= 0 && engine.hasSnapshot (selected);
 }
 
 void SnapshotsPanel::select (int number)
@@ -625,10 +625,11 @@ void SnapshotsPanel::select (int number)
 
 void SnapshotsPanel::refresh()
 {
-    if (selected >= 0 && engine.getSnapshotInfo (selected) == nullptr)
+    if (selected >= 0 && ! engine.hasSnapshot (selected))
         selected = engine.getSnapshots().empty() ? -1 : engine.getSnapshots().front().number;
+    engine.watchSnapshot (selected);   // a server sends this one's details
 
-    if (newNumber.getText().isEmpty() || engine.getSnapshotInfo (newNumber.getText().getIntValue()) != nullptr)
+    if (newNumber.getText().isEmpty() || engine.hasSnapshot (newNumber.getText().getIntValue()))
     {
         int highest = 0;
         for (auto& s : engine.getSnapshots())
@@ -675,10 +676,8 @@ void SnapshotsPanel::updateDifferences()
 void SnapshotsPanel::updateHeader()
 {
     const bool has = hasSelection();
-    auto* info = has ? engine.getSnapshotInfo (selected) : nullptr;
-
     if (! nameEdit.hasKeyboardFocus (true))
-        nameEdit.setText (info != nullptr ? info->name : juce::String(), false);
+        nameEdit.setText (has ? engine.getSnapshotName (selected) : juce::String(), false);
     nameEdit.setEnabled (has);
     for (auto* b : { &recallButton, &storeOverButton, &duplicateButton, &renumberButton, &deleteButton, &consoleSceneButton })
         b->setEnabled (has);
@@ -710,8 +709,9 @@ void SnapshotsPanel::updateHeader()
         if (stored.toMilliseconds() > 0)
             parts.add ("Stored " + stored.toString (true, true, false, true));
         parts.add ("Recalls " + juce::String (in) + " of " + juce::String (total) + " plugins");
-        if (auto m = host.midi.describeTriggerFor (selected); m.isNotEmpty())
-            parts.add ("MIDI: " + m);
+        for (auto& sn : engine.getSnapshots())
+            if (sn.number == selected && sn.midi.isNotEmpty())
+                parts.add ("MIDI: " + sn.midi);
         parts.add ("OSC: /liverack/scene/recall " + juce::String (selected));
     }
     else
@@ -737,18 +737,18 @@ void SnapshotsPanel::updateHeader()
 // Program changes
 void SnapshotsPanel::updateMidiControls()
 {
-    const auto& link = host.midi.getSnapshotLink();
+    const auto link = engine.getSnapshotLink();
 
     pcInput.clear (juce::dontSendNotification);
     pcInput.addItem ("Any MIDI device", 1);
-    auto inputs = host.midi.getInputNames();
+    auto inputs = engine.getMidiInputNames();
     for (int i = 0; i < inputs.size(); ++i)
         pcInput.addItem (inputs[i], i + 2);
     const int inIndex = inputs.indexOf (link.input);
     pcInput.setSelectedId (inIndex >= 0 ? inIndex + 2 : 1, juce::dontSendNotification);
 
     outDevice.clear (juce::dontSendNotification);
-    auto outputs = MidiControl::getOutputNames();
+    auto outputs = engine.getMidiOutputNames();
     if (link.output.isNotEmpty() && ! outputs.contains (link.output))
         outputs.add (link.output); // kept while it's unplugged
     outDevice.setTextWhenNothingSelected ("Choose an output");
@@ -776,7 +776,7 @@ void SnapshotsPanel::applyMidiControls()
     link.send = sendPC.getToggleState();
     link.output = outDevice.getSelectedId() > 0 ? outDevice.getText() : juce::String();
     link.outChannel = juce::jmax (1, outChannel.getSelectedId());
-    host.midi.setSnapshotLink (link);
+    engine.setSnapshotLink (link);
     list->repaint();
     updateHeader();
 }
@@ -800,7 +800,7 @@ void SnapshotsPanel::storeNew()
         safe->select (number);
     };
 
-    if (engine.getSnapshotInfo (number) != nullptr && host.confirm != nullptr)
+    if (engine.hasSnapshot (number) && host.confirm != nullptr)
         host.confirm ("Store over snapshot " + juce::String (number) + "?",
                       "It already exists. Its settings are replaced with the plugins as they are now; what it recalls stays the same.",
                       "Store over", doStore);
@@ -853,7 +853,7 @@ void SnapshotsPanel::storeTicked()
         if (unticked.count (diffKey (d.rack, d.slot)) > 0)
             continue;
         if (d.slot < 0) filter.rackIds.push_back (engine.getRackConfig (d.rack).id);
-        else            filter.slotIds.push_back (engine.getSlotId (d.rack, d.slot));
+        else            filter.slotIds.push_back (engine.getSlot (d.rack, d.slot).id);
     }
 
     if (filter.rackIds.empty() && filter.slotIds.empty())

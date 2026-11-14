@@ -1,6 +1,5 @@
 #pragma once
-#include "RackEngine.h"
-#include "MidiControl.h"
+#include "LiveConnection.h"
 #include <set>
 
 // The Snapshots screen: every snapshot in the show, and for the one picked,
@@ -12,8 +11,7 @@ class SnapshotsPanel : public juce::Component,
 public:
     struct Host
     {
-        RackEngine& engine;
-        MidiControl& midi;
+        LiveConnection& engine;   // the show, here or on a server
         std::function<int()> currentSnapshot;
         std::function<void (int)> recall;
         std::function<void (int, const juce::String&, const SnapshotStoreFilter&)> store;
@@ -52,7 +50,7 @@ private:
     bool hasSelection() const;
 
     Host host;
-    RackEngine& engine;
+    LiveConnection& engine;
     int selected = -1;
 
     // The list

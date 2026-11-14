@@ -47,6 +47,25 @@ public:
     void setRackName (int rack, const juce::String&) override;
     void setSlotBypassed (int rack, int slot, bool) override;
 
+    std::vector<Snapshot> getSnapshots() override;
+    void watchSnapshot (int number) override;
+    SnapshotScope getScopeFor (int number) override;
+    bool isSlotInScopeFor (int number, int rack, int slot) override;
+    bool snapshotHasSlot (int number, int rack, int slot) override;
+    std::vector<SnapshotDifference> differencesFromNow (int number) override;
+    void setScopeFor (int number, const SnapshotScope&) override;
+    void setSlotInScopeFor (int number, int rack, int slot, bool) override;
+    void renameSnapshot (int number, const juce::String&) override;
+    void deleteSnapshot (int number) override;
+    bool duplicateSnapshot (int from, int to) override;
+    bool renumberSnapshot (int from, int to) override;
+    void setSnapshotConsoleScene (int number, const juce::String&) override;
+
+    MidiControl::SnapshotLink getSnapshotLink() override;
+    void setSnapshotLink (const MidiControl::SnapshotLink&) override;
+    juce::StringArray getMidiInputNames() override;
+    juce::StringArray getMidiOutputNames() override;
+
     // Any command of the protocol ({"cmd": ...}), for what has no method yet
     void sendCommand (const juce::var& command);
 
@@ -58,6 +77,8 @@ private:
     bool connectAndRun();
     void received (const juce::String& message);
     bool sendQueued (juce::StreamingSocket&);
+    void sendQuery();
+    juce::var watchedSnapshot (int number) const;   // its details, if they're for that number
 
     juce::var rackState (int rack) const;
     juce::var slotState (int rack, int slot) const;
@@ -74,6 +95,7 @@ private:
 
     juce::CriticalSection queueLock;
     juce::StringArray outgoing;
+    std::atomic<int> watched { std::numeric_limits<int>::min() };   // the snapshot whose details we asked for
 
     std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>> (true);
 

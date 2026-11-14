@@ -1,5 +1,6 @@
 #pragma once
 #include "RackEngine.h"
+#include "MidiControl.h"
 
 // How LiveRack's screens reach the show.
 //
@@ -16,6 +17,7 @@
 struct LiveSlot
 {
     bool exists = false;
+    int id = 0;                 // stays with the plugin when it moves (snapshots, Hot Plugins)
     juce::String name;
     juce::String key;           // plugin family key (library settings such as gain reduction)
     bool bypassed = false;
@@ -71,6 +73,52 @@ public:
     virtual void setRackColour (int rack, int colourIndex) = 0;
     virtual void setRackName (int rack, const juce::String&) = 0;
     virtual void setSlotBypassed (int rack, int slot, bool) = 0;
+
+    //==========================================================================
+    // Snapshots. Number -1 = the scope new snapshots start with.
+    struct Snapshot
+    {
+        int number = 0;
+        juce::String name;
+        juce::Time stored;            // invalid for snapshots from before 0.17
+        juce::String consoleScene;    // linked console scene ("4.10"), empty = by number
+        juce::String midi;            // what triggers it ("Program 3 (ch 1)"), empty = nothing
+    };
+
+    virtual std::vector<Snapshot> getSnapshots() = 0;   // in number order
+    bool hasSnapshot (int number)                 { for (auto& s : getSnapshots()) if (s.number == number) return true; return false; }
+    juce::String getSnapshotName (int number)     { for (auto& s : getSnapshots()) if (s.number == number) return s.name; return {}; }
+    juce::Time getSnapshotStoredTime (int number) { for (auto& s : getSnapshots()) if (s.number == number) return s.stored; return {}; }
+    juce::String getSnapshotConsoleScene (int number) { for (auto& s : getSnapshots()) if (s.number == number) return s.consoleScene; return {}; }
+    int nextFreeSnapshotNumber (int after)
+    {
+        const auto list = getSnapshots();
+        for (int n = juce::jmax (1, after + 1);; ++n)
+            if (std::none_of (list.begin(), list.end(), [n] (const Snapshot& s) { return s.number == n; }))
+                return n;
+    }
+
+    // The details of one snapshot (a server sends them for the snapshot asked
+    // for with watchSnapshot; until then these are empty or defaults)
+    virtual void watchSnapshot (int number) = 0;
+    virtual SnapshotScope getScopeFor (int number) = 0;
+    virtual bool isSlotInScopeFor (int number, int rack, int slot) = 0;
+    virtual bool snapshotHasSlot (int number, int rack, int slot) = 0;
+    virtual std::vector<SnapshotDifference> differencesFromNow (int number) = 0;
+
+    virtual void setScopeFor (int number, const SnapshotScope&) = 0;
+    virtual void setSlotInScopeFor (int number, int rack, int slot, bool) = 0;
+    virtual void renameSnapshot (int number, const juce::String&) = 0;
+    virtual void deleteSnapshot (int number) = 0;
+    virtual bool duplicateSnapshot (int from, int to) = 0;   // false if 'to' is taken
+    virtual bool renumberSnapshot (int from, int to) = 0;
+    virtual void setSnapshotConsoleScene (int number, const juce::String& scene) = 0;
+
+    // MIDI program changes and snapshots (on the computer with the audio)
+    virtual MidiControl::SnapshotLink getSnapshotLink() = 0;
+    virtual void setSnapshotLink (const MidiControl::SnapshotLink&) = 0;
+    virtual juce::StringArray getMidiInputNames() = 0;
+    virtual juce::StringArray getMidiOutputNames() = 0;
 };
 
 //==============================================================================
@@ -81,6 +129,7 @@ class LocalConnection : public LiveConnection
 {
 public:
     explicit LocalConnection (RackEngine& e) : engine (e) {}
+    void setMidi (MidiControl* m) { midi = m; }
 
     RackEngine& getEngine() { return engine; }
 
@@ -106,6 +155,7 @@ public:
         if (auto* p = engine.getPlugin (r, s))
         {
             slot.exists = true;
+            slot.id = engine.getSlotId (r, s);
             slot.name = p->getName();
             slot.bypassed = engine.isSlotBypassed (r, s);
             slot.isolated = engine.isSlotIsolated (r, s);
@@ -129,6 +179,35 @@ public:
     void setRackName (int r, const juce::String& n) override   { engine.setRackName (r, n); }
     void setSlotBypassed (int r, int s, bool b) override       { engine.setSlotBypassed (r, s, b); }
 
+    std::vector<Snapshot> getSnapshots() override
+    {
+        std::vector<Snapshot> list;
+        for (auto& sn : engine.getSnapshots())
+            list.push_back ({ sn.number, sn.name, engine.getSnapshotStoredTime (sn.number), engine.getSnapshotConsoleScene (sn.number),
+                              midi != nullptr ? midi->describeTriggerFor (sn.number) : juce::String() });
+        return list;
+    }
+
+    void watchSnapshot (int) override {}
+    SnapshotScope getScopeFor (int n) override                          { return engine.getScopeFor (n); }
+    bool isSlotInScopeFor (int n, int r, int s) override                { return engine.isSlotInScopeFor (n, r, s); }
+    bool snapshotHasSlot (int n, int r, int s) override                 { return engine.snapshotHasSlot (n, r, s); }
+    std::vector<SnapshotDifference> differencesFromNow (int n) override { return engine.differencesFromNow (n); }
+
+    void setScopeFor (int n, const SnapshotScope& sc) override          { engine.setScopeFor (n, sc); }
+    void setSlotInScopeFor (int n, int r, int s, bool in) override      { engine.setSlotInScopeFor (n, r, s, in); }
+    void renameSnapshot (int n, const juce::String& name) override      { engine.renameSnapshot (n, name); }
+    void deleteSnapshot (int n) override                                { engine.deleteSnapshot (n); }
+    bool duplicateSnapshot (int from, int to) override                  { return engine.duplicateSnapshot (from, to); }
+    bool renumberSnapshot (int from, int to) override                   { return engine.renumberSnapshot (from, to); }
+    void setSnapshotConsoleScene (int n, const juce::String& sc) override { engine.setSnapshotConsoleScene (n, sc); }
+
+    MidiControl::SnapshotLink getSnapshotLink() override         { return midi != nullptr ? midi->getSnapshotLink() : MidiControl::SnapshotLink(); }
+    void setSnapshotLink (const MidiControl::SnapshotLink& l) override { if (midi != nullptr) midi->setSnapshotLink (l); }
+    juce::StringArray getMidiInputNames() override               { return midi != nullptr ? midi->getInputNames() : juce::StringArray(); }
+    juce::StringArray getMidiOutputNames() override              { return MidiControl::getOutputNames(); }
+
 private:
     RackEngine& engine;
+    MidiControl* midi = nullptr;
 };
