@@ -2,6 +2,8 @@
 #include "LiveConnection.h"
 #include "Theme.h"
 
+class RemotePluginView;
+
 // Shows the selected plugin's editor docked under the strips, with a tab for
 // each plugin in the rack, like SuperRack's plugin pane.
 class PluginDock : public juce::Component,
@@ -21,6 +23,9 @@ public:
     std::function<void (int rack, int slot)> onSelectSlot, onPopOut, onRemove, onToggleBypass;
     std::function<void()> onPreferredHeightChanged;
     std::function<void (int delta)> onStepRack;    // previous / next rack
+
+    // LiveRack Client: the plugin's window on the server, as a live picture
+    std::function<std::unique_ptr<RemotePluginView> (int rack, int slot)> createRemoteView;
 
     // Rack view: the panel fills the main window instead of sharing it with the strips
     void setFullView (bool isFull, bool isAvailable);
@@ -50,6 +55,7 @@ public:
 private:
    #ifdef LIVERACK_PREVIEW_HOOKS
     friend struct PreviewHooks;
+    friend struct ClientPreview;
    #endif
     class TabButton;
     int dropIndexAt (juce::Point<int>) const;
@@ -66,6 +72,8 @@ private:
 
     juce::AudioProcessor* shownProcessor = nullptr;
     std::unique_ptr<juce::AudioProcessorEditor> editor;
+    std::unique_ptr<RemotePluginView> remoteView;
+    juce::String remoteViewKey;     // rack:slot:id it shows
     juce::Point<int> naturalSize;   // the editor's own size, before fitting it in
     juce::Point<int> lastFitted;    // the size the panel last asked for
     bool fitting = false, poppedTooBig = false;

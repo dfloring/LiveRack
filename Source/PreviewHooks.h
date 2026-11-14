@@ -14,6 +14,7 @@
 // set up a sample session, feed a test signal through it, and open dialogs
 // for UI screenshots. Never part of the Mac app.
 #include "MainComponent.h"
+#include "AppMode.h"
 
 struct PreviewHooks
 {
@@ -399,7 +400,7 @@ struct PreviewHooks
             : juce::DocumentWindow ("Devices over the network (test)", Theme::background, 0), live ("127.0.0.1", port)
         {
             setUsingNativeTitleBar (true);
-            DevicesPanel::Host h { live, m.engine, *m.midi,
+            DevicesPanel::Host h { live, &m.engine, m.midi.get(),
                 [] (int) {}, [this] (int c) { openConsole (c); }, [] {}, [] { return 0; } };
             panel = new DevicesPanel (std::move (h));
             setContentOwned (panel, false);
@@ -727,6 +728,14 @@ struct PreviewHooks
                                   std::cerr << "STEP wrap " << m.selectedRack << " (expect " << m.engine.getNumRacks() - 1 << ")" << std::endl; m.stepRack (1); }
         if (open == "plugins")  m.showPluginScanner();
         if (open == "remote")   openRemoteWindow (m);
+        if (open == "switchmode")
+        {
+            // Native -> Client -> Native in one window (the logo menu)
+            static int times = 0;
+            std::cerr << "NATIVE up (" << times << ") racks " << m.engine.getNumRacks() << std::endl;
+            if (times++ == 0)
+                juce::Timer::callAfterDelay (2000, [] { if (AppMode::switchTo != nullptr) AppMode::switchTo (true); });
+        }
         if (open == "overview") overviewTest (m);
         if (open == "remoterouting") openRemoteRouting (m);
         if (open == "remotedevices") openRemoteDevices (m);

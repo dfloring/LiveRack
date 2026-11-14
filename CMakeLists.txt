@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(LiveRack VERSION 0.27.1)
+project(LiveRack VERSION 0.28.0)
 if(APPLE)
     enable_language(OBJCXX)
 endif()
@@ -28,7 +28,7 @@ juce_add_gui_app(LiveRack
     ICON_BIG     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/LiveRackIcon.png"
     MICROPHONE_PERMISSION_ENABLED TRUE
     MICROPHONE_PERMISSION_TEXT "LiveRack needs audio input to process your console's channels."
-    PLIST_TO_MERGE "<plist><dict><key>NSLocalNetworkUsageDescription</key><string>LiveRack talks to your mixing console on the local network to follow scene recalls.</string></dict></plist>")
+    PLIST_TO_MERGE "<plist><dict><key>NSLocalNetworkUsageDescription</key><string>LiveRack talks to your mixing console on the local network to follow scene recalls, and to other LiveRack computers (LiveRack Client).</string></dict></plist>")
 
 target_sources(LiveRack PRIVATE
     Source/Main.cpp
@@ -43,6 +43,9 @@ target_sources(LiveRack PRIVATE
     Source/LocalConnection.cpp
     Source/PluginsPanel.cpp
     Source/DriverSettingsPanel.cpp
+    Source/ClientComponent.cpp
+    Source/RemotePluginView.cpp
+    Source/ServerFinder.cpp
     Source/PluginDock.cpp
     Source/PluginLibrary.cpp
     Source/PluginPicker.cpp

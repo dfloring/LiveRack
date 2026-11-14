@@ -15,6 +15,7 @@
 - **iPad / web remote:** run racks and every plugin parameter from Safari on an iPad, including **the plugin's own window, live** (Mac)
 - **OSC remote** and a **Companion module** (`companion-module-liverack-host/`)
 - **Mac and Windows** builds (Windows with ASIO for Dante Virtual Soundcard and SoundGrid)
+- **LiveRack Client:** run the audio on one computer (the server) and the screens on another, over the network
 
 > Status: early and in active development. Test it on your rig before relying on it for a show.
 
@@ -27,7 +28,7 @@ Get the latest build from [Releases](../../releases): the Mac app (Apple silicon
 - **Mac:** unzip, then right-click `LiveRack.app` > **Open** the first time (it isn't notarised).
 - **Windows:** unzip and run `LiveRack.exe`. If Windows warns about an unknown publisher: **More info > Run anyway**. Pick your ASIO driver (Dante Virtual Soundcard, SoundGrid) in Devices > driver Settings.
 
-# User guide (v0.27)
+# User guide (v0.28)
 
 Any number of independent racks of VST3/AU plugins on one or more audio drivers at once (Dante Virtual Soundcard, a Dante interface, the Waves SoundGrid Driver). Everything lives in one **show file** (`.liverack`) with its snapshots inside it, and the open show comes back automatically on launch.
 
@@ -85,14 +86,30 @@ Control it from the iPad / web remote, OSC or Companion as usual.
 
 ### Server protocol (for clients)
 
-The web remote's server also speaks a fuller protocol for apps that control LiveRack over the network (the coming LiveRack Client, Companion, your own scripts). Everything is JSON over one WebSocket at `ws://<computer>:<port>/live`:
+The web remote's server also speaks a fuller protocol for apps that control LiveRack over the network (LiveRack Client, Companion, your own scripts). Everything is JSON over one WebSocket at `ws://<computer>:<port>/live`:
 
 - On connect the server sends `{"t":"hello", "protocol":1, "version":..., "server":<computer name>}`, then `{"t":"state", "data":...}` whenever anything changes (the same JSON as `/state`; ask for `live=1` to get drivers with their status, consoles, snapshots, Hot Plugins, latency, isolation and server settings), and `{"t":"meters", "data":...}` about 20 times a second (rack in / out levels, gain reduction per plugin with `est` marking estimates, each plugin's and rack's processing time, each driver's DSP and longest block). The state also gives the current page's racks in order (`order`), each rack's `colourIndex`, each plugin's library `key`, and each latency group's delay (`groupLatencyMs`).
 - The client sends `{"t":"query", "q":"live=1&view=2:0"}` to choose what the state includes (`view` adds every parameter of one plugin), `{"t":"cmd", ...}` for any command, `{"t":"get", "what":"library"|"shows"|"devices"|"snapshot", "number":n, "id":n}` (answered with a `reply`; `snapshot` gives its differences from now and what it recalls), and `{"t":"ping"}` every few seconds.
 - Commands, besides everything the web remote already does: `rackStep` (dir), `sceneStore` (number, name, and optionally `slots` [[rack, slot]…] / `racks` [rack…] to store over only those), `sceneRename` / `sceneDelete` / `sceneDuplicate` (to) / `sceneRenumber` (to), `sceneScope` (number; rack, slot, in; and the four switches), `midiSnapshots` (follow, input, channel, first, send, output, outChannel), `hot` (rack, slot, on), `latencyGroup`, `isolate` (rack, slot, on), `server` (multiCore, startAtLogin, restartAfterCrash), `slotDrop` (rack, slot, toRack, to, copy: a plugin dragged within a rack or to another one), `addPlugin` with `id` (an exact plugin) as well as `key` (a library family), `rackConfig` with `colour` (0–7, -1 = automatic), and the audio drivers: `driverSet` (driver, type, device, rate, buffer), `driverAdd`, `driverRemove`. `get devices` lists each driver's device types, devices, sample rates and buffer sizes.
 - **Finding servers:** while the web remote is on, LiveRack announces itself every 2 s with a UDP broadcast on port 47810 (`{"liverack":1, "name", "port", "version"}`), so clients can list the LiveRack computers on the network by name.
 
-The iPad / web remote page now uses this connection too, so changes show up straight away; it falls back to polling where WebSockets aren't available. LiveRack's own rack strips, plugin panel, Snapshots screen, Routing matrix, Devices screen (drivers, consoles, remotes, Server mode and Server check), page tabs and Hot Plugins now read the show the same way (in Native, straight from this computer's engine), on the way to LiveRack Client. The state also gives each rack's and plugin's `id`; `sceneScope` takes number -1 for the scope new snapshots start with. Each driver in the state has its `label`, `numIns` / `numOuts` (channels enabled) and `blocks` (the console card slot for each block of 8 channels); `rackConfig` takes -1 in `in` / `out` for unpatched. Live clients also get `consoleLinks` (each console's settings and status), `osc`, `web`, `serverSetup` (start apps) and `serverCheck`; meters carry `consoleAges`, `oscAge` and `webAge`. Commands: `consoleSet`, `consoleAdd`, `consoleRemove`, `consoleLearn`, `oscSet`, `webSet`, `serverFix`, `serverRecheck`, and `server` takes `startApps`. Query `consoleLog=N` adds a console's message log; `get devices` also returns the server's `networks`. Live state also has `pageRacks` (each page's name and rack ids), `hotIds` and `scan` (a plugin scan's progress); commands `pagesSet`, `hotSet`, `scanStart` (`all` to rescan everything), `scanCancel`, `pluginForget`, `failedClear`; `get plugins` returns the scanned plugins and the files that failed to scan.
+The iPad / web remote page now uses this connection too, so changes show up straight away; it falls back to polling where WebSockets aren't available. LiveRack's own rack strips, plugin panel, Snapshots screen, Routing matrix, Devices screen (drivers, consoles, remotes, Server mode and Server check), page tabs and Hot Plugins read the show the same way (in Native, straight from this computer's engine; in LiveRack Client, over this connection). The state also gives each rack's and plugin's `id`; `sceneScope` takes number -1 for the scope new snapshots start with. Each driver in the state has its `label`, `numIns` / `numOuts` (channels enabled) and `blocks` (the console card slot for each block of 8 channels); `rackConfig` takes -1 in `in` / `out` for unpatched. Live clients also get `consoleLinks` (each console's settings and status), `osc`, `web`, `serverSetup` (start apps) and `serverCheck`; meters carry `consoleAges`, `oscAge` and `webAge`. Commands: `consoleSet`, `consoleAdd`, `consoleRemove`, `consoleLearn`, `oscSet`, `webSet`, `serverFix`, `serverRecheck`, and `server` takes `startApps`. Query `consoleLog=N` adds a console's message log; `get devices` also returns the server's `networks`. Live state also has `pageRacks` (each page's name and rack ids), `hotIds` and `scan` (a plugin scan's progress); commands `pagesSet`, `hotSet`, `scanStart` (`all` to rescan everything), `scanCancel`, `pluginForget`, `failedClear`; `get plugins` returns the scanned plugins and the files that failed to scan. For LiveRack Client: `get descriptions` returns every scanned plugin's full description (XML), commands `bpm` (value) and `stereoPoint` (rack, slot), each rack's `consoleIndex` (which console, also accepted by `rackConfig`), and each User Key's `action` ([type, rack, slot id, number]) and `category`. A `get` with an `id` of 100 or more is answered with that id, so a client can match replies to requests.
+
+## LiveRack Client (the screens on another computer)
+
+LiveRack can run the show on one computer (the **server**: the one with the audio interface, Dante or SoundGrid) and show it on another (the **Client**: a MacBook at FOH, say). It's the same app: click the **LiveRack logo** at the top left and choose **Use this computer as a Client**. The audio and plugins on that computer stop (its own show is kept, and comes back when you switch back), and the window becomes the Client.
+
+- **Connecting:** the Client lists the LiveRack servers it hears on the network (the server's web remote must be on: Devices, iPad / web remote), the recent ones, and a box for an address (`192.168.1.20`, or `name:port` if the port isn't 8090). It reconnects to the last server by itself the next time it starts.
+- **The same screens:** Channels, Rack, Devices, Routing, Plugins and Snapshots, Hot Plugins, pages and User Keys work as they do on the server, and every change is made on the server. Several Clients (and the iPad) can be connected at once; each sees the others' changes straight away.
+- **Plugin windows:** in **Rack**, the plugin's window is a live picture of the real window on the server; click, drag, scroll and type in it as usual. A plugin's menus open on the Client. **Pop Out** (or right-click a plugin > Open in its own window) puts it in a window of its own. The picture only streams while it's on screen.
+- **Selection:** each Client has its own selected rack and plugin, so two people can work on different racks. When the console selects a channel (Follow CUE / SEL), the Clients follow it too.
+- **Shows** are opened and saved on the server (the **Show** button lists the shows in its LiveRack Shows folder).
+- **If the server drops out,** the Client says so and keeps trying; the audio carries on there. **Choose another server** goes back to the list.
+- **Back to Native:** the logo menu > **Run shows on this computer**.
+- Use the same LiveRack version on both; the status bar says so if they differ.
+- **Not in the Client yet:** MIDI controllers plugged into the Client, keyboard shortcuts, and assigning User Keys (press them here; assign them on the server for now). They come in the next version.
+
+Testing on one computer: start a second copy with `LiveRack --client` (Windows: `LiveRack.exe --client 127.0.0.1`; Mac: `open -n LiveRack.app --args --client 127.0.0.1`) next to the normal one.
 
 ## Routing
 
@@ -258,11 +275,14 @@ Settings live in `~/Library/Application Support/LiveRack`: `audio-drivers.xml`, 
 - `Source/ConsoleLink*`: console following
 - `Source/ServerMode.*`: start at login and the watcher that restarts LiveRack after a crash
 - `Source/IsolatedPlugin.*`: a plugin in its own helper process (both sides: the stand-in inside the rack and the helper)
+- `Source/LiveConnection.h`, `LocalConnection.cpp`, `RemoteConnection.*`: how the screens reach the show (this computer's engine, or a server)
+- `Source/ClientComponent.*`, `RemotePluginView.*`, `ServerFinder.*`: LiveRack Client (the connect screen, the main window over the network, plugin window pictures, finding servers)
 
 ## Next steps
 
 - Plugin isolation, next stages: the plugin's window inside the panel, MIDI, and making it the default once it has proved itself
-- Split engine and UI over the network for a separate DSP server
+- LiveRack Client: MIDI controllers on the Client, keyboard shortcuts and assigning User Keys
+- Headless polish for a LiveRack server with no screen
 
 ## Licence
 

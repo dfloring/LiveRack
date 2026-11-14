@@ -1,6 +1,7 @@
 #include "PluginDock.h"
 #include "RackStripsView.h"
 #include "Theme.h"
+#include "RemotePluginView.h"
 
 // A plugin tab that can be dragged
 class PluginDock::TabButton : public juce::TextButton
@@ -72,6 +73,9 @@ PluginDock::~PluginDock()
 
 void PluginDock::releaseEditor()
 {
+    remoteView.reset();
+    remoteViewKey.clear();
+
     if (editor != nullptr)
     {
         editor->removeComponentListener (this);
@@ -85,6 +89,8 @@ void PluginDock::releaseEditor()
 int PluginDock::getPreferredHeight() const
 {
     const int chrome = 10 + 32 + 8 + (tabs.isEmpty() ? 0 : 36) + 10;
+    if (remoteView != nullptr)
+        return chrome + (remoteView->getNaturalSize().y > 0 ? remoteView->getNaturalSize().y : 300);
     return chrome + (editor != nullptr ? juce::jmax (editor->getHeight(), naturalSize.y) : 140);
 }
 
@@ -109,6 +115,9 @@ void PluginDock::componentMovedOrResized (juce::Component&, bool, bool wasResize
 // are native views on the Mac, so they can't be scaled or scrolled here.)
 void PluginDock::layoutEditor()
 {
+    if (remoteView != nullptr)
+        remoteView->setBounds (editorHolder.getLocalBounds()); // the picture fits itself in
+
     if (editor == nullptr)
         return;
 
@@ -169,6 +178,11 @@ void PluginDock::show (int newRack, int newSlot)
 
     if (plugin != shownProcessor || ! editorsShown)
         releaseEditor();
+    if (remoteView != nullptr && (plugin != nullptr || ! hasSlot))
+    {
+        remoteView.reset();
+        remoteViewKey.clear();
+    }
 
     if (plugin != tooBig)
         tooBig = nullptr;
@@ -178,6 +192,29 @@ void PluginDock::show (int newRack, int newSlot)
         message = fullViewAvailable && ! fullView
                     ? "This plugin is too big for this panel. Rack (top bar) shows it in the whole window, or Pop Out opens it in its own window."
                     : "This plugin is too big for this panel. Pop Out opens it in its own window, or make the window bigger.";
+    }
+    else if (plugin == nullptr && hasSlot && editorsShown && createRemoteView != nullptr)
+    {
+        // Running on the server: its window as a live picture
+        const auto key = juce::String (rack) + ":" + juce::String (slot) + ":" + juce::String (engine.getSlot (rack, slot).id);
+        if (remoteView == nullptr || key != remoteViewKey)
+        {
+            remoteView = createRemoteView (rack, slot);
+            remoteViewKey = key;
+            if (remoteView != nullptr)
+            {
+                editorHolder.addAndMakeVisible (*remoteView);
+                juce::Component::SafePointer<PluginDock> safe (this);
+                remoteView->onNaturalSizeChanged = [safe]
+                {
+                    if (safe == nullptr) return;
+                    safe->layoutEditor();
+                    if (safe->onPreferredHeightChanged != nullptr)
+                        safe->onPreferredHeightChanged();
+                };
+            }
+        }
+        message.clear();
     }
     else if (plugin == nullptr && hasSlot)
     {

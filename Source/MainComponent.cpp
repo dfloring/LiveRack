@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "AppMode.h"
 #include "IsolatedPlugin.h"
 #include "ServerMode.h"
 #include "ConsoleLinkPanel.h"
@@ -2004,7 +2005,7 @@ void MainComponent::showDevices()
 
     juce::Component::SafePointer<MainComponent> safe (this);
 
-    DevicesPanel::Host host { live, engine, *midi,
+    DevicesPanel::Host host { live, &engine, midi.get(),
         [safe] (int d) { if (safe != nullptr) safe->showDriverSettings (d); },
         [safe] (int c) { if (safe != nullptr) safe->showConsoleSettings (c); },
         [safe] { if (safe != nullptr) safe->showShortcuts(); },
@@ -2523,6 +2524,28 @@ void MainComponent::mouseUp (const juce::MouseEvent& e)
 {
     if (sceneChip.contains (e.getPosition()))
         showSnapshotMenu();
+    else if (juce::Rectangle<int> (0, 0, 150, toolbarHeight).contains (e.getPosition()))
+        showAppMenu();
+}
+
+// The logo: which LiveRack this is, and switching to LiveRack Client
+void MainComponent::showAppMenu()
+{
+    juce::PopupMenu m;
+    m.addSectionHeader ("LiveRack " JUCE_APPLICATION_VERSION_STRING);
+    m.addItem (1, "Use this computer as a Client (connect to a server)...");
+
+    juce::Component::SafePointer<MainComponent> safe (this);
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (juce::Rectangle<int> (0, 0, 150, toolbarHeight))),
+        [safe] (int r)
+        {
+            if (safe == nullptr || r != 1)
+                return;
+            safe->confirm ("Switch to LiveRack Client?",
+                           "LiveRack Client shows and controls a LiveRack server on another computer. The audio and plugins "
+                           "on this computer stop. This show is kept, and opens again when you switch back to Native.",
+                           "Switch", [] { if (AppMode::switchTo != nullptr) AppMode::switchTo (true); });
+        });
 }
 
 juce::String MainComponent::snapshotLabel (int number) const
@@ -3123,6 +3146,7 @@ juce::String MainComponent::buildWebState (const juce::String& query)
         ro->setProperty ("in", juce::Array<juce::var> { cfg.input[0], cfg.input[1] });
         ro->setProperty ("out", juce::Array<juce::var> { cfg.output[0], cfg.output[1] });
         ro->setProperty ("console", cfg.consoleChannel);
+        ro->setProperty ("consoleIndex", cfg.console);   // which console, with more than one
 
         const int point = engine.getStereoPoint (i);
         juce::Array<juce::var> slots;
@@ -3150,6 +3174,9 @@ juce::String MainComponent::buildWebState (const juce::String& query)
         const auto& a = keysBar.getKey (k);
         key.getDynamicObject()->setProperty ("label", a.type == Action::none ? juce::String() : a.describe (engine));
         key.getDynamicObject()->setProperty ("lit", a.type != Action::none && isActionActive (a));
+        // What it does, so LiveRack Client can run it against its own selection
+        key.getDynamicObject()->setProperty ("action", juce::Array<juce::var> { (int) a.type, a.rack, a.slotId, a.number });
+        key.getDynamicObject()->setProperty ("category", a.type == Action::none ? juce::String() : a.category());
         keys.add (key);
     }
     r->setProperty ("keys", keys);
@@ -3702,6 +3729,16 @@ void MainComponent::addWebEditState (juce::DynamicObject& r, const juce::String&
         r.setProperty ("failedPlugins", failed);
     }
 
+    // Every scanned plugin in full, for LiveRack Client's plugin picker
+    if (has ("descriptions"))
+    {
+        juce::Array<juce::var> list;
+        for (auto& d : engine.getKnownPlugins().getTypes())
+            if (auto xml = d.createXml())
+                list.add (xml->toString (juce::XmlElement::TextFormat().singleLine().withoutHeader()));
+        r.setProperty ("descriptions", list);
+    }
+
     if (has ("lib"))
     {
         juce::Array<juce::var> lib;
@@ -3802,6 +3839,17 @@ bool MainComponent::handleServerCommand (const juce::String& cmd, const juce::va
             if (want && ! pinned) engine.pinHot (id);
             if (! want && pinned) engine.unpinHot (id);
         }
+    }
+    else if (cmd == "bpm" && (double) c["value"] > 0.0)
+    {
+        engine.setBpm (juce::jlimit (20.0, 400.0, (double) c["value"]));
+    }
+    else if (cmd == "stereoPoint" && engine.getPlugin (rack, slot) != nullptr && engine.getRackConfig (rack).isMonoToStereo())
+    {
+        dock.releaseEditor();
+        engine.setStereoPoint (rack, slot);
+        fixStereoVersions (rack);
+        refreshAll();
     }
     else if (cmd == "latencyGroup" && juce::isPositiveAndBelow (rack, engine.getNumRacks()))
     {
@@ -3977,6 +4025,8 @@ bool MainComponent::handleWebEditCommand (const juce::String& cmd, const juce::v
         }
         if (c.hasProperty ("console"))
             cfg.consoleChannel = juce::jmax (0, (int) c["console"]);
+        if (c.hasProperty ("consoleIndex"))
+            cfg.console = juce::jmax (0, (int) c["consoleIndex"]);
         if (c.hasProperty ("safe"))
             cfg.recallSafe = (bool) c["safe"];
         if (c.hasProperty ("colour"))

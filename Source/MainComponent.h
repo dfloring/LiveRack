@@ -47,6 +47,7 @@ private:
     using juce::Component::keyPressed;
     bool keyPressed (const juce::KeyPress&, juce::Component*) override;
     void mouseUp (const juce::MouseEvent&) override;
+    void showAppMenu();
     void sendFeedback();
 
     // Selection

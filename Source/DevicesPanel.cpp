@@ -513,7 +513,7 @@ public:
 
         if (kind == midiDevice)
         {
-            for (auto& d : host.midi.getDevices())
+            for (auto& d : host.midi->getDevices())
                 if (d.name == identifier)
                 {
                     title = d.name;
@@ -533,10 +533,10 @@ public:
         }
         else if (kind == mappings)
         {
-            const auto n = (int) host.midi.getMappings().size();
+            const auto n = (int) host.midi->getMappings().size();
             title = "MIDI mappings";
-            sub = host.midi.isLearning() ? "Learning... move a control" : juce::String (n) + (n == 1 ? " mapping: click to review" : " mappings: click to review");
-            light = host.midi.isLearning() ? Theme::amber : Theme::accent.withAlpha (0.5f);
+            sub = host.midi->isLearning() ? "Learning... move a control" : juce::String (n) + (n == 1 ? " mapping: click to review" : " mappings: click to review");
+            light = host.midi->isLearning() ? Theme::amber : Theme::accent.withAlpha (0.5f);
         }
         else if (kind == web)
         {
@@ -602,7 +602,7 @@ public:
             m.addSectionHeader (identifier);
             m.addItem (1, "Remove device (keep its mappings)");
             m.addItem (2, "Remove device and its mappings");
-            auto& midi = host.midi;
+            auto& midi = *host.midi;
             const auto name = identifier;
             m.showMenuAsync (juce::PopupMenu::Options(), [&midi, name] (int r)
             {
@@ -612,7 +612,7 @@ public:
         }
         else if (kind == addMidi)
         {
-            const auto available = host.midi.getDevicesToAdd();
+            const auto available = host.midi->getDevicesToAdd();
             juce::PopupMenu m;
             m.addSectionHeader ("Add a MIDI device");
             for (int i = 0; i < available.size(); ++i)
@@ -620,7 +620,7 @@ public:
             if (available.isEmpty())
                 m.addItem (-1, "No other MIDI devices found. Plug one in and try again.", false);
 
-            auto& midi = host.midi;
+            auto& midi = *host.midi;
             m.showMenuAsync (juce::PopupMenu::Options(), [&midi, available] (int r)
             {
                 if (r > 0 && r <= available.size())
@@ -782,10 +782,10 @@ public:
         }
         else if (kind == mappings)
         {
-            auto& maps = host.midi.getMappings();
+            auto& maps = host.midi->getMappings();
             juce::PopupMenu m;
 
-            if (host.midi.isLearning())
+            if (host.midi->isLearning())
                 m.addItem (9999, "Cancel MIDI Learn");
 
             if (maps.empty())
@@ -795,7 +795,7 @@ public:
             {
                 juce::PopupMenu item;
                 item.addItem (1 + i, "Remove");
-                m.addSubMenu (maps[(size_t) i].describeControl() + "   >   " + maps[(size_t) i].describeTarget (host.engine), item);
+                m.addSubMenu (maps[(size_t) i].describeControl() + "   >   " + maps[(size_t) i].describeTarget (*host.engine), item);
             }
 
             if (! maps.empty())
@@ -804,7 +804,7 @@ public:
                 m.addItem (10000, "Remove all");
             }
 
-            auto& midi = host.midi;
+            auto& midi = *host.midi;
             m.showMenuAsync (juce::PopupMenu::Options(), [&midi] (int r)
             {
                 if (r == 9999)       midi.cancelLearn();
@@ -852,11 +852,14 @@ public:
         for (int c = 0; c < host.live.getNumConsoles(); ++c)
             addAndMakeVisible (consoles.add (new ConsoleCard (host, c)));
 
-        for (auto& d : host.midi.getDevices())
-            addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::midiDevice, d.name)));
-        addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::addMidi)));
-        addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::mappings)));
-        addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::shortcuts)));
+        if (host.midi != nullptr)
+        {
+            for (auto& d : host.midi->getDevices())
+                addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::midiDevice, d.name)));
+            addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::addMidi)));
+            addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::mappings)));
+            addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::shortcuts)));
+        }
         addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::web)));
         addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::osc)));
         addAndMakeVisible (controllers.add (new ControllerCard (host, ControllerCard::serverCheck)));
@@ -908,7 +911,10 @@ public:
         section ("Consoles", "One panel per console. Click a card slot to say what's in it and which driver channels it arrives on.");
         gridOf (consoles, &addConsole, 2, 300);
 
-        section ("Controllers", "MIDI devices you add, keyboard shortcuts and the OSC remote. Lights flash as messages arrive.");
+        if (host.midi != nullptr)
+            section ("Controllers", "MIDI devices you add, keyboard shortcuts and the OSC remote. Lights flash as messages arrive.");
+        else
+            section ("Remote control", "The iPad remote, OSC and Server mode, on the server. Lights flash as messages arrive.");
         gridOf (controllers, nullptr, 4, 76);
 
         return y;
@@ -983,7 +989,7 @@ void DevicesPanel::timerCallback()
     // Devices plugged in or removed
     if ((int) content->drivers.size() != host.live.getNumDrivers()
         || (int) content->consoles.size() != host.live.getNumConsoles()
-        || (int) content->controllers.size() != (int) host.midi.getDevices().size() + 7)
+        || (int) content->controllers.size() != (host.midi != nullptr ? (int) host.midi->getDevices().size() + 7 : 4))
         refresh();
 
     content->update();

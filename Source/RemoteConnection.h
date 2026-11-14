@@ -1,5 +1,6 @@
 #pragma once
 #include "LiveConnection.h"
+#include <map>
 
 // A LiveRack server over the network, through its /live protocol (the same
 // one the iPad remote uses). Keeps a copy of the server's state, updated as
@@ -115,6 +116,15 @@ public:
     // The latest state, as the server sent it
     const juce::var& getState() const { return state; }
 
+    // Asks the server for something ("shows", "descriptions"...); the reply
+    // arrives on the message thread. Nothing comes back if the link drops.
+    void request (const juce::String& what, std::function<void (const juce::var& data)> onReply);
+
+    juce::String getHost() const    { return host; }
+    int getPort() const             { return port; }
+    juce::String getServerVersion() const { return serverVersion; }   // empty until it says hello
+    bool hasEverConnected() const   { return everConnected; }
+
 private:
     void run() override;
     bool connectAndRun();
@@ -133,7 +143,10 @@ private:
 
     // Message thread
     juce::var state, meters, deviceOptions, networks, pluginList;
-    juce::String serverName;
+    juce::String serverName, serverVersion;
+    bool everConnected = false;
+    std::map<int, std::function<void (const juce::var&)>> pendingReplies;
+    int nextRequestId = 100;
     std::atomic<bool> connected { false };
 
     juce::CriticalSection queueLock;
