@@ -673,6 +673,7 @@ void WebRemote::runLive (juce::StreamingSocket& socket, const juce::String& firs
             {
                 const auto what = event["what"].toString();
                 const juce::String q = what == "library" ? "lib=1" : what == "shows" ? "shows=1" : what == "devices" ? "devices=1"
+                                     : what == "plugins" ? "plugins=1"
                                      : what == "snapshot" ? "snapshot=" + juce::String ((int) event["number"]) : "";
                 const auto json = onMessageThread ([this, q] { return buildState != nullptr ? buildState (q) : juce::String ("{}"); });
                 alive = reply (event["id"], what, json);

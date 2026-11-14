@@ -217,8 +217,8 @@ private:
     LocalConnection live { engine };
     RackStripsView strips { live };
     PluginDock dock { live };
-    HotPluginsBar hotBar { engine, *this };
-    PageTabs pageTabs { engine };
+    HotPluginsBar hotBar { live, *this };
+    PageTabs pageTabs { live };
     std::vector<Shortcut> extraShortcuts = Shortcuts::loadExtras();
     UserKeysBar keysBar { engine, *this };
 

@@ -186,3 +186,148 @@ void LocalConnection::recheckServer()
 {
     ServerCheck::refreshSoon();
 }
+
+//==============================================================================
+// Scanning for plugins, on a background thread. The scan itself runs in the
+// scanner process (KnownPluginList's custom scanner), so a plugin that
+// crashes while being scanned doesn't take LiveRack down; it's listed as failed.
+class LocalConnection::ScanJob : private juce::Thread
+{
+public:
+    ScanJob (RackEngine& e, bool all) : juce::Thread ("Plugin scan"), engine (e), rescanAll (all) { startThread(); }
+    ~ScanJob() override { signalThreadShouldExit(); stopThread (30000); }
+
+    LiveScanStatus status() const
+    {
+        const juce::ScopedLock sl (lock);
+        LiveScanStatus s;
+        s.running = isThreadRunning();
+        s.progress = progress;
+        s.current = current;
+        s.message = message;
+        return s;
+    }
+
+    bool isDone() const { return ! isThreadRunning(); }
+    juce::String getMessage() const { const juce::ScopedLock sl (lock); return message; }
+    void cancel() { signalThreadShouldExit(); }
+
+private:
+    void run() override
+    {
+        auto& formats = engine.getFormatManager();
+        auto& list = engine.getKnownPlugins();
+        const int before = list.getNumTypes();
+        juce::StringArray failed;
+        const int numFormats = juce::jmax (1, formats.getNumFormats());
+
+        for (int f = 0; f < formats.getNumFormats() && ! threadShouldExit(); ++f)
+        {
+            auto* format = formats.getFormat (f);
+            juce::PluginDirectoryScanner scanner (list, *format, format->getDefaultLocationsToSearch(), true,
+                                                  engine.getDeadMansPedalFile(), false);
+            juce::String name;
+            for (;;)
+            {
+                if (threadShouldExit())
+                    break;
+                {
+                    const juce::ScopedLock sl (lock);
+                    current = scanner.getNextPluginFileThatWillBeScanned();
+                    progress = ((float) f + juce::jlimit (0.0f, 1.0f, scanner.getProgress())) / (float) numFormats;
+                }
+                if (! scanner.scanNextFile (! rescanAll, name))
+                    break;
+            }
+            failed.addArray (scanner.getFailedFiles());
+        }
+
+        const int added = list.getNumTypes() - before;
+        const juce::ScopedLock sl (lock);
+        progress = 1.0f;
+        current.clear();
+        message = threadShouldExit() ? juce::String ("Scan stopped. ") : juce::String ("Scan finished. ");
+        if (added > 0)        message << added << (added == 1 ? " new plugin" : " new plugins");
+        else if (added < 0)   message << "Plugin list updated";
+        else                  message << "No new plugins";
+        if (! failed.isEmpty())
+            message << ", " << failed.size() << " failed to scan";
+        message << ".";
+    }
+
+    RackEngine& engine;
+    const bool rescanAll;
+    juce::CriticalSection lock;
+    float progress = 0.0f;
+    juce::String current, message;
+};
+
+LocalConnection::LocalConnection (RackEngine& e) : engine (e) {}
+LocalConnection::~LocalConnection() = default;
+
+std::vector<LivePlugin> LocalConnection::getKnownPlugins()
+{
+    std::vector<LivePlugin> list;
+    for (auto& d : engine.getKnownPlugins().getTypes())
+        list.push_back ({ d.name, d.manufacturerName, d.pluginFormatName,
+                          services.categoryFor != nullptr ? services.categoryFor (d) : d.category,
+                          d.createIdentifierString(), d.isInstrument });
+    std::sort (list.begin(), list.end(), [] (const LivePlugin& a, const LivePlugin& b)
+               { return a.name.compareNatural (b.name) < 0; });
+    return list;
+}
+
+juce::StringArray LocalConnection::getFailedPlugins()
+{
+    // What JUCE's own scan screen keeps as failed: files listed as blacklisted
+    juce::StringArray failed;
+    for (auto& f : engine.getKnownPlugins().getBlacklistedFiles())
+        failed.add (f);
+    return failed;
+}
+
+LiveScanStatus LocalConnection::getScanStatus()
+{
+    if (scan == nullptr)
+    {
+        LiveScanStatus s;
+        s.message = lastScanMessage;
+        return s;
+    }
+    auto s = scan->status();
+    if (! s.running)
+    {
+        lastScanMessage = s.message;
+        scan.reset();
+    }
+    return s;
+}
+
+void LocalConnection::startScan (bool rescanAll)
+{
+    if (scan != nullptr && ! scan->isDone())
+        return;
+    scan = std::make_unique<ScanJob> (engine, rescanAll);
+}
+
+void LocalConnection::cancelScan()
+{
+    if (scan != nullptr)
+        scan->cancel();
+}
+
+void LocalConnection::forgetPlugin (const juce::String& identifier)
+{
+    auto& list = engine.getKnownPlugins();
+    for (auto& d : list.getTypes())
+        if (d.createIdentifierString() == identifier)
+        {
+            list.removeType (d);
+            break;
+        }
+}
+
+void LocalConnection::clearFailedPlugins()
+{
+    engine.getKnownPlugins().clearBlacklistedFiles();
+}

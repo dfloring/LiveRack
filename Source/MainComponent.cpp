@@ -542,6 +542,7 @@ MainComponent::MainComponent()
         sv.addConsole = [this] { addConsole(); };
         sv.removeConsole = [this] (int i) { removeConsole (i); };
         sv.consolesChanged = [this] { saveConsoles(); if (devicesPanel != nullptr) devicesPanel->refresh(); };
+        sv.categoryFor = [this] (const juce::PluginDescription& d) { return PluginLibrary::categoryName (library.categoryFor (d)); };
         sv.rackForChannel = [this] (int console, int channel) -> juce::String
         {
             for (int r = 0; r < engine.getNumRacks(); ++r)
@@ -2802,7 +2803,7 @@ void MainComponent::selectRackForChannel (int console, int channel)
 void MainComponent::addPage()
 {
     auto* w = new juce::AlertWindow ("New page", "A page shows just the racks you put on it.", juce::MessageBoxIconType::NoIcon);
-    w->addTextEditor ("name", "Page " + juce::String ((int) engine.getPages().size() + 1), "Name");
+    w->addTextEditor ("name", "Page " + juce::String ((int) live.getPages().size() + 1), "Name");
     if (juce::isPositiveAndBelow (selectedRack, engine.getNumRacks()))
         w->addComboBox ("start", { "Start with " + engine.getRackConfig (selectedRack).name, "Start empty" }, "Racks");
     w->addButton ("Add", 1, juce::KeyPress (juce::KeyPress::returnKey));
@@ -2815,30 +2816,30 @@ void MainComponent::addPage()
         if (safe == nullptr || r != 1)
             return;
 
-        auto pages = safe->engine.getPages();
+        auto pages = safe->live.getPages();
         RackPage p;
         p.name = w->getTextEditorContents ("name").trim();
         if (p.name.isEmpty()) p.name = "Page";
         auto* start = w->getComboBoxComponent ("start");
         if (start != nullptr && start->getSelectedItemIndex() == 0)
-            p.rackIds.push_back (safe->engine.getRackId (rack));
+            p.rackIds.push_back (safe->live.getRackConfig (rack).id);
         pages.push_back (p);
-        safe->engine.setPages (pages);
-        safe->engine.setCurrentPage ((int) pages.size() - 1);
+        safe->live.setPages (pages);
+        safe->live.setCurrentPage ((int) pages.size() - 1);
     }), true);
 }
 
 void MainComponent::showPageMenu (int page)
 {
-    if (! juce::isPositiveAndBelow (page, (int) engine.getPages().size()))
+    if (! juce::isPositiveAndBelow (page, (int) live.getPages().size()))
         return;
 
-    const int count = (int) engine.getPages().size();
+    const int count = (int) live.getPages().size();
     juce::PopupMenu m;
-    m.addSectionHeader (engine.getPages()[(size_t) page].name);
+    m.addSectionHeader (live.getPages()[(size_t) page].name);
     m.addItem (1, "Rename...");
     if (juce::isPositiveAndBelow (selectedRack, engine.getNumRacks()))
-        m.addItem (2, "Add " + engine.getRackConfig (selectedRack).name + " to this page", ! engine.isRackOnPage (selectedRack, page));
+        m.addItem (2, "Add " + engine.getRackConfig (selectedRack).name + " to this page", ! live.isRackOnPage (selectedRack, page));
     m.addItem (3, "Move left", page > 0);
     m.addItem (4, "Move right", page < count - 1);
     m.addSeparator();
@@ -2860,10 +2861,10 @@ void MainComponent::showPageMenu (int page)
             w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, page, w] (int res)
             {
                 if (safe == nullptr || res != 1) return;
-                auto ps = safe->engine.getPages();
+                auto ps = safe->live.getPages();
                 if (juce::isPositiveAndBelow (page, (int) ps.size()) && w->getTextEditorContents ("name").trim().isNotEmpty())
                     ps[(size_t) page].name = w->getTextEditorContents ("name").trim();
-                safe->engine.setPages (ps);
+                safe->live.setPages (ps);
             }), true);
         }
         if (r == 2) e.setRackOnPage (safe->selectedRack, page, true);
@@ -3206,6 +3207,33 @@ juce::String MainComponent::buildWebState (const juce::String& query)
 void MainComponent::addLiveState (juce::DynamicObject& r)
 {
     auto obj = [] { return juce::var (new juce::DynamicObject()); };
+
+    // Pages with their racks, Hot Plugins by id, and a plugin scan
+    {
+        juce::Array<juce::var> pages;
+        for (auto& p : live.getPages())
+        {
+            auto pv = obj();
+            pv.getDynamicObject()->setProperty ("name", p.name);
+            juce::Array<juce::var> ids;
+            for (int id : p.rackIds) ids.add (id);
+            pv.getDynamicObject()->setProperty ("racks", ids);
+            pages.add (pv);
+        }
+        r.setProperty ("pageRacks", pages);
+
+        juce::Array<juce::var> hot;
+        for (int id : live.getHotPlugins()) hot.add (id);
+        r.setProperty ("hotIds", hot);
+
+        const auto sc = live.getScanStatus();
+        auto sv = obj();
+        sv.getDynamicObject()->setProperty ("running", sc.running);
+        sv.getDynamicObject()->setProperty ("progress", std::round (sc.progress * 100.0f) / 100.0f);
+        sv.getDynamicObject()->setProperty ("current", sc.current);
+        sv.getDynamicObject()->setProperty ("message", sc.message);
+        r.setProperty ("scan", sv);
+    }
 
     // Devices: consoles, remotes, server mode and Server check
     {
@@ -3650,6 +3678,29 @@ void MainComponent::addWebEditState (juce::DynamicObject& r, const juce::String&
         r.setProperty ("recent", recent);
     }
 
+    // The full plugin list and failed scans (the Plugins screen)
+    if (has ("plugins"))
+    {
+        juce::Array<juce::var> list;
+        for (auto& p : live.getKnownPlugins())
+        {
+            auto pv = obj();
+            auto* o = pv.getDynamicObject();
+            o->setProperty ("name", p.name);
+            o->setProperty ("maker", p.manufacturer);
+            o->setProperty ("format", p.format);
+            o->setProperty ("category", p.category);
+            o->setProperty ("id", p.identifier);
+            if (p.isInstrument) o->setProperty ("instrument", true);
+            list.add (pv);
+        }
+        r.setProperty ("plugins", list);
+        juce::Array<juce::var> failed;
+        for (auto& f : live.getFailedPlugins())
+            failed.add (f);
+        r.setProperty ("failedPlugins", failed);
+    }
+
     if (has ("lib"))
     {
         juce::Array<juce::var> lib;
@@ -3821,6 +3872,39 @@ bool MainComponent::handleServerCommand (const juce::String& cmd, const juce::va
                     safe->live.setWebSettings (on, port, id, name);
             });
     }
+    else if (cmd == "pagesSet")
+    {
+        std::vector<RackPage> pages;
+        if (auto* list = c["pages"].getArray())
+            for (auto& p : *list)
+            {
+                RackPage page;
+                page.name = p["name"].toString();
+                if (auto* ids = p["racks"].getArray())
+                    for (auto& id : *ids)
+                        page.rackIds.push_back ((int) id);
+                pages.push_back (page);
+            }
+        live.setPages (pages);
+        if (c.hasProperty ("current"))
+            live.setCurrentPage ((int) c["current"]);
+    }
+    else if (cmd == "hotSet")
+    {
+        std::vector<int> ids;
+        if (auto* list = c["ids"].getArray())
+            for (auto& id : *list)
+                ids.push_back ((int) id);
+        live.setHotPlugins (ids);
+    }
+    else if (cmd == "scanStart")
+        live.startScan ((bool) c["all"]);
+    else if (cmd == "scanCancel")
+        live.cancelScan();
+    else if (cmd == "pluginForget")
+        live.forgetPlugin (c["id"].toString());
+    else if (cmd == "failedClear")
+        live.clearFailedPlugins();
     else if (cmd == "serverFix")
     {
         live.fixServerCheck (c["title"].toString());

@@ -55,6 +55,21 @@ public:
     std::vector<LiveCheckItem> getServerCheck() override;
     void fixServerCheck (const juce::String&) override;
     void recheckServer() override;
+
+    std::vector<RackPage> getPages() override;
+    void setPages (std::vector<RackPage>) override;
+    int getCurrentPage() override;
+    void setCurrentPage (int) override;
+    std::vector<int> getHotPlugins() override;
+    void setHotPlugins (std::vector<int>) override;
+    void refreshKnownPlugins() override;
+    std::vector<LivePlugin> getKnownPlugins() override;
+    juce::StringArray getFailedPlugins() override;
+    LiveScanStatus getScanStatus() override;
+    void startScan (bool) override;
+    void cancelScan() override;
+    void forgetPlugin (const juce::String&) override;
+    void clearFailedPlugins() override;
     std::vector<int> getVisibleRacks() override;
     float getRackLoad (int rack) override;
     float getSlotLoad (int rack, int slot) override;
@@ -117,7 +132,7 @@ private:
     const int port;
 
     // Message thread
-    juce::var state, meters, deviceOptions, networks;
+    juce::var state, meters, deviceOptions, networks, pluginList;
     juce::String serverName;
     std::atomic<bool> connected { false };
 

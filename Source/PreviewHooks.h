@@ -6,6 +6,7 @@
 #include "RemoteConnection.h"
 #include "DriverSettingsPanel.h"
 #include "DevicesPanel.h"
+#include "PluginsPanel.h"
 #include "ConsoleLinkPanel.h"
 #include "RoutingMatrix.h"
 #include "SnapshotsPanel.h"
@@ -615,6 +616,90 @@ struct PreviewHooks
         });
     }
 
+    // The Plugins screen, pages and Hot Plugins over the network
+    struct RemotePluginsWindow : public juce::DocumentWindow
+    {
+        explicit RemotePluginsWindow (int port)
+            : juce::DocumentWindow ("Plugins over the network (test)", Theme::background, 0), live ("127.0.0.1", port)
+        {
+            setUsingNativeTitleBar (true);
+            panel = new PluginsPanel (live);
+            setContentOwned (panel, false);
+            setBounds (0, 0, 1440, 960);
+            setVisible (true);
+        }
+        RemoteConnection live;
+        PluginsPanel* panel = nullptr;
+    };
+
+    static inline std::unique_ptr<RemotePluginsWindow> remotePlugins;
+
+    static void remotePluginsTest (MainComponent& m)
+    {
+        remotePlugins = std::make_unique<RemotePluginsWindow> (m.webRemote.getPort());
+        auto& live = remotePlugins->live;
+        auto& here = m.live;
+
+        juce::Timer::callAfterDelay (3000, [&live, &here, &m]
+        {
+            const auto a = live.getKnownPlugins(), b = here.getKnownPlugins();
+            bool same = a.size() == b.size();
+            for (size_t i = 0; same && i < a.size(); ++i)
+                same = a[i].name == b[i].name && a[i].format == b[i].format && a[i].identifier == b[i].identifier && a[i].category == b[i].category;
+            std::cerr << "RPLUG known " << a.size() << " same as here " << same << " (panel shows " << remotePlugins->panel->shown.size() << ")";
+            for (auto& p : a) std::cerr << " | " << p.name << " [" << p.category << "]";
+            std::cerr << std::endl;
+            std::cerr << "RPLUG hot same " << (live.getHotPlugins() == here.getHotPlugins()) << " pages " << live.getPages().size() << " / " << here.getPages().size()
+                      << " current " << live.getCurrentPage() << " / " << here.getCurrentPage() << std::endl;
+
+            for (auto& p : a)
+                if (p.name.startsWith ("Gain"))
+                    live.forgetPlugin (p.identifier);
+
+            std::vector<RackPage> pages = live.getPages();
+            pages.push_back ({ "Band", { live.getRackConfig (0).id, live.getRackConfig (1).id } });
+            live.setPages (pages);
+            live.setCurrentPage ((int) pages.size() - 1);
+            live.setHotPlugins ({ live.getSlot (2, 1).id, live.getSlot (0, 0).id });
+            juce::ignoreUnused (m);
+        });
+
+        juce::Timer::callAfterDelay (4500, [&live, &here, &m]
+        {
+            bool gain = false;
+            for (auto& p : here.getKnownPlugins()) gain = gain || p.name.startsWith ("Gain");
+            const auto pages = m.engine.getPages();
+            int r = -1, s = -1;
+            m.engine.findSlot (m.engine.getHotPlugins().empty() ? 0 : m.engine.getHotPlugins()[0], r, s);
+            std::cerr << "RPLUG here now: Gain still listed " << gain << " (expect 0), pages " << pages.size() << " last '" << (pages.empty() ? juce::String() : pages.back().name)
+                      << "' with " << (pages.empty() ? 0 : (int) pages.back().rackIds.size()) << " racks, current page " << m.engine.getCurrentPage()
+                      << ", first hot " << r << ":" << s << " (expect 2:1); the copy sees " << live.getPages().size() << " pages, current " << live.getCurrentPage()
+                      << ", page tab on 'Band' rack 0 " << live.isRackOnPage (0, (int) pages.size() - 1) << std::endl;
+            live.startScan (false);
+        });
+
+        for (int t = 5000; t <= 30000; t += 1000)
+            juce::Timer::callAfterDelay (t, [&live, &here, t]
+            {
+                static bool reported = false, sawRunning = false;
+                const auto st = live.getScanStatus();
+                if (st.running && ! sawRunning) { sawRunning = true; std::cerr << "RPLUG scanning on the server: " << st.progress << " '" << st.current << "'" << std::endl; }
+                if (! st.running && ! reported && st.message.isNotEmpty())
+                {
+                    reported = true;
+                    bool gain = false;
+                    for (auto& p : here.getKnownPlugins()) gain = gain || p.name.startsWith ("Gain");
+                    juce::Timer::callAfterDelay (1500, [&live, gain, st, t]
+                    {
+                        bool remoteGain = false;
+                        for (auto& p : live.getKnownPlugins()) remoteGain = remoteGain || p.name.startsWith ("Gain");
+                        std::cerr << "RPLUG scan done by " << t << " ms: '" << st.message << "' Gain back here " << gain << ", in the panel " << remoteGain
+                                  << " (" << remotePlugins->panel->all.size() << " listed)" << std::endl;
+                    });
+                }
+            });
+    }
+
     static void pump (RackEngine& e, juce::AudioBuffer<float>& in, juce::AudioBuffer<float>& out)
     {
         e.previewProcess (in, out);
@@ -646,6 +731,7 @@ struct PreviewHooks
         if (open == "remoterouting") openRemoteRouting (m);
         if (open == "remotedevices") openRemoteDevices (m);
         if (open == "remotesetup") remoteSetupTest (m);
+        if (open == "remoteplugins") remotePluginsTest (m);
         if (open == "driverdialog") driverDialogTest (m);
         if (open == "timing")
         {

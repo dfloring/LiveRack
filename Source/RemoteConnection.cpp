@@ -287,6 +287,16 @@ void RemoteConnection::received (const juce::String& text)
             sendChangeMessage();
         });
     }
+    else if (t == "reply" && message["what"].toString() == "plugins")
+    {
+        juce::MessageManager::callAsync ([this, flag, data = message["data"]]
+        {
+            if (! flag->load())
+                return;
+            pluginList = data;
+            sendChangeMessage();
+        });
+    }
     else if (t == "hello")
     {
         juce::MessageManager::callAsync ([this, flag, name = message["server"].toString()]
@@ -900,3 +910,101 @@ std::vector<LiveCheckItem> RemoteConnection::getServerCheck()
 
 void RemoteConnection::fixServerCheck (const juce::String& title) { sendCommand (make ("serverFix", { { "title", title } })); }
 void RemoteConnection::recheckServer()                            { sendCommand (make ("serverRecheck", {})); }
+
+//==============================================================================
+// Pages, Hot Plugins and plugins
+std::vector<RackPage> RemoteConnection::getPages()
+{
+    std::vector<RackPage> pages;
+    if (auto* list = state["pageRacks"].getArray())
+        for (auto& p : *list)
+        {
+            RackPage page;
+            page.name = p["name"].toString();
+            if (auto* ids = p["racks"].getArray())
+                for (auto& id : *ids)
+                    page.rackIds.push_back ((int) id);
+            pages.push_back (page);
+        }
+    return pages;
+}
+
+static juce::var pagesToVar (const std::vector<RackPage>& pages)
+{
+    juce::Array<juce::var> list;
+    for (auto& p : pages)
+    {
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("name", p.name);
+        juce::Array<juce::var> ids;
+        for (int id : p.rackIds) ids.add (id);
+        o->setProperty ("racks", ids);
+        list.add (juce::var (o));
+    }
+    return list;
+}
+
+void RemoteConnection::setPages (std::vector<RackPage> pages)
+{
+    sendCommand (make ("pagesSet", { { "pages", pagesToVar (pages) } }));
+}
+
+int RemoteConnection::getCurrentPage()        { return state.hasProperty ("page") ? (int) state["page"] : -1; }
+void RemoteConnection::setCurrentPage (int p) { sendCommand (make ("page", { { "page", p } })); }
+
+std::vector<int> RemoteConnection::getHotPlugins()
+{
+    std::vector<int> ids;
+    if (auto* list = state["hotIds"].getArray())
+        for (auto& id : *list)
+            ids.push_back ((int) id);
+    return ids;
+}
+
+void RemoteConnection::setHotPlugins (std::vector<int> ids)
+{
+    juce::Array<juce::var> list;
+    for (int id : ids) list.add (id);
+    sendCommand (make ("hotSet", { { "ids", list } }));
+}
+
+void RemoteConnection::refreshKnownPlugins()
+{
+    const juce::ScopedLock sl (queueLock);
+    outgoing.add ("{\"t\":\"get\",\"what\":\"plugins\",\"id\":2}");
+}
+
+std::vector<LivePlugin> RemoteConnection::getKnownPlugins()
+{
+    std::vector<LivePlugin> list;
+    if (auto* a = pluginList["plugins"].getArray())
+        for (auto& p : *a)
+            list.push_back ({ p["name"].toString(), p["maker"].toString(), p["format"].toString(),
+                              p["category"].toString(), p["id"].toString(), (bool) p["instrument"] });
+    return list;
+}
+
+juce::StringArray RemoteConnection::getFailedPlugins()
+{
+    juce::StringArray failed;
+    if (auto* a = pluginList["failedPlugins"].getArray())
+        for (auto& f : *a)
+            failed.add (f.toString());
+    return failed;
+}
+
+LiveScanStatus RemoteConnection::getScanStatus()
+{
+    LiveScanStatus s;
+    const auto v = state["scan"];
+    s.running = (bool) v["running"];
+    s.progress = (float) (double) v["progress"];
+    s.current = v["current"].toString();
+    s.message = v["message"].toString();
+    return s;
+}
+
+void RemoteConnection::startScan (bool all)                         { sendCommand (make ("scanStart", { { "all", all } })); }
+void RemoteConnection::cancelScan()                                 { sendCommand (make ("scanCancel", {})); }
+void RemoteConnection::forgetPlugin (const juce::String& id)        { sendCommand (make ("pluginForget", { { "id", id } })); refreshKnownPlugins(); }
+void RemoteConnection::clearFailedPlugins()                         { sendCommand (make ("failedClear", {})); refreshKnownPlugins(); }

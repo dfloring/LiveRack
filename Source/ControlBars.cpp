@@ -17,7 +17,7 @@ namespace
 }
 
 //==============================================================================
-HotPluginsBar::HotPluginsBar (RackEngine& e, ActionHost& h) : engine (e), host (h) {}
+HotPluginsBar::HotPluginsBar (LiveConnection& e, ActionHost& h) : engine (e), host (h) {}
 
 juce::Rectangle<int> HotPluginsBar::tileBounds (int index) const
 {
@@ -40,7 +40,7 @@ void HotPluginsBar::paint (juce::Graphics& g)
     drawHeading (g, getLocalBounds().removeFromTop (16), "HOT PLUGINS",
                  engine.getHotPlugins().empty() ? "Right-click a plugin on a strip > Pin to Hot Plugins" : "");
 
-    const auto& hot = engine.getHotPlugins();
+    const auto hot = engine.getHotPlugins();
     const int selRack = host.getSelectedRack(), selSlot = host.getSelectedSlot();
 
     for (int i = 0; i < RackEngine::maxHotPlugins; ++i)
@@ -73,12 +73,12 @@ void HotPluginsBar::paint (juce::Graphics& g)
         g.fillRoundedRectangle (inner.removeFromLeft (5.0f), 2.0f);
         inner.removeFromLeft (7.0f);
 
-        auto* plugin = engine.getPlugin (rack, slot);
-        const bool byp = engine.isSlotBypassed (rack, slot) || engine.isRackBypassed (rack);
+        const auto plugin = engine.getSlot (rack, slot);
+        const bool byp = plugin.bypassed || engine.isRackBypassed (rack);
 
         g.setColour (Theme::text.withAlpha (byp ? 0.5f : 1.0f));
         g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-        g.drawFittedText (plugin != nullptr ? plugin->getName() : "?", inner.removeFromTop (inner.getHeight() * 0.55f).toNearestInt(),
+        g.drawFittedText (plugin.exists ? plugin.name : "?", inner.removeFromTop (inner.getHeight() * 0.55f).toNearestInt(),
                           juce::Justification::bottomLeft, 1, 0.8f);
         g.setColour (Theme::textDim);
         g.setFont (juce::FontOptions (11.0f));
@@ -90,7 +90,7 @@ void HotPluginsBar::paint (juce::Graphics& g)
 void HotPluginsBar::mouseDown (const juce::MouseEvent& e)
 {
     const int i = tileAt (e.getPosition());
-    const auto& hot = engine.getHotPlugins();
+    const auto hot = engine.getHotPlugins();
     if (i < 0 || i >= (int) hot.size())
         return;
 
@@ -106,7 +106,7 @@ void HotPluginsBar::mouseDown (const juce::MouseEvent& e)
         m.showMenuAsync (juce::PopupMenu::Options(), [this, i, id] (int result)
         {
             auto list = engine.getHotPlugins();
-            if (result == 1) engine.unpinHot (id);
+            if (result == 1) { list.erase (std::remove (list.begin(), list.end(), id), list.end()); engine.setHotPlugins (list); }
             if (result == 2 && i > 0)                       { std::swap (list[(size_t) i], list[(size_t) i - 1]); engine.setHotPlugins (list); }
             if (result == 3 && i + 1 < (int) list.size())   { std::swap (list[(size_t) i], list[(size_t) i + 1]); engine.setHotPlugins (list); }
         });
@@ -132,7 +132,7 @@ void HotPluginsBar::mouseDrag (const juce::MouseEvent& e)
 
 void HotPluginsBar::mouseUp (const juce::MouseEvent& e)
 {
-    const auto& hot = engine.getHotPlugins();
+    const auto hot = engine.getHotPlugins();
     const int from = dragFrom, to = juce::jmin (dragOver, (int) hot.size() - 1);
     dragFrom = dragOver = -1;
 
@@ -351,7 +351,7 @@ void UserKeysBar::load()
 }
 
 //==============================================================================
-PageTabs::PageTabs (RackEngine& e) : engine (e) {}
+PageTabs::PageTabs (LiveConnection& e) : engine (e) {}
 
 std::vector<juce::Rectangle<int>> PageTabs::layoutTabs() const
 {
@@ -376,7 +376,7 @@ std::vector<juce::Rectangle<int>> PageTabs::layoutTabs() const
 void PageTabs::paint (juce::Graphics& g)
 {
     const auto tabs = layoutTabs();
-    const auto& pages = engine.getPages();
+    const auto pages = engine.getPages();
     const int current = engine.getCurrentPage();
 
     for (int i = 0; i < (int) tabs.size(); ++i)

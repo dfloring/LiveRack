@@ -94,6 +94,22 @@ struct LiveNetwork
     juce::String id, name, label;
 };
 
+// A scanned plugin
+struct LivePlugin
+{
+    juce::String name, manufacturer, format, category, identifier;
+    bool isInstrument = false;
+};
+
+// Scanning for plugins
+struct LiveScanStatus
+{
+    bool running = false;
+    float progress = 0.0f;               // 0..1 over all formats
+    juce::String current;                // the plugin being scanned
+    juce::String message;                // the result of the last scan
+};
+
 class LiveConnection : public juce::ChangeBroadcaster
 {
 public:
@@ -219,6 +235,49 @@ public:
     virtual void fixServerCheck (const juce::String& title) = 0;   // fixes open on the server's screen
     virtual void recheckServer() = 0;
 
+    //==========================================================================
+    // Pages and Hot Plugins
+    virtual std::vector<RackPage> getPages() = 0;
+    virtual void setPages (std::vector<RackPage>) = 0;
+    virtual int getCurrentPage() = 0;                  // -1 = All
+    virtual void setCurrentPage (int) = 0;
+    virtual std::vector<int> getHotPlugins() = 0;      // plugin ids, in order
+    virtual void setHotPlugins (std::vector<int>) = 0;
+
+    bool findSlot (int slotId, int& rack, int& slot)
+    {
+        for (int r = 0; r < getNumRacks(); ++r)
+            for (int s = 0; s < getNumSlots (r); ++s)
+                if (getSlot (r, s).id == slotId) { rack = r; slot = s; return true; }
+        return false;
+    }
+    int findRackById (int id)
+    {
+        for (int r = 0; r < getNumRacks(); ++r)
+            if (getRackConfig (r).id == id)
+                return r;
+        return -1;
+    }
+    bool isRackOnPage (int rack, int page)
+    {
+        const auto pages = getPages();
+        if (! juce::isPositiveAndBelow (page, (int) pages.size()) || ! juce::isPositiveAndBelow (rack, getNumRacks()))
+            return false;
+        const auto& ids = pages[(size_t) page].rackIds;
+        return std::find (ids.begin(), ids.end(), getRackConfig (rack).id) != ids.end();
+    }
+
+    //==========================================================================
+    // Plugins: the scanned list, and scanning
+    virtual void refreshKnownPlugins() = 0;            // a server is asked again; a change message follows
+    virtual std::vector<LivePlugin> getKnownPlugins() = 0;
+    virtual juce::StringArray getFailedPlugins() = 0;  // files that crashed or failed while scanning
+    virtual LiveScanStatus getScanStatus() = 0;
+    virtual void startScan (bool rescanAll) = 0;       // rescanAll: plugins already in the list too
+    virtual void cancelScan() = 0;
+    virtual void forgetPlugin (const juce::String& identifier) = 0;
+    virtual void clearFailedPlugins() = 0;             // so they're tried again next scan
+
     // MIDI program changes and snapshots (on the computer with the audio)
     virtual MidiControl::SnapshotLink getSnapshotLink() = 0;
     virtual void setSnapshotLink (const MidiControl::SnapshotLink&) = 0;
@@ -233,7 +292,7 @@ public:
 class LocalConnection : public LiveConnection
 {
 public:
-    explicit LocalConnection (RackEngine& e) : engine (e) {}
+    explicit LocalConnection (RackEngine&);
 
     // Console card slot for a driver's channel (1-based), from the main window
     std::function<juce::String (int driver, int channel)> slotLabelFor;
@@ -247,7 +306,9 @@ public:
         std::function<void()> addConsole, consolesChanged;
         std::function<void (int)> removeConsole;
         std::function<juce::String (int console, int channel)> rackForChannel;
+        std::function<juce::String (const juce::PluginDescription&)> categoryFor;
     };
+    ~LocalConnection() override;
     void setServices (Services s) { services = std::move (s); }
 
     int getNumConsoles() override;
@@ -268,6 +329,22 @@ public:
     std::vector<LiveCheckItem> getServerCheck() override;
     void fixServerCheck (const juce::String&) override;
     void recheckServer() override;
+
+    std::vector<RackPage> getPages() override        { return engine.getPages(); }
+    void setPages (std::vector<RackPage> p) override { engine.setPages (std::move (p)); }
+    int getCurrentPage() override                    { return engine.getCurrentPage(); }
+    void setCurrentPage (int p) override             { engine.setCurrentPage (p); }
+    std::vector<int> getHotPlugins() override        { return engine.getHotPlugins(); }
+    void setHotPlugins (std::vector<int> h) override { engine.setHotPlugins (std::move (h)); }
+
+    void refreshKnownPlugins() override {}
+    std::vector<LivePlugin> getKnownPlugins() override;
+    juce::StringArray getFailedPlugins() override;
+    LiveScanStatus getScanStatus() override;
+    void startScan (bool rescanAll) override;
+    void cancelScan() override;
+    void forgetPlugin (const juce::String&) override;
+    void clearFailedPlugins() override;
 
     static int numBlocks (const DriverStatus& st) { return (juce::jmax (32, st.numIns, st.numOuts) + 7) / 8; }
 
@@ -432,4 +509,8 @@ private:
     RackEngine& engine;
     MidiControl* midi = nullptr;
     Services services;
+
+    class ScanJob;
+    std::unique_ptr<ScanJob> scan;
+    juce::String lastScanMessage;
 };

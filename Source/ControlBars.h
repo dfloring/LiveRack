@@ -1,12 +1,13 @@
 #pragma once
 #include "Actions.h"
+#include "LiveConnection.h"
 
 // Row of up to 12 pinned plugins: one click opens a plugin in the plugin
 // panel. Right-click to unpin, drag to reorder.
 class HotPluginsBar : public juce::Component
 {
 public:
-    HotPluginsBar (RackEngine&, ActionHost&);
+    HotPluginsBar (LiveConnection&, ActionHost&);   // the show, here or on a server
 
     std::function<void (int slotId)> onOpen;
 
@@ -21,7 +22,7 @@ private:
     juce::Rectangle<int> tileBounds (int index) const;
     int tileAt (juce::Point<int>) const;
 
-    RackEngine& engine;
+    LiveConnection& engine;
     ActionHost& host;
     int dragFrom = -1, dragOver = -1;
 };
@@ -70,7 +71,7 @@ private:
 class PageTabs : public juce::Component
 {
 public:
-    explicit PageTabs (RackEngine&);
+    explicit PageTabs (LiveConnection&);   // the show, here or on a server
 
     std::function<void()> onAddPage;
     std::function<void (int page)> onPageMenu;
@@ -82,5 +83,5 @@ public:
 
 private:
     std::vector<juce::Rectangle<int>> layoutTabs() const; // All, pages..., +
-    RackEngine& engine;
+    LiveConnection& engine;
 };
