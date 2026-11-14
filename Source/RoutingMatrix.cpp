@@ -67,16 +67,16 @@ public:
         }
 
         // Column groups of 8, labelled with the driver (and console card slot)
-        const auto driverName = e.getDriverLabel (owner.driver);
+        const auto shownDriver = e.getDriver (owner.driver);
+        const auto driverName = shownDriver.label;
         for (int b = 0; b < perPage / 8; ++b)
         {
             const int x = labelW + b * 8 * colW;
             const int ch1 = first + b * 8 + 1;
             juce::String label = juce::String (ch1) + "-" + juce::String (ch1 + 7);
 
-            if (owner.slotLabelFor != nullptr)
-                if (auto slot = owner.slotLabelFor (owner.driver, ch1); slot.isNotEmpty())
-                    label = slot + "  " + label;
+            if (auto slot = shownDriver.blockLabels[(ch1 - 1) / 8]; slot.isNotEmpty())
+                label = slot + "  " + label;
 
             g.setColour (Theme::border.brighter (0.2f));
             g.fillRect (x, 2, 2, groupH + numberH + (int) rows.size() * rowH);
@@ -225,7 +225,7 @@ public:
             if (! owner.outputs && ! wasOn)
                 owner.autoPatchOutputs (row.rack, cfg, row.side, ch);
 
-            owner.engine.setRackConfig (row.rack, cfg);
+            owner.engine.setRackRouting (row.rack, cfg.driver, cfg.input, cfg.output);
         }
 
         if (owner.onSelectRack != nullptr)
@@ -242,13 +242,8 @@ public:
             return {};
 
         const int ch = firstChannel() + (p.x - labelW) / colW;
-        auto* dev = owner.engine.getDeviceManager (owner.driver).getCurrentAudioDevice();
-        juce::String name;
-        if (dev != nullptr)
-        {
-            const auto names = owner.outputs ? dev->getOutputChannelNames() : dev->getInputChannelNames();
-            name = names[ch];
-        }
+        const auto shownDriver = owner.engine.getDriver (owner.driver);
+        const auto name = (owner.outputs ? shownDriver.outNames : shownDriver.inNames)[ch];
         return owner.engine.getRackConfig (rows[(size_t) ri].rack).name + "  <>  channel " + juce::String (ch + 1)
                + (name.isNotEmpty() ? " (" + name + ")" : juce::String());
     }
@@ -259,7 +254,7 @@ public:
 //==============================================================================
 bool RoutingMatrix::outputFree (int rack, int driverIndex, int ch) const
 {
-    const auto status = engine.getDriverStatus (driverIndex);
+    const auto status = engine.getDriver (driverIndex);
     if (status.open && ch >= status.numOuts)
         return false;
 
@@ -299,7 +294,7 @@ void RoutingMatrix::autoPatchOutputs (int rack, RackConfig& cfg, int side, int c
     }
 }
 
-RoutingMatrix::RoutingMatrix (RackEngine& e) : engine (e)
+RoutingMatrix::RoutingMatrix (LiveConnection& e) : engine (e)
 {
     grid = std::make_unique<Grid> (*this);
 
@@ -346,13 +341,13 @@ void RoutingMatrix::updateTabs()
     driverTabs.clear();
     for (int d = 0; d < engine.getNumDrivers(); ++d)
     {
-        auto* b = driverTabs.add (new juce::TextButton (engine.getDriverLabel (d)));
+        auto* b = driverTabs.add (new juce::TextButton (engine.getDriver (d).label));
         b->setToggleState (d == driver, juce::dontSendNotification);
         b->onClick = [this, d] { driver = d; page = 0; refresh(); };
         addAndMakeVisible (b);
     }
 
-    const auto status = engine.getDriverStatus (driver);
+    const auto status = engine.getDriver (driver);
     const int channels = juce::jmax (perPage, outputs ? status.numOuts : status.numIns);
     const int pages = (channels + perPage - 1) / perPage;
     page = juce::jlimit (0, pages - 1, page);

@@ -27,6 +27,8 @@ public:
     double getRackTotalLatencyMs (int rack) override;
     double getGroupLatencyMs (int group) override;
     int getNumDrivers() override;
+    LiveDriver getDriver (int driver) override;
+    void setRackRouting (int rack, int driver, const int inputs[2], const int outputs[2]) override;
     std::vector<int> getVisibleRacks() override;
     float getRackLoad (int rack) override;
     float getSlotLoad (int rack, int slot) override;

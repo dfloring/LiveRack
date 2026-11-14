@@ -27,7 +27,7 @@ Get the latest build from [Releases](../../releases): the Mac app (Apple silicon
 - **Mac:** unzip, then right-click `LiveRack.app` > **Open** the first time (it isn't notarised).
 - **Windows:** unzip and run `LiveRack.exe`. If Windows warns about an unknown publisher: **More info > Run anyway**. Pick your ASIO driver (Dante Virtual Soundcard, SoundGrid) in Devices > driver Settings.
 
-# User guide (v0.23)
+# User guide (v0.24)
 
 Any number of independent racks of VST3/AU plugins on one or more audio drivers at once (Dante Virtual Soundcard, a Dante interface, the Waves SoundGrid Driver). Everything lives in one **show file** (`.liverack`) with its snapshots inside it, and the open show comes back automatically on launch.
 
@@ -92,7 +92,7 @@ The web remote's server also speaks a fuller protocol for apps that control Live
 - Commands, besides everything the web remote already does: `rackStep` (dir), `sceneStore` (number, name, and optionally `slots` [[rack, slot]…] / `racks` [rack…] to store over only those), `sceneRename` / `sceneDelete` / `sceneDuplicate` (to) / `sceneRenumber` (to), `sceneScope` (number; rack, slot, in; and the four switches), `midiSnapshots` (follow, input, channel, first, send, output, outChannel), `hot` (rack, slot, on), `latencyGroup`, `isolate` (rack, slot, on), `server` (multiCore, startAtLogin, restartAfterCrash), `slotDrop` (rack, slot, toRack, to, copy: a plugin dragged within a rack or to another one), `addPlugin` with `id` (an exact plugin) as well as `key` (a library family), `rackConfig` with `colour` (0–7, -1 = automatic), and the audio drivers: `driverSet` (driver, type, device, rate, buffer), `driverAdd`, `driverRemove`. `get devices` lists each driver's device types, devices, sample rates and buffer sizes.
 - **Finding servers:** while the web remote is on, LiveRack announces itself every 2 s with a UDP broadcast on port 47810 (`{"liverack":1, "name", "port", "version"}`), so clients can list the LiveRack computers on the network by name.
 
-The iPad / web remote page now uses this connection too, so changes show up straight away; it falls back to polling where WebSockets aren't available. LiveRack's own rack strips, plugin panel and Snapshots screen now read the show the same way (in Native, straight from this computer's engine), on the way to LiveRack Client. The state also gives each rack's and plugin's `id`; `sceneScope` takes number -1 for the scope new snapshots start with.
+The iPad / web remote page now uses this connection too, so changes show up straight away; it falls back to polling where WebSockets aren't available. LiveRack's own rack strips, plugin panel, Snapshots screen and Routing matrix now read the show the same way (in Native, straight from this computer's engine), on the way to LiveRack Client. The state also gives each rack's and plugin's `id`; `sceneScope` takes number -1 for the scope new snapshots start with. Each driver in the state has its `label`, `numIns` / `numOuts` (channels enabled) and `blocks` (the console card slot for each block of 8 channels); `rackConfig` takes -1 in `in` / `out` for unpatched.
 
 ## Routing
 

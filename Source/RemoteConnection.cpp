@@ -628,3 +628,29 @@ juce::StringArray RemoteConnection::getMidiOutputNames()
             names.add (n.toString());
     return names;
 }
+
+//==============================================================================
+// Routing
+LiveDriver RemoteConnection::getDriver (int driver)
+{
+    LiveDriver d;
+    const auto v = at (state["drivers"], driver);
+    d.label = v.isObject() ? v["label"].toString() : "Driver " + juce::String (driver + 1);
+    d.open = (bool) v["open"];
+    d.numIns = (int) v["numIns"];
+    d.numOuts = (int) v["numOuts"];
+    auto names = [] (const juce::var& list) { juce::StringArray a; if (auto* arr = list.getArray()) for (auto& n : *arr) a.add (n.toString()); return a; };
+    d.inNames = names (v["ins"]);
+    d.outNames = names (v["outs"]);
+    d.blockLabels = names (v["blocks"]);
+    return d;
+}
+
+void RemoteConnection::setRackRouting (int rack, int driver, const int inputs[2], const int outputs[2])
+{
+    auto c = command ("rackConfig", rack);
+    c.getDynamicObject()->setProperty ("driver", driver);
+    c.getDynamicObject()->setProperty ("in", juce::Array<juce::var> { inputs[0], inputs[1] });
+    c.getDynamicObject()->setProperty ("out", juce::Array<juce::var> { outputs[0], outputs[1] });
+    sendCommand (c);
+}

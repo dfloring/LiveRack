@@ -4,6 +4,7 @@
 #include "SocketUtil.h"
 #include "ServerCheck.h"
 #include "RemoteConnection.h"
+#include "RoutingMatrix.h"
 #include "SnapshotsPanel.h"
 // Only compiled into Linux preview builds (LIVERACK_PREVIEW_HOOKS=1), used to
 // set up a sample session, feed a test signal through it, and open dialogs
@@ -323,6 +324,70 @@ struct PreviewHooks
         });
     }
 
+    // The routing matrix in a second window, over the network
+    struct RemoteRoutingWindow : public juce::DocumentWindow, private juce::ChangeListener
+    {
+        explicit RemoteRoutingWindow (int port)
+            : juce::DocumentWindow ("Routing over the network (test)", Theme::background, 0), live ("127.0.0.1", port)
+        {
+            setUsingNativeTitleBar (true);
+            matrix = new RoutingMatrix (live);
+            setContentOwned (matrix, false);
+            setBounds (0, 0, 1440, 960);
+            setVisible (true);
+            live.addChangeListener (this);
+        }
+        ~RemoteRoutingWindow() override { live.removeChangeListener (this); }
+        void changeListenerCallback (juce::ChangeBroadcaster*) override { matrix->refresh(); }
+
+        RemoteConnection live;
+        RoutingMatrix* matrix = nullptr;
+    };
+
+    static inline std::unique_ptr<RemoteRoutingWindow> remoteRouting;
+
+    static void openRemoteRouting (MainComponent& m)
+    {
+        // A console card on channels 9-24, for the block labels
+        auto cs = m.consoles[0]->getSettings();
+        cs.type = ConsoleLink::Type::yamahaRcp;
+        cs.slots = { { "MY Slot 1", 2, 0, 9, 16 } };
+        m.consoles[0]->setSettings (cs);
+
+        remoteRouting = std::make_unique<RemoteRoutingWindow> (m.webRemote.getPort());
+        auto& live = remoteRouting->live;
+        auto& e = m.engine;
+
+        juce::Timer::callAfterDelay (3000, [&m, &live, &e]
+        {
+            bool same = live.getNumDrivers() == e.getNumDrivers();
+            for (int d = 0; d < e.getNumDrivers(); ++d)
+            {
+                const auto a = live.getDriver (d), b = m.live.getDriver (d);
+                same = same && a.label == b.label && a.open == b.open && a.numIns == b.numIns && a.numOuts == b.numOuts
+                       && a.inNames == b.inNames && a.outNames == b.outNames && a.blockLabels == b.blockLabels;
+                std::cerr << "RROUTE driver " << d << " '" << a.label << "' open " << a.open << " ins " << a.numIns << " outs " << a.numOuts
+                          << " blocks " << a.blockLabels.joinIntoString ("|") << std::endl;
+            }
+            std::cerr << "RROUTE drivers same as here " << same << std::endl;
+            remoteRouting->matrix->setSelectedRack (1);
+
+            const int in[2] = { 20, -1 }, out[2] = { 21, 22 };
+            live.setRackRouting (1, 0, in, out);
+            const int none[2] = { -1, -1 };
+            live.setRackRouting (2, 0, none, none);
+        });
+
+        juce::Timer::callAfterDelay (4500, [&live, &e]
+        {
+            const auto a = e.getRackConfig (1), b = e.getRackConfig (2);
+            std::cerr << "RROUTE rack 1 now in " << a.input[0] << " out " << a.output[0] << "," << a.output[1] << " (expect 20, 21,22); rack 2 in "
+                      << b.input[0] << " out " << b.output[0] << " (expect -1 -1)" << std::endl;
+            const auto c = live.getRackConfig (1), d = live.getRackConfig (2);
+            std::cerr << "RROUTE the copy sees rack 1 in " << c.input[0] << " out " << c.output[0] << "," << c.output[1] << "; rack 2 in " << d.input[0] << std::endl;
+        });
+    }
+
     static void pump (RackEngine& e, juce::AudioBuffer<float>& in, juce::AudioBuffer<float>& out)
     {
         e.previewProcess (in, out);
@@ -351,6 +416,7 @@ struct PreviewHooks
         if (open == "plugins")  m.showPluginScanner();
         if (open == "remote")   openRemoteWindow (m);
         if (open == "overview") overviewTest (m);
+        if (open == "remoterouting") openRemoteRouting (m);
         if (open == "timing")
         {
             // Keep the audio going so plugin timing shows

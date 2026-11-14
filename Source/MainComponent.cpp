@@ -533,6 +533,7 @@ MainComponent::MainComponent()
 
     midi = std::make_unique<MidiControl> (engine, *this);
     live.setMidi (midi.get());
+    live.slotLabelFor = [this] (int d, int ch) { return slotLabelFor (d, ch); };
     midi->onChanged = [this] { statusBar->repaint(); };
     keysBar.onMidiLearn = [this] (int key) { midi->learnAction (keysBar.getKey (key)); };
     keysBar.onSetShortcut = [this] (int key)
@@ -2035,8 +2036,7 @@ void MainComponent::showRouting (int rack)
     if (routingWindow == nullptr)
     {
         juce::Component::SafePointer<MainComponent> safe (this);
-        routingMatrix = new RoutingMatrix (engine);
-        routingMatrix->slotLabelFor = [safe] (int d, int ch) { return safe != nullptr ? safe->slotLabelFor (d, ch) : juce::String(); };
+        routingMatrix = new RoutingMatrix (live);
         routingMatrix->onSelectRack = [safe] (int r)
         {
             if (safe != nullptr && r != safe->selectedRack)
@@ -3234,6 +3234,13 @@ void MainComponent::addLiveState (juce::DynamicObject& r)
         }
         o->setProperty ("ins", ins);
         o->setProperty ("outs", outs);
+        o->setProperty ("label", engine.getDriverLabel (d));
+        o->setProperty ("numIns", st.numIns);
+        o->setProperty ("numOuts", st.numOuts);
+        juce::Array<juce::var> blocks;   // the console card slot for each block of 8 channels
+        for (int b = 0; b < LocalConnection::numBlocks (st); ++b)
+            blocks.add (slotLabelFor (d, b * 8 + 1));
+        o->setProperty ("blocks", blocks);
         drivers.add (dv);
     }
     r.setProperty ("drivers", drivers);
@@ -3742,9 +3749,9 @@ bool MainComponent::handleWebEditCommand (const juce::String& cmd, const juce::v
         for (int ch = 0; ch < 2; ++ch)
         {
             if (auto* in = c["in"].getArray(); in != nullptr && ch < in->size())
-                cfg.input[ch] = juce::jmax (0, (int) (*in)[ch]);
+                cfg.input[ch] = juce::jmax (-1, (int) (*in)[ch]);    // -1 = unpatched
             if (auto* out = c["out"].getArray(); out != nullptr && ch < out->size())
-                cfg.output[ch] = juce::jmax (0, (int) (*out)[ch]);
+                cfg.output[ch] = juce::jmax (-1, (int) (*out)[ch]);
         }
         if (c.hasProperty ("console"))
             cfg.consoleChannel = juce::jmax (0, (int) c["console"]);

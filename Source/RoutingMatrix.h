@@ -1,5 +1,5 @@
 #pragma once
-#include "RackEngine.h"
+#include "LiveConnection.h"
 
 // Console-style crosspoint routing: rack inputs (or outputs) down the side,
 // audio driver channels across the top. Click a crosspoint to patch it,
@@ -7,11 +7,9 @@
 class RoutingMatrix : public juce::Component
 {
 public:
-    explicit RoutingMatrix (RackEngine&);
+    explicit RoutingMatrix (LiveConnection&);   // the show, here or on a server
     ~RoutingMatrix() override;
 
-    // Labels for channel blocks, e.g. "CL5 MY Slot 1" (driver, 1-based channel)
-    std::function<juce::String (int driver, int channel)> slotLabelFor;
     std::function<void (int rack)> onSelectRack;
 
     void setSelectedRack (int);
@@ -30,7 +28,7 @@ private:
     void autoPatchOutputs (int rack, RackConfig&, int side, int channel);
     juce::String note; // e.g. why an output wasn't auto-patched
 
-    RackEngine& engine;
+    LiveConnection& engine;
     bool outputs = false;
     int driver = 0, page = 0, selectedRack = -1, selectedSide = 0;
 

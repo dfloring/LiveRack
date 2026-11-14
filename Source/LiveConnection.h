@@ -24,6 +24,16 @@ struct LiveSlot
     bool isolated = false;      // runs in its own process
 };
 
+// An audio driver, as the routing screen needs it
+struct LiveDriver
+{
+    juce::String label;                 // short: the device's name, or "Driver 2"
+    bool open = false;
+    int numIns = 0, numOuts = 0;        // channels enabled
+    juce::StringArray inNames, outNames;
+    juce::StringArray blockLabels;      // console card slot for each block of 8 channels ("MY Slot 1"), or empty
+};
+
 class LiveConnection : public juce::ChangeBroadcaster
 {
 public:
@@ -45,6 +55,7 @@ public:
     virtual double getRackTotalLatencyMs (int rack) = 0;
     virtual double getGroupLatencyMs (int group) = 0;
     virtual int getNumDrivers() = 0;
+    virtual LiveDriver getDriver (int driver) = 0;
     virtual std::vector<int> getVisibleRacks() = 0;        // the current page, in order
 
     // Processing time, as a share of the block: the longest in the last few seconds
@@ -72,6 +83,7 @@ public:
     virtual void setRackLatencyGroup (int rack, int group) = 0;
     virtual void setRackColour (int rack, int colourIndex) = 0;
     virtual void setRackName (int rack, const juce::String&) = 0;
+    virtual void setRackRouting (int rack, int driver, const int inputs[2], const int outputs[2]) = 0;   // channels 0-based, -1 = unpatched
     virtual void setSlotBypassed (int rack, int slot, bool) = 0;
 
     //==========================================================================
@@ -129,6 +141,37 @@ class LocalConnection : public LiveConnection
 {
 public:
     explicit LocalConnection (RackEngine& e) : engine (e) {}
+
+    // Console card slot for a driver's channel (1-based), from the main window
+    std::function<juce::String (int driver, int channel)> slotLabelFor;
+
+    static int numBlocks (const DriverStatus& st) { return (juce::jmax (32, st.numIns, st.numOuts) + 7) / 8; }
+
+    LiveDriver getDriver (int d) override
+    {
+        LiveDriver v;
+        const auto st = engine.getDriverStatus (d);
+        v.label = engine.getDriverLabel (d);
+        v.open = st.open;
+        v.numIns = st.numIns;
+        v.numOuts = st.numOuts;
+        if (auto* dev = engine.getDeviceManager (d).getCurrentAudioDevice())
+        {
+            v.inNames = dev->getInputChannelNames();
+            v.outNames = dev->getOutputChannelNames();
+        }
+        for (int b = 0; b < numBlocks (st); ++b)
+            v.blockLabels.add (slotLabelFor != nullptr ? slotLabelFor (d, b * 8 + 1) : juce::String());
+        return v;
+    }
+
+    void setRackRouting (int r, int driver, const int inputs[2], const int outputs[2]) override
+    {
+        auto cfg = engine.getRackConfig (r);
+        cfg.driver = driver;
+        for (int c = 0; c < 2; ++c) { cfg.input[c] = inputs[c]; cfg.output[c] = outputs[c]; }
+        engine.setRackConfig (r, cfg);
+    }
     void setMidi (MidiControl* m) { midi = m; }
 
     RackEngine& getEngine() { return engine; }
