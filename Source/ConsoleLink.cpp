@@ -512,3 +512,65 @@ std::vector<ConsoleLink::CardSlot> ConsoleLink::defaultSlots (Type t)
 
     return { { "Slot 1", 0, 0, 1, 0 } };
 }
+
+//==============================================================================
+juce::var ConsoleLink::settingsToVar (const Settings& s)
+{
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("type", (int) s.type);
+    o->setProperty ("address", s.address);
+    o->setProperty ("sceneFolder", s.sceneFolder.getFullPathName());
+    o->setProperty ("recallScenes", s.recallScenes);
+    o->setProperty ("followSelection", s.followSelection);
+    o->setProperty ("x32Follow", s.x32Follow);
+    o->setProperty ("dm7Side", s.dm7Side);
+    o->setProperty ("name", s.name);
+    juce::Array<juce::var> triggers;
+    for (auto& t : s.x32Trigger)
+        triggers.add (t);
+    o->setProperty ("x32Trigger", triggers);
+    juce::Array<juce::var> slots;
+    for (auto& c : s.slots)
+    {
+        auto* e = new juce::DynamicObject();
+        e->setProperty ("slot", c.slot);
+        e->setProperty ("card", c.card);
+        e->setProperty ("driver", c.driver);
+        e->setProperty ("first", c.firstChannel);
+        e->setProperty ("count", c.numChannels);
+        slots.add (juce::var (e));
+    }
+    o->setProperty ("slots", slots);
+    return juce::var (o);
+}
+
+ConsoleLink::Settings ConsoleLink::settingsFromVar (const juce::var& v)
+{
+    Settings s;
+    s.type            = (Type) juce::jlimit (0, 3, (int) v["type"]);
+    s.address         = v["address"].toString();
+    s.recallScenes    = v.hasProperty ("recallScenes") ? (bool) v["recallScenes"] : true;
+    s.followSelection = v.hasProperty ("followSelection") ? (bool) v["followSelection"] : true;
+    s.x32Follow       = juce::jlimit (0, 2, (int) v["x32Follow"]);
+    s.dm7Side         = juce::jlimit (0, 1, (int) v["dm7Side"]);
+    s.name            = v["name"].toString();
+    if (auto* t = v["x32Trigger"].getArray())
+        for (int i = 0; i < juce::jmin (3, t->size()); ++i)
+            if (t->getReference (i).toString().isNotEmpty())
+                s.x32Trigger[i] = t->getReference (i).toString();
+    if (auto* slots = v["slots"].getArray())
+        for (auto& e : *slots)
+        {
+            CardSlot c;
+            c.slot = e["slot"].toString();
+            c.card = juce::jlimit (0, numCardTypes - 1, (int) e["card"]);
+            c.driver = juce::jmax (0, (int) e["driver"]);
+            c.firstChannel = juce::jmax (1, (int) e["first"]);
+            c.numChannels = juce::jmax (0, (int) e["count"]);
+            s.slots.push_back (c);
+        }
+    const auto folder = v["sceneFolder"].toString();
+    if (juce::File::isAbsolutePath (folder))
+        s.sceneFolder = juce::File (folder);
+    return s;
+}

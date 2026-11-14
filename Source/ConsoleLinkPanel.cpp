@@ -1,9 +1,10 @@
 #include "ConsoleLinkPanel.h"
 
-ConsoleLinkPanel::ConsoleLinkPanel (ConsoleLink& l, std::function<void()> applied)
-    : link (l), onApplied (std::move (applied))
+ConsoleLinkPanel::ConsoleLinkPanel (LiveConnection& l, int console)
+    : live (l), index (console)
 {
-    const auto& s = link.getSettings();
+    const auto s = live.getConsole (index).settings;
+    live.watchConsoleLog (index);   // a server sends this console's messages
     folder = s.sceneFolder;
 
     typeBox.addItem ("Off", 1);
@@ -32,7 +33,7 @@ ConsoleLinkPanel::ConsoleLinkPanel (ConsoleLink& l, std::function<void()> applie
     learnButton.onClick = [this]
     {
         apply(); // make sure we're connected with the chosen mode
-        link.startLearning();
+        live.learnConsoleTrigger (index);
     };
     triggerLabel.setColour (juce::Label::textColourId, juce::Colours::lightgrey);
     triggerLabel.setFont (juce::FontOptions (12.0f));
@@ -54,9 +55,21 @@ ConsoleLinkPanel::ConsoleLinkPanel (ConsoleLink& l, std::function<void()> applie
              &recallToggle, &followToggle, &followLabel, &followBox, &learnButton, &triggerLabel, &sideBox })
         addAndMakeVisible (c);
 
+    // Importing old scene files reads a folder on the computer with the audio
+    if (! live.isLocal())
+    {
+        folderButton.setEnabled (false);
+        folderButton.setTooltip ("Choose this folder on " + live.getServerName() + " itself");
+    }
+
     startTimerHz (4);
     timerCallback();
     setSize (680, 560);
+}
+
+ConsoleLinkPanel::~ConsoleLinkPanel()
+{
+    live.watchConsoleLog (-1);
 }
 
 void ConsoleLinkPanel::resized()
@@ -101,7 +114,8 @@ void ConsoleLinkPanel::resized()
 
 void ConsoleLinkPanel::timerCallback()
 {
-    statusLabel.setText (link.getStatusText(), juce::dontSendNotification);
+    const auto c = live.getConsole (index);
+    statusLabel.setText (c.statusText, juce::dontSendNotification);
 
     const bool isX32 = typeBox.getSelectedId() == 3;
     const bool isDm7 = typeBox.getSelectedId() == 4;
@@ -114,15 +128,17 @@ void ConsoleLinkPanel::timerCallback()
     followLabel.setEnabled (isX32 || isDm7);
     followLabel.setText (isDm7 ? "DM7 follows" : "X32 follows", juce::dontSendNotification);
 
-    const auto& st = link.getSettings();
-    triggerLabel.setText (link.isLearning() ? "Listening... recall one on the X32"
+    const auto& st = c.settings;
+    triggerLabel.setText (c.learning ? "Listening... recall one on the X32"
                                             : "Trigger: " + st.x32Trigger[juce::jlimit (0, 2, st.x32Follow)],
                           juce::dontSendNotification);
 
-    if (link.getLogCounter() != shownLogCounter)
+    // The log changed (or, from a server, has just arrived)
+    const auto lines = live.getConsoleLog (index).joinIntoString ("\n");
+    if (c.logCounter != shownLogCounter || lines != logView.getText())
     {
-        shownLogCounter = link.getLogCounter();
-        logView.setText (link.getLog().joinIntoString ("\n"), false);
+        shownLogCounter = c.logCounter;
+        logView.setText (lines, false);
         logView.moveCaretToEnd();
     }
 }
@@ -138,19 +154,19 @@ void ConsoleLinkPanel::apply()
     s.x32Follow       = juce::jmax (0, followBox.getSelectedId() - 1);
     s.dm7Side         = juce::jmax (0, sideBox.getSelectedId() - 1);
 
+    const auto now = live.getConsole (index).settings;
+
     // Keep learned trigger addresses
     for (int i = 0; i < 3; ++i)
-        s.x32Trigger[i] = link.getSettings().x32Trigger[i];
+        s.x32Trigger[i] = now.x32Trigger[i];
 
     // Keep the name and card slots (new defaults if the console type changed)
-    s.name = link.getSettings().name;
-    if (s.type == link.getSettings().type)
-        s.slots = link.getSettings().slots;
+    s.name = now.name;
+    s.slots = s.type == now.type ? now.slots : ConsoleLink::defaultSlots (s.type);
+    if (! live.isLocal())
+        s.sceneFolder = now.sceneFolder;
 
-    link.setSettings (s);
-
-    if (onApplied != nullptr)
-        onApplied();
+    live.setConsoleSettings (index, s);
 }
 
 void ConsoleLinkPanel::chooseFolder()

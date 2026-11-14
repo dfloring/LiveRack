@@ -6,6 +6,7 @@
 #include "RemoteConnection.h"
 #include "DriverSettingsPanel.h"
 #include "DevicesPanel.h"
+#include "ConsoleLinkPanel.h"
 #include "RoutingMatrix.h"
 #include "SnapshotsPanel.h"
 // Only compiled into Linux preview builds (LIVERACK_PREVIEW_HOOKS=1), used to
@@ -397,9 +398,8 @@ struct PreviewHooks
             : juce::DocumentWindow ("Devices over the network (test)", Theme::background, 0), live ("127.0.0.1", port)
         {
             setUsingNativeTitleBar (true);
-            DevicesPanel::Host h { m.engine, live, m.consoles, *m.midi, m.osc, m.webRemote,
-                [] (int) {}, [] (int) {}, [] {}, [] (int) {}, [] {},
-                [] (int, int) { return juce::String(); }, [] {}, [] { return 0; } };
+            DevicesPanel::Host h { live, m.engine, *m.midi,
+                [] (int) {}, [this] (int c) { openConsole (c); }, [] {}, [] { return 0; } };
             panel = new DevicesPanel (std::move (h));
             setContentOwned (panel, false);
             setBounds (0, 0, 1440, 960);
@@ -409,8 +409,19 @@ struct PreviewHooks
         ~RemoteDevicesWindow() override { live.removeChangeListener (this); }
         void changeListenerCallback (juce::ChangeBroadcaster*) override { panel->refresh(); }
 
+        void openConsole (int c)
+        {
+            consoleWindow = std::make_unique<juce::DocumentWindow> ("Console settings over the network", Theme::panel, juce::DocumentWindow::closeButton);
+            consolePanel = new ConsoleLinkPanel (live, c);
+            consoleWindow->setContentOwned (consolePanel, true);
+            consoleWindow->setTopLeftPosition (700, 80);
+            consoleWindow->setVisible (true);
+        }
+
         RemoteConnection live;
         DevicesPanel* panel = nullptr;
+        std::unique_ptr<juce::DocumentWindow> consoleWindow;
+        ConsoleLinkPanel* consolePanel = nullptr;
         std::unique_ptr<juce::DocumentWindow> settingsWindow;
         DriverSettingsPanel* settings = nullptr;
     };
@@ -523,6 +534,87 @@ struct PreviewHooks
         juce::Timer::callAfterDelay (9500, [show] { show ("after type"); });
     }
 
+    // Consoles, remotes, Server mode and Server check over the network
+    static void remoteSetupTest (MainComponent& m)
+    {
+        // A CL5 at a made-up address, plus a second console
+        ConsoleLink::Settings cs;
+        cs.type = ConsoleLink::Type::yamahaRcp;
+        cs.address = "127.0.0.1";
+        cs.name = "FOH CL5";
+        m.live.setConsoleSettings (0, cs);
+        m.live.addConsole();
+
+        remoteDevices = std::make_unique<RemoteDevicesWindow> (m, m.webRemote.getPort());
+        auto& live = remoteDevices->live;
+        auto& here = m.live;
+
+        juce::Timer::callAfterDelay (2500, [&live, &here]
+        {
+            bool same = live.getNumConsoles() == here.getNumConsoles();
+            for (int i = 0; same && i < here.getNumConsoles(); ++i)
+            {
+                const auto a = live.getConsole (i), b = here.getConsole (i);
+                same = a.displayName == b.displayName && a.statusText == b.statusText && a.connected == b.connected
+                       && a.settings.address == b.settings.address && a.settings.type == b.settings.type && a.settings.slots.size() == b.settings.slots.size()
+                       && a.settings.recallScenes == b.settings.recallScenes && a.settings.followSelection == b.settings.followSelection;
+            }
+            std::cerr << "RSET consoles " << live.getNumConsoles() << " same " << same << " first '" << live.getConsole (0).displayName
+                      << "' status '" << live.getConsole (0).statusText << "'" << std::endl;
+
+            const auto o1 = live.getOscSettings(), o2 = here.getOscSettings();
+            const auto w1 = live.getWebSettings(), w2 = here.getWebSettings();
+            std::cerr << "RSET osc same " << (o1.enabled == o2.enabled && o1.port == o2.port && o1.statusText == o2.statusText)
+                      << " web same " << (w1.enabled == w2.enabled && w1.port == w2.port && w1.url == w2.url && w1.statusText == w2.statusText)
+                      << " web active " << (w1.lastActivityMs != 0) << " '" << w1.statusText << "'" << std::endl;
+
+            const auto s1 = live.getServerSettings(), s2 = here.getServerSettings();
+            std::cerr << "RSET server same " << (s1.startAtLogin == s2.startAtLogin && s1.restartAfterCrash == s2.restartAfterCrash && s1.multiCore == s2.multiCore
+                                                 && s1.cores == s2.cores && s1.loginProblem == s2.loginProblem && s1.startApps == s2.startApps) << std::endl;
+
+            const auto c1 = live.getServerCheck(), c2 = here.getServerCheck();
+            bool checkSame = c1.size() == c2.size();
+            for (size_t i = 0; checkSame && i < c1.size(); ++i)
+                checkSame = c1[i].title == c2[i].title && c1[i].state == c2[i].state && c1[i].fixLabel == c2[i].fixLabel;
+            std::cerr << "RSET server check " << c1.size() << " items same " << checkSame << std::endl;
+
+            live.refreshDriverOptions();   // brings the networks too
+
+            // Changes from the network
+            auto st = live.getConsole (0).settings;
+            st.followSelection = false;
+            st.slots[0].slot = "Renamed slot";
+            live.setConsoleSettings (0, st);
+            live.setOscSettings (true, 9123, {}, {});
+            live.setServerSettings (s1.startAtLogin, s1.restartAfterCrash, ! s1.multiCore, juce::StringArray { "/usr/bin/true" });
+            live.removeConsole (1);
+            remoteDevices->openConsole (0);
+            ServerCheck::showWindow (live);
+        });
+
+        juce::Timer::callAfterDelay (4500, [&m, &live, &here]
+        {
+            const auto c = here.getConsole (0);
+            std::cerr << "RSET here now: consoles " << here.getNumConsoles() << " (expect 1), follow " << c.settings.followSelection
+                      << " (expect 0), slot '" << c.settings.slots[0].slot << "', osc port " << here.getOscSettings().port
+                      << " (expect 9123), multi-core " << here.getServerSettings().multiCore << ", start apps "
+                      << here.getServerSettings().startApps.joinIntoString (",") << std::endl;
+            std::cerr << "RSET the copy sees: consoles " << live.getNumConsoles() << ", osc '" << live.getOscSettings().statusText
+                      << "', networks " << live.getNetworks().size() << " (here " << here.getNetworks().size() << ")" << std::endl;
+            auto* p = remoteDevices->consolePanel;
+            std::cerr << "RSET console dialog: address '" << p->addressEditor.getText() << "' status '" << p->statusLabel.getText()
+                      << "' log lines " << juce::StringArray::fromLines (p->logView.getText()).size() << " (here " << here.getConsoleLog (0).size() << ")" << std::endl;
+            std::function<void (juce::Component&)> find = [&find] (juce::Component& c)
+            {
+                if (auto* b = dynamic_cast<juce::TextButton*> (&c); b != nullptr && b->getButtonText().startsWith ("Follow") | b->getButtonText().startsWith ("Recall"))
+                    std::cerr << "RSET pill '" << b->getButtonText() << "' on " << b->getToggleState() << " showing " << b->isShowing() << std::endl;
+                for (auto* ch : c.getChildren()) find (*ch);
+            };
+            find (*remoteDevices->panel);
+            juce::ignoreUnused (m);
+        });
+    }
+
     static void pump (RackEngine& e, juce::AudioBuffer<float>& in, juce::AudioBuffer<float>& out)
     {
         e.previewProcess (in, out);
@@ -553,6 +645,7 @@ struct PreviewHooks
         if (open == "overview") overviewTest (m);
         if (open == "remoterouting") openRemoteRouting (m);
         if (open == "remotedevices") openRemoteDevices (m);
+        if (open == "remotesetup") remoteSetupTest (m);
         if (open == "driverdialog") driverDialogTest (m);
         if (open == "timing")
         {
@@ -584,7 +677,7 @@ struct PreviewHooks
             std::cerr << "CHECK start apps " << ServerMode::getStartApps().joinIntoString (" ; ") << std::endl;
             ServerMode::setStartApps ({});
             m.showDevices();
-            juce::Timer::callAfterDelay (1500, [&m] { ServerCheck::showWindow (m.engine, m.webRemote); });
+            juce::Timer::callAfterDelay (1500, [&m] { ServerCheck::showWindow (m.live); });
         }
         if (open == "networks")
         {

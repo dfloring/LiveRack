@@ -1,4 +1,5 @@
 #include "ServerCheck.h"
+#include "LiveConnection.h"
 #include "RackEngine.h"
 #include "WebRemote.h"
 #include "ServerMode.h"
@@ -307,14 +308,14 @@ namespace
 class Panel : public juce::Component, private juce::Timer
 {
 public:
-    Panel (RackEngine& e, WebRemote& w) : engine (e), web (w)
+    explicit Panel (LiveConnection& l) : live (l)
     {
         list.owner = this;
         addAndMakeVisible (viewport);
         viewport.setViewedComponent (&list, false);
         viewport.setScrollBarsShown (true, false);
         addAndMakeVisible (recheck);
-        recheck.onClick = [] { refreshSoon(); };
+        recheck.onClick = [this] { live.recheckServer(); };
         onUpdated() = [safe = juce::Component::SafePointer<Panel> (this)] { if (safe != nullptr) safe->rebuild(); };
         setSize (640, 600);
         rebuild();
@@ -327,9 +328,12 @@ public:
 
     void rebuild()
     {
-        items = getSystemItems();
-        for (auto& i : getAppItems (engine, web))
-            items.push_back (i);
+        const auto now = live.getServerCheck();
+        if (! buttons.isEmpty() && now.size() == items.size()
+            && std::equal (now.begin(), now.end(), items.begin(), [] (const LiveCheckItem& a, const LiveCheckItem& b)
+                           { return a.state == b.state && a.title == b.title && a.detail == b.detail && a.fixLabel == b.fixLabel; }))
+            return;   // nothing new (a fix button being clicked stays put)
+        items = now;
 
         buttons.clear();
         int y = 0;
@@ -338,14 +342,16 @@ public:
         {
             const int h = 30 + juce::jmax (1, (int) std::ceil (juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (12.5f), i.detail) / 420.0f)) * 17 + 14;
             rows.push_back ({ y, h });
-            if (i.fixLabel.isNotEmpty() && i.fix != nullptr)
+            if (i.fixLabel.isNotEmpty())
             {
                 auto* b = buttons.add (new juce::TextButton (i.fixLabel));
-                auto fix = i.fix;
-                b->onClick = [fix, safe = juce::Component::SafePointer<Panel> (this)]
+                if (! live.isLocal())
+                    b->setTooltip ("Settings open on " + live.getServerName() + "'s own screen");
+                b->onClick = [title = i.title, safe = juce::Component::SafePointer<Panel> (this)]
                 {
-                    fix();
-                    if (safe != nullptr) juce::Timer::callAfterDelay (300, [safe] { if (safe != nullptr) safe->rebuild(); });
+                    if (safe == nullptr) return;
+                    safe->live.fixServerCheck (title);
+                    juce::Timer::callAfterDelay (600, [safe] { if (safe != nullptr) safe->rebuild(); });
                 };
                 b->setBounds (getWidth() - 220, y + h / 2 - 15, 190, 30);
                 list.addAndMakeVisible (b);
@@ -402,9 +408,8 @@ private:
         }
     };
 
-    RackEngine& engine;
-    WebRemote& web;
-    std::vector<Item> items;
+    LiveConnection& live;
+    std::vector<LiveCheckItem> items;
     std::vector<std::pair<int, int>> rows;
     Rows list;
     juce::Viewport viewport;
@@ -413,12 +418,12 @@ private:
 };
 }
 
-void showWindow (RackEngine& engine, WebRemote& web)
+void showWindow (LiveConnection& live)
 {
-    refreshSoon();
+    live.recheckServer();
     juce::DialogWindow::LaunchOptions o;
-    o.content.setOwned (new Panel (engine, web));
-    o.dialogTitle = "Server check";
+    o.content.setOwned (new Panel (live));
+    o.dialogTitle = live.isLocal() ? juce::String ("Server check") : "Server check: " + live.getServerName();
     o.dialogBackgroundColour = Theme::background;
     o.escapeKeyTriggersCloseButton = true;
     o.useNativeTitleBar = true;

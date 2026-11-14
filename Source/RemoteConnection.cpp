@@ -278,11 +278,12 @@ void RemoteConnection::received (const juce::String& text)
     }
     else if (t == "reply" && message["what"].toString() == "devices")
     {
-        juce::MessageManager::callAsync ([this, flag, data = message["data"]["devices"]]
+        juce::MessageManager::callAsync ([this, flag, data = message["data"]["devices"], nets = message["data"]["networks"]]
         {
             if (! flag->load())
                 return;
             deviceOptions = data;
+            networks = nets;
             sendChangeMessage();
         });
     }
@@ -302,6 +303,8 @@ void RemoteConnection::sendQuery()
     juce::String q ("live=1");
     if (const int n = watched.load(); n != std::numeric_limits<int>::min())
         q << "&snapshot=" << n;
+    if (const int c = watchedLog.load(); c >= 0)
+        q << "&consoleLog=" << c;
 
     const juce::ScopedLock sl (queueLock);
     outgoing.add ("{\"t\":\"query\",\"q\":\"" + q + "\"}");
@@ -768,3 +771,132 @@ juce::String RemoteConnection::setDriver (int driver, const juce::String& type, 
     sendCommand (c);
     return {};   // the server's status line says how it went
 }
+
+//==============================================================================
+// Consoles, remotes and server settings
+juce::uint32 RemoteConnection::activityFromAge (const juce::var& ageMs) const
+{
+    if (ageMs.isVoid() || (int) ageMs < 0)
+        return 0;
+    return juce::jmax<juce::uint32> (1, juce::Time::getMillisecondCounter() - (juce::uint32) (int) ageMs);
+}
+
+int RemoteConnection::getNumConsoles() { return sizeOf (state["consoleLinks"]); }
+
+LiveConsole RemoteConnection::getConsole (int i)
+{
+    LiveConsole c;
+    const auto v = at (state["consoleLinks"], i);
+    if (! v.isObject())
+        return c;
+
+    c.settings = ConsoleLink::settingsFromVar (v["settings"]);
+    c.displayName = v["displayName"].toString();
+    c.statusText = v["status"].toString();
+    c.connected = (bool) v["connected"];
+    c.learning = (bool) v["learning"];
+    c.currentScene = (int) v["scene"];
+    c.lastSelectedChannel = (int) v["selected"];
+    c.selectedRack = v["selectedRack"].toString();
+    c.logCounter = (int) v["logCounter"];
+    c.lastActivityMs = activityFromAge (at (meters["consoleAges"], i));
+    return c;
+}
+
+juce::StringArray RemoteConnection::getConsoleLog (int i)
+{
+    juce::StringArray lines;
+    const auto v = state["consoleLog"];
+    if ((int) v["console"] == i)
+        if (auto* a = v["lines"].getArray())
+            for (auto& l : *a)
+                lines.add (l.toString());
+    return lines;
+}
+
+void RemoteConnection::watchConsoleLog (int i)
+{
+    if (watchedLog.exchange (i) != i)
+        sendQuery();
+}
+
+void RemoteConnection::setConsoleSettings (int i, const ConsoleLink::Settings& s)
+{
+    sendCommand (make ("consoleSet", { { "console", i }, { "settings", ConsoleLink::settingsToVar (s) } }));
+}
+
+void RemoteConnection::addConsole()                 { sendCommand (make ("consoleAdd", {})); }
+void RemoteConnection::removeConsole (int i)        { sendCommand (make ("consoleRemove", { { "console", i } })); }
+void RemoteConnection::learnConsoleTrigger (int i)  { sendCommand (make ("consoleLearn", { { "console", i } })); }
+
+LiveRemoteSettings RemoteConnection::remoteFrom (const juce::var& v, const juce::var& ageMs) const
+{
+    LiveRemoteSettings s;
+    s.enabled = (bool) v["enabled"];
+    s.listening = (bool) v["listening"];
+    s.port = (int) v["port"];
+    s.clients = (int) v["clients"];
+    s.networkId = v["network"].toString();
+    s.networkName = v["networkName"].toString();
+    s.statusText = v["status"].toString();
+    s.url = v["url"].toString();
+    s.lastActivityMs = activityFromAge (ageMs);
+    return s;
+}
+
+LiveRemoteSettings RemoteConnection::getOscSettings() { return remoteFrom (state["osc"], meters["oscAge"]); }
+LiveRemoteSettings RemoteConnection::getWebSettings() { return remoteFrom (state["web"], meters["webAge"]); }
+
+void RemoteConnection::setOscSettings (bool on, int port, const juce::String& id, const juce::String& name)
+{
+    sendCommand (make ("oscSet", { { "enabled", on }, { "port", port }, { "network", id }, { "networkName", name } }));
+}
+
+void RemoteConnection::setWebSettings (bool on, int port, const juce::String& id, const juce::String& name)
+{
+    sendCommand (make ("webSet", { { "enabled", on }, { "port", port }, { "network", id }, { "networkName", name } }));
+}
+
+std::vector<LiveNetwork> RemoteConnection::getNetworks()
+{
+    std::vector<LiveNetwork> list;
+    if (auto* a = networks.getArray())
+        for (auto& n : *a)
+            list.push_back ({ n["id"].toString(), n["name"].toString(), n["label"].toString() });
+    return list;
+}
+
+LiveServerSettings RemoteConnection::getServerSettings()
+{
+    LiveServerSettings s;
+    const auto v = state["server"];
+    s.startAtLogin = (bool) v["startAtLogin"];
+    s.restartAfterCrash = (bool) v["restartAfterCrash"];
+    s.multiCore = (bool) v["multiCore"];
+    s.cores = juce::jmax (1, (int) v["cores"]);
+    s.loginProblem = state["serverSetup"]["loginProblem"].toString();
+    if (auto* a = state["serverSetup"]["startApps"].getArray())
+        for (auto& p : *a)
+            s.startApps.add (p.toString());
+    return s;
+}
+
+void RemoteConnection::setServerSettings (bool login, bool restart, bool multiCore, const juce::StringArray& apps)
+{
+    juce::Array<juce::var> list;
+    for (auto& a : apps)
+        list.add (a);
+    sendCommand (make ("server", { { "startAtLogin", login }, { "restartAfterCrash", restart }, { "multiCore", multiCore }, { "startApps", list } }));
+}
+
+std::vector<LiveCheckItem> RemoteConnection::getServerCheck()
+{
+    std::vector<LiveCheckItem> list;
+    if (auto* a = state["serverCheck"].getArray())
+        for (auto& i : *a)
+            list.push_back ({ (int) i["state"], i["title"].toString(), i["detail"].toString(), i["fix"].toString() });
+    return list;
+}
+
+void RemoteConnection::fixServerCheck (const juce::String& title) { sendCommand (make ("serverFix", { { "title", title } })); }
+void RemoteConnection::recheckServer()                            { sendCommand (make ("serverRecheck", {})); }

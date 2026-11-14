@@ -1,6 +1,10 @@
 #pragma once
 #include "RackEngine.h"
 #include "MidiControl.h"
+#include "ConsoleLink.h"
+
+class OscRemote;
+class WebRemote;
 
 // How LiveRack's screens reach the show.
 //
@@ -45,6 +49,49 @@ struct LiveDriverOptions
     juce::Array<int> buffers;
     double rate = 0;
     int buffer = 0;
+};
+
+// A console link, as the Devices screen shows it
+struct LiveConsole
+{
+    ConsoleLink::Settings settings;
+    juce::String displayName, statusText;
+    bool connected = false, learning = false;
+    int currentScene = -1, lastSelectedChannel = 0;
+    juce::String selectedRack;          // the rack on the last selected channel, if any
+    juce::uint32 lastActivityMs = 0;    // on this computer's millisecond counter, 0 = never
+    int logCounter = 0;                 // goes up as messages arrive (the log itself: getConsoleLog)
+};
+
+// The OSC remote or the web remote
+struct LiveRemoteSettings
+{
+    bool enabled = false, listening = false;
+    int port = 0, clients = 0;
+    juce::String networkId, networkName, statusText, url;
+    juce::uint32 lastActivityMs = 0;
+};
+
+// Server mode
+struct LiveServerSettings
+{
+    bool startAtLogin = false, restartAfterCrash = false, multiCore = false;
+    int cores = 1;
+    juce::String loginProblem;          // why starting at login can't be turned on, if it can't
+    juce::StringArray startApps;        // paths on the server
+};
+
+// One line of Server check
+struct LiveCheckItem
+{
+    int state = 0;                      // ServerCheck::Item::State
+    juce::String title, detail, fixLabel;
+};
+
+// A network the server is on
+struct LiveNetwork
+{
+    juce::String id, name, label;
 };
 
 class LiveConnection : public juce::ChangeBroadcaster
@@ -149,6 +196,29 @@ public:
     virtual bool renumberSnapshot (int from, int to) = 0;
     virtual void setSnapshotConsoleScene (int number, const juce::String& scene) = 0;
 
+    //==========================================================================
+    // Consoles
+    virtual int getNumConsoles() = 0;
+    virtual LiveConsole getConsole (int console) = 0;
+    virtual juce::StringArray getConsoleLog (int console) = 0;    // a server sends it while watched
+    virtual void watchConsoleLog (int console) = 0;               // -1 = none
+    virtual void setConsoleSettings (int console, const ConsoleLink::Settings&) = 0;
+    virtual void addConsole() = 0;
+    virtual void removeConsole (int console) = 0;
+    virtual void learnConsoleTrigger (int console) = 0;           // X32: use the next recall's address
+
+    // Remotes and server settings
+    virtual LiveRemoteSettings getOscSettings() = 0;
+    virtual LiveRemoteSettings getWebSettings() = 0;
+    virtual void setOscSettings (bool enabled, int port, const juce::String& networkId, const juce::String& networkName) = 0;
+    virtual void setWebSettings (bool enabled, int port, const juce::String& networkId, const juce::String& networkName) = 0;
+    virtual std::vector<LiveNetwork> getNetworks() = 0;
+    virtual LiveServerSettings getServerSettings() = 0;
+    virtual void setServerSettings (bool startAtLogin, bool restartAfterCrash, bool multiCore, const juce::StringArray& startApps) = 0;
+    virtual std::vector<LiveCheckItem> getServerCheck() = 0;
+    virtual void fixServerCheck (const juce::String& title) = 0;   // fixes open on the server's screen
+    virtual void recheckServer() = 0;
+
     // MIDI program changes and snapshots (on the computer with the audio)
     virtual MidiControl::SnapshotLink getSnapshotLink() = 0;
     virtual void setSnapshotLink (const MidiControl::SnapshotLink&) = 0;
@@ -167,6 +237,37 @@ public:
 
     // Console card slot for a driver's channel (1-based), from the main window
     std::function<juce::String (int driver, int channel)> slotLabelFor;
+
+    // The main window's consoles and remotes
+    struct Services
+    {
+        std::vector<std::unique_ptr<ConsoleLink>>* consoles = nullptr;
+        OscRemote* osc = nullptr;
+        WebRemote* web = nullptr;
+        std::function<void()> addConsole, consolesChanged;
+        std::function<void (int)> removeConsole;
+        std::function<juce::String (int console, int channel)> rackForChannel;
+    };
+    void setServices (Services s) { services = std::move (s); }
+
+    int getNumConsoles() override;
+    LiveConsole getConsole (int) override;
+    juce::StringArray getConsoleLog (int) override;
+    void watchConsoleLog (int) override {}
+    void setConsoleSettings (int, const ConsoleLink::Settings&) override;
+    void addConsole() override;
+    void removeConsole (int) override;
+    void learnConsoleTrigger (int) override;
+    LiveRemoteSettings getOscSettings() override;
+    LiveRemoteSettings getWebSettings() override;
+    void setOscSettings (bool, int, const juce::String&, const juce::String&) override;
+    void setWebSettings (bool, int, const juce::String&, const juce::String&) override;
+    std::vector<LiveNetwork> getNetworks() override;
+    LiveServerSettings getServerSettings() override;
+    void setServerSettings (bool, bool, bool, const juce::StringArray&) override;
+    std::vector<LiveCheckItem> getServerCheck() override;
+    void fixServerCheck (const juce::String&) override;
+    void recheckServer() override;
 
     static int numBlocks (const DriverStatus& st) { return (juce::jmax (32, st.numIns, st.numOuts) + 7) / 8; }
 
@@ -326,6 +427,9 @@ public:
     juce::StringArray getMidiOutputNames() override              { return MidiControl::getOutputNames(); }
 
 private:
+    ConsoleLink* console (int i) const;
+
     RackEngine& engine;
     MidiControl* midi = nullptr;
+    Services services;
 };

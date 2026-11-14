@@ -13,18 +13,11 @@ class DevicesPanel : public juce::Component,
 public:
     struct Host
     {
-        RackEngine& engine;
-        LiveConnection& live;     // the show, here or on a server (the driver cards so far)
-        std::vector<std::unique_ptr<ConsoleLink>>& consoles;
+        LiveConnection& live;     // drivers, consoles, remotes and server settings, here or on a server
+        RackEngine& engine;       // MIDI controllers and keyboard shortcuts stay on this computer
         MidiControl& midi;
-        OscRemote& osc;
-        WebRemote& web;
         std::function<void (int driver)> openDriverSettings;
         std::function<void (int console)> openConsoleSettings;
-        std::function<void()> addConsole;
-        std::function<void (int console)> removeConsole;
-        std::function<void()> consolesChanged;  // save settings
-        std::function<juce::String (int console, int channel)> rackForChannel;
         std::function<void()> openShortcuts;
         std::function<int()> shortcutCount;
     };

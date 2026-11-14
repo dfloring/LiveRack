@@ -534,6 +534,26 @@ MainComponent::MainComponent()
     midi = std::make_unique<MidiControl> (engine, *this);
     live.setMidi (midi.get());
     live.slotLabelFor = [this] (int d, int ch) { return slotLabelFor (d, ch); };
+    {
+        LocalConnection::Services sv;
+        sv.consoles = &consoles;
+        sv.osc = &osc;
+        sv.web = &webRemote;
+        sv.addConsole = [this] { addConsole(); };
+        sv.removeConsole = [this] (int i) { removeConsole (i); };
+        sv.consolesChanged = [this] { saveConsoles(); if (devicesPanel != nullptr) devicesPanel->refresh(); };
+        sv.rackForChannel = [this] (int console, int channel) -> juce::String
+        {
+            for (int r = 0; r < engine.getNumRacks(); ++r)
+            {
+                const auto c = engine.getRackConfig (r);
+                if (c.consoleChannel == channel && (consoles.size() < 2 || c.console == console))
+                    return c.name;
+            }
+            return {};
+        };
+        live.setServices (std::move (sv));
+    }
     midi->onChanged = [this] { statusBar->repaint(); };
     keysBar.onMidiLearn = [this] (int key) { midi->learnAction (keysBar.getKey (key)); };
     keysBar.onSetShortcut = [this] (int key)
@@ -1982,23 +2002,9 @@ void MainComponent::showDevices()
 
     juce::Component::SafePointer<MainComponent> safe (this);
 
-    DevicesPanel::Host host { engine, live, consoles, *midi, osc, webRemote,
+    DevicesPanel::Host host { live, engine, *midi,
         [safe] (int d) { if (safe != nullptr) safe->showDriverSettings (d); },
         [safe] (int c) { if (safe != nullptr) safe->showConsoleSettings (c); },
-        [safe] { if (safe != nullptr) safe->addConsole(); },
-        [safe] (int c) { if (safe != nullptr) safe->removeConsole (c); },
-        [safe] { if (safe != nullptr) safe->saveConsoles(); },
-        [safe] (int console, int channel) -> juce::String
-        {
-            if (safe == nullptr) return {};
-            for (int r = 0; r < safe->engine.getNumRacks(); ++r)
-            {
-                const auto c = safe->engine.getRackConfig (r);
-                if (c.consoleChannel == channel && (safe->consoles.size() < 2 || c.console == console))
-                    return c.name;
-            }
-            return {};
-        },
         [safe] { if (safe != nullptr) safe->showShortcuts(); },
         [safe] { return safe != nullptr ? (int) safe->extraShortcuts.size() + [&]{ int n = 0; for (int i = 0; i < UserKeysBar::numKeys; ++i) if (safe->keysBar.getShortcut (i).isValid()) ++n; return n; }() : 0; } };
 
@@ -2626,12 +2632,7 @@ void MainComponent::showConsoleSettings (int i)
     if (! juce::isPositiveAndBelow (i, (int) consoles.size()))
         return;
 
-    juce::Component::SafePointer<MainComponent> safe (this);
-    auto* panel = new ConsoleLinkPanel (*consoles[(size_t) i], [safe]
-    {
-        if (safe != nullptr)
-            safe->saveConsoles();
-    });
+    auto* panel = new ConsoleLinkPanel (live, i);
 
     juce::DialogWindow::LaunchOptions o;
     o.content.setOwned (panel);
@@ -3206,6 +3207,65 @@ void MainComponent::addLiveState (juce::DynamicObject& r)
 {
     auto obj = [] { return juce::var (new juce::DynamicObject()); };
 
+    // Devices: consoles, remotes, server mode and Server check
+    {
+        juce::Array<juce::var> list;
+        for (int i = 0; i < live.getNumConsoles(); ++i)
+        {
+            const auto c = live.getConsole (i);
+            auto cv = obj();
+            auto* o = cv.getDynamicObject();
+            o->setProperty ("settings", ConsoleLink::settingsToVar (c.settings));
+            o->setProperty ("displayName", c.displayName);
+            o->setProperty ("status", c.statusText);
+            o->setProperty ("connected", c.connected);
+            o->setProperty ("learning", c.learning);
+            o->setProperty ("scene", c.currentScene);
+            o->setProperty ("selected", c.lastSelectedChannel);
+            o->setProperty ("selectedRack", c.selectedRack);
+            o->setProperty ("logCounter", c.logCounter);
+            list.add (cv);
+        }
+        r.setProperty ("consoleLinks", list);
+
+        auto remote = [&obj] (const LiveRemoteSettings& s)
+        {
+            auto v = obj();
+            auto* o = v.getDynamicObject();
+            o->setProperty ("enabled", s.enabled);
+            o->setProperty ("listening", s.listening);
+            o->setProperty ("port", s.port);
+            o->setProperty ("clients", s.clients);
+            o->setProperty ("network", s.networkId);
+            o->setProperty ("networkName", s.networkName);
+            o->setProperty ("status", s.statusText);
+            o->setProperty ("url", s.url);
+            return v;
+        };
+        r.setProperty ("osc", remote (live.getOscSettings()));
+        r.setProperty ("web", remote (live.getWebSettings()));
+
+        const auto ss = live.getServerSettings();
+        auto sv = obj();
+        sv.getDynamicObject()->setProperty ("loginProblem", ss.loginProblem);
+        juce::Array<juce::var> apps;
+        for (auto& a : ss.startApps) apps.add (a);
+        sv.getDynamicObject()->setProperty ("startApps", apps);
+        r.setProperty ("serverSetup", sv);
+
+        juce::Array<juce::var> check;
+        for (auto& i : live.getServerCheck())
+        {
+            auto iv = obj();
+            iv.getDynamicObject()->setProperty ("state", i.state);
+            iv.getDynamicObject()->setProperty ("title", i.title);
+            iv.getDynamicObject()->setProperty ("detail", i.detail);
+            iv.getDynamicObject()->setProperty ("fix", i.fixLabel);
+            check.add (iv);
+        }
+        r.setProperty ("serverCheck", check);
+    }
+
     // Audio drivers and how they're doing
     juce::Array<juce::var> drivers;
     for (int d = 0; d < engine.getNumDrivers(); ++d)
@@ -3412,6 +3472,16 @@ juce::String MainComponent::buildWebMeters()
     root->setProperty ("racks", racks);
     root->setProperty ("drivers", drivers);
     root->setProperty ("bpm", engine.getBpm());
+
+    // How long ago each console and remote last sent something (ms, -1 = never)
+    const auto now = juce::Time::getMillisecondCounter();
+    auto age = [now] (juce::uint32 t) { return t == 0 ? juce::var (-1) : juce::var ((int) juce::jmin<juce::uint32> (now - t, 86400000u)); };
+    juce::Array<juce::var> consoleAges;
+    for (int i = 0; i < live.getNumConsoles(); ++i)
+        consoleAges.add (age (live.getConsole (i).lastActivityMs));
+    root->setProperty ("consoleAges", consoleAges);
+    root->setProperty ("oscAge", age (live.getOscSettings().lastActivityMs));
+    root->setProperty ("webAge", age (live.getWebSettings().lastActivityMs));
     return juce::JSON::toString (juce::var (root), true);
 }
 
@@ -3447,7 +3517,33 @@ void MainComponent::addWebEditState (juce::DynamicObject& r, const juce::String&
         addLiveState (r);
 
     if (has ("devices"))
+    {
         r.setProperty ("devices", buildDeviceOptions());
+
+        juce::Array<juce::var> nets;
+        for (auto& n : live.getNetworks())
+        {
+            auto nv = obj();
+            nv.getDynamicObject()->setProperty ("id", n.id);
+            nv.getDynamicObject()->setProperty ("name", n.name);
+            nv.getDynamicObject()->setProperty ("label", n.label);
+            nets.add (nv);
+        }
+        r.setProperty ("networks", nets);
+    }
+
+    // One console's message log
+    for (auto& part : juce::StringArray::fromTokens (query, "&", ""))
+        if (part.startsWith ("consoleLog="))
+        {
+            const int i = part.fromFirstOccurrenceOf ("=", false, false).getIntValue();
+            auto lv = obj();
+            lv.getDynamicObject()->setProperty ("console", i);
+            juce::Array<juce::var> lines;
+            for (auto& l : live.getConsoleLog (i)) lines.add (l);
+            lv.getDynamicObject()->setProperty ("lines", lines);
+            r.setProperty ("consoleLog", lv);
+        }
 
     // One snapshot in detail: what recalling it would change, and what it recalls
     for (auto& part : juce::StringArray::fromTokens (query, "&", ""))
@@ -3679,6 +3775,59 @@ bool MainComponent::handleServerCommand (const juce::String& cmd, const juce::va
         if (c.hasProperty ("multiCore"))         engine.setMultiCore ((bool) c["multiCore"]);
         if (c.hasProperty ("startAtLogin"))      ServerMode::setStartAtLogin ((bool) c["startAtLogin"]);
         if (c.hasProperty ("restartAfterCrash")) ServerMode::setRestartAfterCrash ((bool) c["restartAfterCrash"]);
+        if (auto* apps = c["startApps"].getArray())
+        {
+            juce::StringArray list;
+            for (auto& a : *apps)
+                if (juce::File::isAbsolutePath (a.toString()))
+                    list.add (a.toString());
+            ServerMode::setStartApps (list);
+        }
+    }
+    else if (cmd == "consoleSet" && juce::isPositiveAndBelow ((int) c["console"], live.getNumConsoles()))
+    {
+        live.setConsoleSettings ((int) c["console"], ConsoleLink::settingsFromVar (c["settings"]));
+    }
+    else if (cmd == "consoleAdd")
+    {
+        // A console added from a client: no settings dialog on this screen
+        consoles.push_back (std::make_unique<ConsoleLink>());
+        wireConsole ((int) consoles.size() - 1);
+        saveConsoles();
+        if (devicesPanel != nullptr) devicesPanel->refresh();
+    }
+    else if (cmd == "consoleRemove")
+    {
+        live.removeConsole ((int) c["console"]);
+    }
+    else if (cmd == "consoleLearn")
+    {
+        live.learnConsoleTrigger ((int) c["console"]);
+    }
+    else if (cmd == "oscSet" || cmd == "webSet")
+    {
+        const auto now = cmd == "oscSet" ? live.getOscSettings() : live.getWebSettings();
+        const bool on = c.hasProperty ("enabled") ? (bool) c["enabled"] : now.enabled;
+        const int port = c.hasProperty ("port") ? juce::jlimit (1, 65535, (int) c["port"]) : now.port;
+        const auto id = c.hasProperty ("network") ? c["network"].toString() : now.networkId;
+        const auto name = c.hasProperty ("networkName") ? c["networkName"].toString() : now.networkName;
+        // The web remote restarts after its reply has gone (a client may be talking through it)
+        if (cmd == "oscSet")
+            live.setOscSettings (on, port, id, name);
+        else
+            juce::Timer::callAfterDelay (300, [safe = juce::Component::SafePointer<MainComponent> (this), on, port, id, name]
+            {
+                if (safe != nullptr)
+                    safe->live.setWebSettings (on, port, id, name);
+            });
+    }
+    else if (cmd == "serverFix")
+    {
+        live.fixServerCheck (c["title"].toString());
+    }
+    else if (cmd == "serverRecheck")
+    {
+        live.recheckServer();
     }
     else if (cmd == "driverAdd")
     {

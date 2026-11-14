@@ -6,7 +6,8 @@
 #include "ServerCheck.h"
 
 // A "Network" choice for a remote's settings: all networks, or one of this computer's
-static void addNetworkChoice (juce::AlertWindow& w, const juce::String& currentId, const juce::String& currentName,
+static void addNetworkChoice (juce::AlertWindow& w, const std::vector<LiveNetwork>& networks,
+                              const juce::String& currentId, const juce::String& currentName,
                               std::vector<std::pair<juce::String, juce::String>>& choices)
 {
     choices.clear();
@@ -14,12 +15,12 @@ static void addNetworkChoice (juce::AlertWindow& w, const juce::String& currentI
     juce::StringArray items { "All networks" };
     int selected = 0;
 
-    for (auto& n : SocketUtil::getNetworks())
+    for (auto& n : networks)
     {
         if (n.id == currentId)
             selected = items.size();
         choices.push_back ({ n.id, n.name });
-        items.add (n.describe());
+        items.add (n.label);
     }
 
     if (currentId.isNotEmpty() && selected == 0)
@@ -244,38 +245,34 @@ public:
         settings.onClick = [this] { if (host.openConsoleSettings) host.openConsoleSettings (index); };
         remove.onClick = [this]
         {
-            if (host.removeConsole)
-            {
-                auto& hh = host;
-                const int idx = index;
-                juce::MessageManager::callAsync ([&hh, idx] { hh.removeConsole (idx); });
-            }
+            auto& live = host.live;
+            const int idx = index;
+            juce::MessageManager::callAsync ([&live, idx] { live.removeConsole (idx); });
         };
 
         recallPill.onClick = [this]
         {
-            auto s = link().getSettings();
+            auto s = info().settings;
             s.recallScenes = ! s.recallScenes;
-            link().setSettings (s);
-            changed();
+            setSettings (s);
         };
         followPill.onClick = [this]
         {
-            auto s = link().getSettings();
+            auto s = info().settings;
             s.followSelection = ! s.followSelection;
-            link().setSettings (s);
-            changed();
+            setSettings (s);
         };
     }
 
-    ConsoleLink& link() { return *host.consoles[(size_t) index]; }
-    void changed() { if (host.consolesChanged) host.consolesChanged(); repaint(); }
+    // The console, here or on a server
+    LiveConsole info() { return host.live.getConsole (index); }
+    void setSettings (const ConsoleLink::Settings& s) { host.live.setConsoleSettings (index, s); updatePills(); repaint(); }
 
     juce::Rectangle<int> slotArea() const { return getLocalBounds().reduced (16).withTrimmedTop (56).withHeight (86); }
 
     juce::Rectangle<int> slotBounds (int i) const
     {
-        const int n = juce::jmax (1, (int) host.consoles[(size_t) index]->getSettings().slots.size());
+        const int n = juce::jmax (1, (int) host.live.getConsole (index).settings.slots.size());
         auto a = slotArea();
         const int w = (a.getWidth() - (n - 1) * 8) / n;
         return { a.getX() + i * (w + 8), a.getY(), w, a.getHeight() };
@@ -283,8 +280,8 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        auto& l = link();
-        const auto& s = l.getSettings();
+        const auto l = info();
+        const auto& s = l.settings;
         auto area = getLocalBounds();
         fillCard (g, area);
         area = area.reduced (16);
@@ -292,12 +289,12 @@ public:
         const bool off = s.type == ConsoleLink::Type::off;
         auto top = area.removeFromTop (30);
         Theme::drawLight (g, top.removeFromLeft (16).withSizeKeepingCentre (14, 14).toFloat(),
-                          off ? Theme::textDim : l.isConnected() ? Theme::green : Theme::red);
+                          off ? Theme::textDim : l.connected ? Theme::green : Theme::red);
         top.removeFromLeft (10);
 
         g.setColour (Theme::text);
         g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
-        const auto name = l.getDisplayName();
+        const auto name = l.displayName;
         g.drawText (name, top, juce::Justification::centredLeft);
         const int nameW = juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (18.0f, juce::Font::bold), name);
 
@@ -305,7 +302,7 @@ public:
         g.setFont (juce::FontOptions (13.0f));
         juce::String sub = off ? "Link off: open Settings to choose the console"
                                : s.address + "  " + (ConsoleLink::isYamaha (s.type) ? "RCP" : "OSC")
-                                 + (l.isConnected() ? "  connected" : "  not connected");
+                                 + (l.connected ? "  connected" : "  not connected");
         g.drawText (sub, top.withTrimmedLeft (nameW + 14), juce::Justification::centredLeft, true);
 
         // Card slots
@@ -344,7 +341,7 @@ public:
 
             juce::String route = "Not used";
             if (c.card != 0 && c.numChannels > 0)
-                route = host.engine.getDriverLabel (c.driver).substring (0, 18) + "  "
+                route = host.live.getDriver (c.driver).label.substring (0, 18) + "  "
                         + juce::String (c.firstChannel) + "-" + juce::String (c.firstChannel + c.numChannels - 1);
             g.drawFittedText (route, t, juce::Justification::topLeft, 2, 0.8f);
         }
@@ -356,12 +353,11 @@ public:
         const int tw = (tiles.getWidth() - 16) / 3;
 
         juce::String sel = "-";
-        if (l.getLastSelectedChannel() > 0)
+        if (l.lastSelectedChannel > 0)
         {
-            sel = "CH " + juce::String (l.getLastSelectedChannel());
-            if (host.rackForChannel)
-                if (auto rack = host.rackForChannel (index, l.getLastSelectedChannel()); rack.isNotEmpty())
-                    sel << "  >  " << rack;
+            sel = "CH " + juce::String (l.lastSelectedChannel);
+            if (l.selectedRack.isNotEmpty())
+                sel << "  >  " << l.selectedRack;
         }
 
         auto tile = [&g] (juce::Rectangle<int> r, const juce::String& k, const juce::String& v, juce::Colour light)
@@ -379,12 +375,12 @@ public:
             g.drawFittedText (v, t, juce::Justification::centredLeft, 1, 0.75f);
         };
 
-        const bool flash = recent (l.getLastActivityMs(), 400);
-        tile (tiles.removeFromLeft (tw), "LAST SCENE", l.getCurrentScene() >= 0 ? juce::String (l.getCurrentScene()) : juce::String ("-"), Theme::green.withAlpha (l.getCurrentScene() >= 0 ? 1.0f : 0.3f));
+        const bool flash = recent (l.lastActivityMs, 400);
+        tile (tiles.removeFromLeft (tw), "LAST SCENE", l.currentScene >= 0 ? juce::String (l.currentScene) : juce::String ("-"), Theme::green.withAlpha (l.currentScene >= 0 ? 1.0f : 0.3f));
         tiles.removeFromLeft (8);
-        tile (tiles.removeFromLeft (tw), "SELECTED", sel, Theme::accent.withAlpha (l.getLastSelectedChannel() > 0 ? 1.0f : 0.3f));
+        tile (tiles.removeFromLeft (tw), "SELECTED", sel, Theme::accent.withAlpha (l.lastSelectedChannel > 0 ? 1.0f : 0.3f));
         tiles.removeFromLeft (8);
-        tile (tiles, "LAST MESSAGE", ago (l.getLastActivityMs()), flash ? Theme::green : Theme::textDim.withAlpha (0.4f));
+        tile (tiles, "LAST MESSAGE", ago (l.lastActivityMs), flash ? Theme::green : Theme::textDim.withAlpha (0.4f));
     }
 
     void resized() override
@@ -400,11 +396,12 @@ public:
 
     void updatePills()
     {
-        recallPill.setToggleState (link().getSettings().recallScenes, juce::dontSendNotification);
-        followPill.setToggleState (link().getSettings().followSelection, juce::dontSendNotification);
+        const auto s = info().settings;
+        recallPill.setToggleState (s.recallScenes, juce::dontSendNotification);
+        followPill.setToggleState (s.followSelection, juce::dontSendNotification);
 
         // Yamaha consoles report CUE presses, not SEL: their racks follow the cued channel
-        const auto type = link().getSettings().type;
+        const auto type = s.type;
         const bool yamaha = type == ConsoleLink::Type::yamahaRcp || type == ConsoleLink::Type::yamahaDm7;
         followPill.setButtonText (yamaha ? "Follow CUE" : "Follow selection");
         followPill.setTooltip (yamaha ? "Pressing CUE on an input channel selects the rack with that console channel (the console doesn't report SEL)"
@@ -413,7 +410,7 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        const int n = (int) link().getSettings().slots.size();
+        const int n = (int) info().settings.slots.size();
         for (int i = 0; i < n; ++i)
             if (slotBounds (i).contains (e.getPosition()))
             {
@@ -424,13 +421,16 @@ public:
 
     void showSlotMenu (int i)
     {
-        const auto c = link().getSettings().slots[(size_t) i];
+        const auto all = info().settings.slots;
+        if (! juce::isPositiveAndBelow (i, (int) all.size()))
+            return;
+        const auto c = all[(size_t) i];
         juce::PopupMenu m, card, drv, first, count;
 
         for (int t = 0; t < ConsoleLink::numCardTypes; ++t)
             card.addItem (100 + t, ConsoleLink::cardTypeName (t), true, c.card == t);
-        for (int d = 0; d < host.engine.getNumDrivers(); ++d)
-            drv.addItem (200 + d, host.engine.getDriverLabel (d), true, c.driver == d);
+        for (int d = 0; d < host.live.getNumDrivers(); ++d)
+            drv.addItem (200 + d, host.live.getDriver (d).label, true, c.driver == d);
         for (int f : { 1, 9, 17, 25, 33, 41, 49, 57, 65, 97 })
             first.addItem (300 + f, juce::String (f), true, c.firstChannel == f);
         for (int n : { 8, 16, 32, 48, 64, 128 })
@@ -450,7 +450,7 @@ public:
             if (safe == nullptr || r == 0)
                 return;
 
-            auto s = safe->link().getSettings();
+            auto s = safe->info().settings;
             if (! juce::isPositiveAndBelow (i, (int) s.slots.size()))
                 return;
             auto& slot = s.slots[(size_t) i];
@@ -474,18 +474,16 @@ public:
                 {
                     if (safe != nullptr && res == 1)
                     {
-                        auto st = safe->link().getSettings();
+                        auto st = safe->info().settings;
                         if (juce::isPositiveAndBelow (i, (int) st.slots.size()))
                             st.slots[(size_t) i].slot = w->getTextEditorContents ("name");
-                        safe->link().setSettings (st);
-                        safe->changed();
+                        safe->setSettings (st);
                     }
                 }), true);
                 return;
             }
 
-            safe->link().setSettings (s);
-            safe->changed();
+            safe->setSettings (s);
         });
     }
 
@@ -526,11 +524,12 @@ public:
         }
         else if (kind == osc)
         {
+            const auto o = host.live.getOscSettings();
             title = "OSC remote / Companion";
-            sub = host.osc.getStatusText();
-            light = ! host.osc.isEnabled() ? Theme::textDim.withAlpha (0.3f)
-                  : ! host.osc.isListening() ? Theme::red
-                  : recent (host.osc.getLastActivityMs(), 300) ? Theme::green : Theme::green.withAlpha (0.35f);
+            sub = o.statusText;
+            light = ! o.enabled ? Theme::textDim.withAlpha (0.3f)
+                  : ! o.listening ? Theme::red
+                  : recent (o.lastActivityMs, 300) ? Theme::green : Theme::green.withAlpha (0.35f);
         }
         else if (kind == mappings)
         {
@@ -541,17 +540,18 @@ public:
         }
         else if (kind == web)
         {
+            const auto w = host.live.getWebSettings();
             title = "iPad / web remote";
-            sub = host.web.isEnabled() && host.web.isListening() ? "Open " + host.web.getUrl() + " in Safari  |  "
-                                                                     + juce::String (host.web.getNumClients()) + " connected"
-                                                                   : host.web.getStatusText();
-            light = ! host.web.isEnabled() ? Theme::textDim.withAlpha (0.3f)
-                  : ! host.web.isListening() ? Theme::red
-                  : recent (host.web.getLastActivityMs(), 400) ? Theme::green : Theme::green.withAlpha (0.35f);
+            sub = w.enabled && w.listening ? "Open " + w.url + " in Safari  |  " + juce::String (w.clients) + " connected"
+                                           : w.statusText;
+            light = ! w.enabled ? Theme::textDim.withAlpha (0.3f)
+                  : ! w.listening ? Theme::red
+                  : recent (w.lastActivityMs, 400) ? Theme::green : Theme::green.withAlpha (0.35f);
         }
         else if (kind == server)
         {
-            const bool login = ServerMode::startsAtLogin(), restart = ServerMode::restartsAfterCrash();
+            const auto ss = host.live.getServerSettings();
+            const bool login = ss.startAtLogin, restart = ss.restartAfterCrash;
             title = "Server mode";
             sub = login && restart ? "Starts with the computer, restarts after a crash"
                 : login            ? "Starts with the computer"
@@ -562,8 +562,7 @@ public:
         else if (kind == serverCheck)
         {
             int look = 0;
-            for (auto& i : ServerCheck::getSystemItems()) if (i.state == ServerCheck::Item::lookAt) ++look;
-            for (auto& i : ServerCheck::getAppItems (host.engine, host.web)) if (i.state == ServerCheck::Item::lookAt) ++look;
+            for (auto& i : host.live.getServerCheck()) if (i.state == ServerCheck::Item::lookAt) ++look;
             title = "Server check";
             sub = look == 0 ? "Ready for a service: nothing to look at" : juce::String (look) + (look == 1 ? " thing" : " things") + " to look at: click for the list";
             light = look == 0 ? Theme::green.withAlpha (0.6f) : Theme::amber;
@@ -635,49 +634,77 @@ public:
         }
         else if (kind == serverCheck)
         {
-            ServerCheck::showWindow (host.engine, host.web);
+            ServerCheck::showWindow (host.live);
         }
         else if (kind == server)
         {
-            const auto problem = ServerMode::startAtLoginProblem();
+            const auto ss = host.live.getServerSettings();
+            const auto problem = ss.loginProblem;
+            const bool here = host.live.isLocal();
             juce::PopupMenu m;
-            m.addSectionHeader ("For a computer nobody sits at");
-            m.addItem (1, "Start LiveRack when this computer starts", problem.isEmpty(), ServerMode::startsAtLogin());
+            m.addSectionHeader (here ? juce::String ("For a computer nobody sits at") : "For " + host.live.getServerName());
+            m.addItem (1, here ? "Start LiveRack when this computer starts" : "Start LiveRack when the server starts", problem.isEmpty(), ss.startAtLogin);
             if (problem.isNotEmpty())
                 m.addItem (-1, problem, false);
-            m.addItem (2, "Restart LiveRack if it quits unexpectedly", true, ServerMode::restartsAfterCrash());
+            m.addItem (2, "Restart LiveRack if it quits unexpectedly", true, ss.restartAfterCrash);
             m.addSeparator();
-            m.addItem (3, "Run racks on " + juce::String (RackEngine::getNumRackThreads()) + " CPU cores at once",
-                       RackEngine::getNumRackThreads() > 1, host.engine.isMultiCore());
+            m.addItem (3, "Run racks on " + juce::String (ss.cores) + " CPU cores at once", ss.cores > 1, ss.multiCore);
             m.addSeparator();
 
             // Other apps to start with LiveRack (QRec for SoundGrid, say)
             juce::PopupMenu apps;
-            const auto startApps = ServerMode::getStartApps();
-            for (int i = 0; i < startApps.size(); ++i)
-                apps.addItem (100 + i, "Remove " + juce::File (startApps[i]).getFileNameWithoutExtension());
-            if (! startApps.isEmpty())
+            for (int i = 0; i < ss.startApps.size(); ++i)
+                apps.addItem (100 + i, "Remove " + juce::File (ss.startApps[i]).getFileNameWithoutExtension());
+            if (! ss.startApps.isEmpty())
                 apps.addSeparator();
-            apps.addItem (99, juce::String::fromUTF8 ("Add an app" "\xe2\x80\xa6"));
+            apps.addItem (99, juce::String::fromUTF8 (here ? "Add an app" "\xe2\x80\xa6" : "Add an app (its path on the server)" "\xe2\x80\xa6"));
             juce::String appNames;
-            for (auto& a : startApps)
+            for (auto& a : ss.startApps)
                 appNames << (appNames.isEmpty() ? "" : ", ") << juce::File (a).getFileNameWithoutExtension();
             m.addSubMenu ("Start these apps too" + (appNames.isEmpty() ? juce::String() : ": " + appNames), apps);
             m.addSeparator();
             m.addItem (-1, "Set the computer to log in automatically too (Server check shows it)", false);
 
             juce::Component::SafePointer<juce::Component> safe (this);
-            auto* engine = &host.engine;
-            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safe, engine] (int r)
+            auto* live = &host.live;
+            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safe, live, ss, here] (int r)
             {
-                if (r == 3) engine->setMultiCore (! engine->isMultiCore());
+                auto set = [live, ss] (bool login, bool restart, bool multi, const juce::StringArray& list)
+                {
+                    live->setServerSettings (login, restart, multi, list);
+                    juce::ignoreUnused (ss);
+                };
+                auto list = ss.startApps;
+
+                if (r == 1) set (! ss.startAtLogin, ss.restartAfterCrash, ss.multiCore, list);
+                if (r == 2) set (ss.startAtLogin, ! ss.restartAfterCrash, ss.multiCore, list);
+                if (r == 3) set (ss.startAtLogin, ss.restartAfterCrash, ! ss.multiCore, list);
                 if (r >= 100)
                 {
-                    auto list = ServerMode::getStartApps();
                     list.remove (r - 100);
-                    ServerMode::setStartApps (list);
+                    set (ss.startAtLogin, ss.restartAfterCrash, ss.multiCore, list);
                 }
-                if (r == 99)
+                if (r == 99 && ! here)
+                {
+                    // The app is on the server: type its path there
+                    auto* w = new juce::AlertWindow ("Start an app with LiveRack",
+                                                     "The app's full path on " + live->getServerName() + ", for example C:\\Program Files\\Waves\\QRec\\QRec.exe",
+                                                     juce::MessageBoxIconType::NoIcon);
+                    w->addTextEditor ("path", {}, "Path");
+                    w->addButton ("Add", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                    w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                    w->enterModalState (true, juce::ModalCallbackFunction::create ([live, ss, w] (int res)
+                    {
+                        const auto path = w->getTextEditorContents ("path").trim().unquoted();
+                        if (res == 1 && path.isNotEmpty())
+                        {
+                            auto l = ss.startApps;
+                            l.addIfNotAlreadyThere (path);
+                            live->setServerSettings (ss.startAtLogin, ss.restartAfterCrash, ss.multiCore, l);
+                        }
+                    }), true);
+                }
+                else if (r == 99)
                 {
                    #if JUCE_MAC
                     const auto where = juce::File ("/Applications");
@@ -691,45 +718,42 @@ public:
                    #endif
                     auto chooser = std::make_shared<juce::FileChooser> ("An app to start with LiveRack", where, pattern);
                     chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-                                          [chooser] (const juce::FileChooser& fc)
+                                          [chooser, live, ss] (const juce::FileChooser& fc)
                                           {
                                               const auto f = fc.getResult();
                                               if (f == juce::File())
                                                   return;
-                                              auto list = ServerMode::getStartApps();
-                                              list.addIfNotAlreadyThere (f.getFullPathName());
-                                              ServerMode::setStartApps (list);
+                                              auto l = ss.startApps;
+                                              l.addIfNotAlreadyThere (f.getFullPathName());
+                                              live->setServerSettings (ss.startAtLogin, ss.restartAfterCrash, ss.multiCore, l);
                                           });
                 }
-                if (r == 1) ServerMode::setStartAtLogin (! ServerMode::startsAtLogin());
-                if (r == 2) ServerMode::setRestartAfterCrash (! ServerMode::restartsAfterCrash());
                 if (safe != nullptr) safe->repaint();
             });
         }
         else if (kind == web)
         {
+            const auto ws = host.live.getWebSettings();
             auto* w = new juce::AlertWindow ("iPad / web remote",
                 "Open the address below in Safari on an iPad (or any browser on the same network). "
-                "In Safari, Share > Add to Home Screen makes it an app-like icon.\n\n" + host.web.getUrl(),
+                "In Safari, Share > Add to Home Screen makes it an app-like icon.\n\n" + ws.url,
                 juce::MessageBoxIconType::NoIcon);
-            w->addTextEditor ("port", juce::String (host.web.getPort()), "Port");
+            w->addTextEditor ("port", juce::String (ws.port), "Port");
             w->addComboBox ("on", { "On", "Off" }, "Web remote");
-            w->getComboBoxComponent ("on")->setSelectedItemIndex (host.web.isEnabled() ? 0 : 1);
+            w->getComboBoxComponent ("on")->setSelectedItemIndex (ws.enabled ? 0 : 1);
             auto choices = std::make_shared<std::vector<std::pair<juce::String, juce::String>>>();
-            addNetworkChoice (*w, host.web.getNetworkId(), host.web.getNetworkName(), *choices);
+            addNetworkChoice (*w, host.live.getNetworks(), ws.networkId, ws.networkName, *choices);
             w->addTextBlock ("Network: answer only devices on this network (and this computer). Pick your control network to keep remote traffic off Dante and SoundGrid.");
             w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
             w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-            auto& wr = host.web;
-            w->enterModalState (true, juce::ModalCallbackFunction::create ([&wr, w, choices] (int r)
+            auto& live = host.live;
+            w->enterModalState (true, juce::ModalCallbackFunction::create ([&live, w, choices] (int r)
             {
                 if (r == 1)
                 {
                     const auto& c = (*choices)[(size_t) juce::jmax (0, w->getComboBoxComponent ("network")->getSelectedItemIndex())];
-                    wr.setNetwork (c.first, c.second);
-                    wr.setEnabled (w->getComboBoxComponent ("on")->getSelectedItemIndex() == 0,
-                                   w->getTextEditorContents ("port").getIntValue());
-                    wr.saveSettings();
+                    live.setWebSettings (w->getComboBoxComponent ("on")->getSelectedItemIndex() == 0,
+                                         w->getTextEditorContents ("port").getIntValue(), c.first, c.second);
                 }
             }), true);
         }
@@ -737,23 +761,22 @@ public:
         {
             auto* w = new juce::AlertWindow ("OSC remote", "LiveRack listens for OSC on this UDP port and sends feedback back to whoever talks to it (for Companion).",
                                              juce::MessageBoxIconType::NoIcon);
-            w->addTextEditor ("port", juce::String (host.osc.getPort()), "Port");
+            const auto os = host.live.getOscSettings();
+            w->addTextEditor ("port", juce::String (os.port), "Port");
             w->addComboBox ("on", { "On", "Off" }, "Remote control");
-            w->getComboBoxComponent ("on")->setSelectedItemIndex (host.osc.isEnabled() ? 0 : 1);
+            w->getComboBoxComponent ("on")->setSelectedItemIndex (os.enabled ? 0 : 1);
             auto choices = std::make_shared<std::vector<std::pair<juce::String, juce::String>>>();
-            addNetworkChoice (*w, host.osc.getNetworkId(), host.osc.getNetworkName(), *choices);
+            addNetworkChoice (*w, host.live.getNetworks(), os.networkId, os.networkName, *choices);
             w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
             w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-            auto& o = host.osc;
-            w->enterModalState (true, juce::ModalCallbackFunction::create ([&o, w, choices] (int r)
+            auto& live = host.live;
+            w->enterModalState (true, juce::ModalCallbackFunction::create ([&live, w, choices] (int r)
             {
                 if (r == 1)
                 {
                     const auto& c = (*choices)[(size_t) juce::jmax (0, w->getComboBoxComponent ("network")->getSelectedItemIndex())];
-                    o.setNetwork (c.first, c.second);
-                    o.setEnabled (w->getComboBoxComponent ("on")->getSelectedItemIndex() == 0,
-                                  w->getTextEditorContents ("port").getIntValue());
-                    o.saveSettings();
+                    live.setOscSettings (w->getComboBoxComponent ("on")->getSelectedItemIndex() == 0,
+                                         w->getTextEditorContents ("port").getIntValue(), c.first, c.second);
                 }
             }), true);
         }
@@ -811,7 +834,7 @@ public:
                 if (host.openDriverSettings) host.openDriverSettings (host.live.getNumDrivers() - 1);
             }
         };
-        addConsole.onClick = [this] { if (host.addConsole) host.addConsole(); };
+        addConsole.onClick = [this] { host.live.addConsole(); };
         addAndMakeVisible (addDriver);
         addAndMakeVisible (addConsole);
         rebuild();
@@ -826,7 +849,7 @@ public:
         for (int d = 0; d < host.live.getNumDrivers(); ++d)
             addAndMakeVisible (drivers.add (new DriverCard (host, d)));
 
-        for (int c = 0; c < (int) host.consoles.size(); ++c)
+        for (int c = 0; c < host.live.getNumConsoles(); ++c)
             addAndMakeVisible (consoles.add (new ConsoleCard (host, c)));
 
         for (auto& d : host.midi.getDevices())
@@ -959,7 +982,7 @@ void DevicesPanel::timerCallback()
 {
     // Devices plugged in or removed
     if ((int) content->drivers.size() != host.live.getNumDrivers()
-        || (int) content->consoles.size() != (int) host.consoles.size()
+        || (int) content->consoles.size() != host.live.getNumConsoles()
         || (int) content->controllers.size() != (int) host.midi.getDevices().size() + 7)
         refresh();
 

@@ -3,6 +3,7 @@
 
 class RackEngine;
 class WebRemote;
+class LiveConnection;
 
 // "Server check": the things that make a computer nobody sits at drop out,
 // sleep, restart or lock during a service, each with a way to fix it.
@@ -26,6 +27,6 @@ namespace ServerCheck
     // LiveRack's own settings (message thread)
     std::vector<Item> getAppItems (RackEngine&, WebRemote&);
 
-    // A window listing them all, with the fix buttons
-    void showWindow (RackEngine&, WebRemote&);
+    // A window listing them all, with the fix buttons (for this computer or a server)
+    void showWindow (LiveConnection&);
 }

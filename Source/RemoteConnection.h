@@ -36,6 +36,25 @@ public:
     void refreshDriverOptions() override;
     LiveDriverOptions getDriverOptions (int driver) override;
     juce::String setDriver (int driver, const juce::String& type, const juce::String& device, double rate, int buffer) override;
+
+    int getNumConsoles() override;
+    LiveConsole getConsole (int) override;
+    juce::StringArray getConsoleLog (int) override;
+    void watchConsoleLog (int) override;
+    void setConsoleSettings (int, const ConsoleLink::Settings&) override;
+    void addConsole() override;
+    void removeConsole (int) override;
+    void learnConsoleTrigger (int) override;
+    LiveRemoteSettings getOscSettings() override;
+    LiveRemoteSettings getWebSettings() override;
+    void setOscSettings (bool, int, const juce::String&, const juce::String&) override;
+    void setWebSettings (bool, int, const juce::String&, const juce::String&) override;
+    std::vector<LiveNetwork> getNetworks() override;
+    LiveServerSettings getServerSettings() override;
+    void setServerSettings (bool, bool, bool, const juce::StringArray&) override;
+    std::vector<LiveCheckItem> getServerCheck() override;
+    void fixServerCheck (const juce::String&) override;
+    void recheckServer() override;
     std::vector<int> getVisibleRacks() override;
     float getRackLoad (int rack) override;
     float getSlotLoad (int rack, int slot) override;
@@ -98,13 +117,16 @@ private:
     const int port;
 
     // Message thread
-    juce::var state, meters, deviceOptions;
+    juce::var state, meters, deviceOptions, networks;
     juce::String serverName;
     std::atomic<bool> connected { false };
 
     juce::CriticalSection queueLock;
     juce::StringArray outgoing;
     std::atomic<int> watched { std::numeric_limits<int>::min() };   // the snapshot whose details we asked for
+    std::atomic<int> watchedLog { -1 };                              // the console whose log we asked for
+    juce::uint32 activityFromAge (const juce::var& ageMs) const;
+    LiveRemoteSettings remoteFrom (const juce::var&, const juce::var& ageMs) const;
 
     std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>> (true);
 

@@ -94,6 +94,10 @@ public:
 
     static juce::String typeName (Type);
     static bool isYamaha (Type t) { return t == Type::yamahaRcp || t == Type::yamahaDm7; }
+
+    // Settings as data (the network protocol)
+    static juce::var settingsToVar (const Settings&);
+    static Settings settingsFromVar (const juce::var&);
     juce::String rcpSceneList() const; // "MIXER:Lib/Scene", "scene_a" or "scene_b"
 
 private:

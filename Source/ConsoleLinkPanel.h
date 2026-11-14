@@ -1,22 +1,26 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
-#include "ConsoleLink.h"
+#include "LiveConnection.h"
 
-// Settings + live message log for the console link
+// Settings + live message log for a console link, here or on a server
 class ConsoleLinkPanel : public juce::Component,
                          private juce::Timer
 {
 public:
-    ConsoleLinkPanel (ConsoleLink&, std::function<void()> onApplied);
+    ConsoleLinkPanel (LiveConnection&, int console);
+    ~ConsoleLinkPanel() override;
     void resized() override;
 
 private:
+   #if LIVERACK_PREVIEW_HOOKS
+    friend struct PreviewHooks;
+   #endif
     void timerCallback() override;
     void apply();
     void chooseFolder();
 
-    ConsoleLink& link;
-    std::function<void()> onApplied;
+    LiveConnection& live;
+    const int index;
     juce::File folder;
 
     juce::Label typeLabel    { {}, "Console" },
