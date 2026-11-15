@@ -125,6 +125,9 @@ public:
     juce::String getServerVersion() const { return serverVersion; }   // empty until it says hello
     bool hasEverConnected() const   { return everConnected; }
 
+    // Why the last try failed, in words (empty once connected)
+    juce::String getLastProblem() const { const juce::ScopedLock sl (problemLock); return lastProblem; }
+
 private:
     void run() override;
     bool connectAndRun();
@@ -148,6 +151,9 @@ private:
     std::map<int, std::function<void (const juce::var&)>> pendingReplies;
     int nextRequestId = 100;
     std::atomic<bool> connected { false };
+    juce::CriticalSection problemLock;
+    juce::String lastProblem;
+    void setProblem (const juce::String& p) { const juce::ScopedLock sl (problemLock); lastProblem = p; }
 
     juce::CriticalSection queueLock;
     juce::StringArray outgoing;

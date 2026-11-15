@@ -39,6 +39,34 @@ struct ClientPreview
         if (test.isEmpty())
             return;
 
+        if (test == "clickserver")
+        {
+            // As a person would: wait for the server to show up, click it
+            juce::Component::SafePointer<ClientComponent> safe (&c);
+            juce::Timer::callAfterDelay (4000, [safe]
+            {
+                if (safe == nullptr || safe->connectScreen == nullptr) { std::cerr << "CLIENT no connect screen" << std::endl; return; }
+                for (auto* child : safe->connectScreen->getChildren())
+                    if (auto* b = dynamic_cast<juce::TextButton*> (child); b != nullptr && b->getButtonText().contains ("LiveRack 0."))
+                    {
+                        std::cerr << "CLIENT clicking '" << b->getButtonText() << "'" << std::endl;
+                        b->triggerClick();
+                        break;
+                    }
+            });
+            juce::Timer::callAfterDelay (8000, [safe]
+            {
+                if (safe == nullptr) return;
+                // A typed address with the wrong port, then nothing at all there
+                if (safe->view != nullptr)
+                    std::cerr << "CLIENT problem now '" << safe->view->live.getLastProblem() << "'" << std::endl;
+                std::cerr << "CLIENT after click: view " << (safe->view != nullptr) << " connected "
+                          << (safe->view != nullptr && safe->view->live.isConnected()) << " racks "
+                          << (safe->view != nullptr ? safe->view->live.getNumRacks() : -1) << std::endl;
+            });
+            return;
+        }
+
         at (4000, c, [] (ClientComponent&, View& v)
         {
             auto& l = v.live;

@@ -57,13 +57,23 @@ void RemoteConnection::run()
 bool RemoteConnection::connectAndRun()
 {
     juce::StreamingSocket socket;
+    const auto where = host + ":" + juce::String (port);
     if (! socket.connect (host, port, 3000))
+    {
+        setProblem ("Nothing answers at " + where + ". Check the address and port (the web remote card in the server's Devices shows them), "
+                    "that LiveRack is running there with its web remote on, and that a firewall isn't blocking it.");
         return false;
+    }
 
     WebSocketClient ws { socket };
     if (! ws.handshake (host, port, "/live?live=1"))
+    {
+        setProblem ("Something answered at " + where + ", but it isn't a LiveRack web remote. Check the port: "
+                    "the web remote card in the server's Devices shows it (8090 unless it was changed).");
         return false;
+    }
 
+    setProblem ({});
     connected = true;
     sendQuery();   // a snapshot being watched, again after reconnecting
     auto lastPing = juce::Time::getMillisecondCounter();

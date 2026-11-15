@@ -245,7 +245,7 @@ private:
             b->setColour (juce::TextButton::buttonColourId, Theme::raised);
             const auto name = s.name, host = s.host;
             const int port = s.port;
-            b->onClick = [this, name, host, port] { owner.connectTo (host, port, name); };
+            b->onClick = [this, name, host, port] { connectLater (host, port, name); };
             b->setTooltip (s.version != JUCE_APPLICATION_VERSION_STRING
                                ? "This is LiveRack " JUCE_APPLICATION_VERSION_STRING ". Use the same version on both for everything to work."
                                : juce::String());
@@ -258,7 +258,7 @@ private:
                                                                + (r.port != defaultPort ? ":" + juce::String (r.port) : juce::String())));
             const auto name = r.name, host = r.host;
             const int port = r.port;
-            b->onClick = [this, name, host, port] { owner.connectTo (host, port, name); };
+            b->onClick = [this, name, host, port] { connectLater (host, port, name); };
             addAndMakeVisible (b);
         }
 
@@ -272,7 +272,19 @@ private:
         int port = defaultPort;
         parseAddress (address.getText(), host, port);
         if (host.isNotEmpty())
-            owner.connectTo (host, port, {});
+            connectLater (host, port, {});
+    }
+
+    // Connecting removes this screen and its buttons, so it waits until the
+    // click that asked for it has finished
+    void connectLater (const juce::String& host, int port, const juce::String& name)
+    {
+        juce::Component::SafePointer<ClientComponent> safe (&owner);
+        juce::MessageManager::callAsync ([safe, host, port, name]
+        {
+            if (safe != nullptr)
+                safe->connectTo (host, port, name);
+        });
     }
 
     ClientComponent& owner;
@@ -637,10 +649,11 @@ public:
                     t.removeFromTop (30), juce::Justification::centredLeft, true);
         g.setColour (Theme::textDim);
         g.setFont (juce::FontOptions (14.0f));
+        const auto problem = owner.live.getLastProblem();
         g.drawFittedText (ever ? "Trying again. The audio keeps running on the server; only this screen is cut off."
-                               : "Looking for LiveRack at " + owner.live.getHost() + ":" + juce::String (owner.live.getPort())
-                                 + ". Check that LiveRack is running there with its web remote on, and that both computers are on the same network.",
-                          t.removeFromTop (60), juce::Justification::topLeft, 3);
+                               : problem.isNotEmpty() ? problem
+                               : "Looking for LiveRack at " + owner.live.getHost() + ":" + juce::String (owner.live.getPort()) + "...",
+                          t.removeFromTop (72), juce::Justification::topLeft, 4);
     }
 
     void resized() override
@@ -649,7 +662,7 @@ public:
     }
 
 private:
-    juce::Rectangle<int> box_() const { return getLocalBounds().withSizeKeepingCentre (juce::jmin (getWidth() - 40, 560), 190); }
+    juce::Rectangle<int> box_() const { return getLocalBounds().withSizeKeepingCentre (juce::jmin (getWidth() - 40, 600), 210); }
 
     ClientView& owner;
     juce::TextButton otherButton { "Choose another server" };
@@ -914,6 +927,8 @@ void ClientComponent::ClientView::timerCallback()
         statusBar->repaint();
         repaint (sceneChip.expanded (24));
         overlay->setVisible (! live.isConnected());
+        if (overlay->isVisible())
+            overlay->repaint();
     }
 }
 
@@ -2013,8 +2028,10 @@ ClientComponent::~ClientComponent()
     finder.reset();
 }
 
-void ClientComponent::connectTo (const juce::String& host, int port, const juce::String& name)
+void ClientComponent::connectTo (const juce::String& hostIn, int port, const juce::String& nameIn)
 {
+    // Copies: the caller's strings may belong to the screen about to go
+    const juce::String host (hostIn), name (nameIn);
     connectScreen.reset();
     finder.reset();
     view = std::make_unique<ClientView> (*this, host, port, name);
