@@ -15,6 +15,8 @@
 #include "RoutingMatrix.h"
 #include "SnapshotsPanel.h"
 #include "PluginsPanel.h"
+#include "MidiControl.h"
+#include "Shortcuts.h"
 #include "Theme.h"
 
 namespace
@@ -356,7 +358,11 @@ private:
     void showPageMenu (int page);
     void showAddPluginMenu (int rack);
     void showSlotMenu (int rack, int slot);
+    void showSlotMenuWith (int rack, int slot, int inNew, int inCurrent, int scene);
     void popOut (int rack, int slot);
+    void openApp (int index, const juce::String& name);
+    void setTwoWindows (bool);
+    bool isTwoWindows() const { return rackWindow != nullptr; }
     void loadLibrary();
 
     // Shows and snapshots
@@ -366,6 +372,16 @@ private:
     void showSnapshotMenu();
     void showStoreDialog();
     void confirm (const juce::String& title, const juce::String& message, const juce::String& ok, std::function<void()> onOk);
+
+    // Controllers and keys on this computer
+    void showShortcuts();
+    void captureShortcut (const juce::String& forWhat, std::function<void (juce::KeyPress)> onAccepted);
+    juce::String shortcutOwner (const juce::KeyPress&);
+    void clearShortcut (const juce::KeyPress&);
+    void saveKeyShortcuts();
+    void assignKey (int index, const Action&);
+    void learnParameterMenu (int rack, int slot);
+    static constexpr int numUserKeys = 8;
 
     ClientComponent& owner;
     PluginLibrary library { RackEngine::getSettingsDir().getChildFile ("client-plugin-library.xml") };
@@ -388,7 +404,9 @@ private:
                       scanButton      { "Plugins", "plugins", "The server's plugins and scanning" },
                       scopeButton     { "Snapshots", "snapshots", "Snapshots: recall, store and what each one recalls" },
                       addRackButton   { "Add Rack", "addrack", "Add a rack" },
-                      stackRowsButton { "Stack Rows", "stack", "Stack racks in rows to fit the window" };
+                      stackRowsButton { "Stack Rows", "stack", "Stack racks in rows to fit the window" },
+                      windowModeButton { "Rack Window", "windows", "Rack window: the plugin panel in its own window" },
+                      appsButton      { "Apps", "apps", "The server's apps (QRec, SoundGrid Studio...), live" };
     juce::TextButton storeSceneButton { "STORE" }, tapButton { "TAP" };
     std::vector<juce::Rectangle<int>> toolbarGroups;
     juce::Rectangle<int> sceneChip, bpmArea, logoArea;
@@ -414,8 +432,16 @@ private:
     class PickerOverlay;
     std::unique_ptr<PickerOverlay> pickerOverlay;
     std::vector<std::unique_ptr<RemotePluginWindow>> popOuts;
+    class RackWindow;
+    std::unique_ptr<juce::DocumentWindow> rackWindow;
+    int numAppsShown = -1;
     std::vector<juce::Component::SafePointer<juce::Component>> dialogs;
     juce::String shownTitle;
+
+    std::unique_ptr<MidiControl> midi;
+    std::array<juce::KeyPress, numUserKeys> keyShortcuts;
+    std::vector<Shortcut> extraShortcuts;
+    juce::Component::SafePointer<ShortcutsEditor> shortcutsEditor;
     int ticks = 0;
 
    #if LIVERACK_PREVIEW_HOOKS
@@ -491,8 +517,33 @@ public:
             if (e.mods.isPopupMenu() || a.type == Action::none)
             {
                 juce::PopupMenu m;
-                m.addItem (1, "User Keys are assigned on the server for now", false);
-                m.showMenuAsync ({});
+                m.addItem (1, "Assign...");
+                m.addItem (4, "Set keyboard shortcut on this computer... (now " + Shortcuts::describe (owner.keyShortcuts[(size_t) i]) + ")");
+                m.addItem (2, "MIDI Learn (a controller on this computer)", a.type != Action::none && owner.midi != nullptr);
+                m.addItem (3, "Clear", a.type != Action::none);
+
+                juce::Component::SafePointer<KeysBar> safe (this);
+                m.showMenuAsync (juce::PopupMenu::Options(), [safe, i, a] (int result)
+                {
+                    if (safe == nullptr) return;
+                    auto& v = safe->owner;
+                    if (result == 1)
+                        Action::showChooser (v.live, a, v.selectedRack, [safe, i] (Action chosen)
+                        {
+                            if (safe != nullptr) safe->owner.assignKey (i, chosen);
+                        });
+                    if (result == 2 && v.midi != nullptr)
+                        v.midi->learnAction (a);
+                    if (result == 3)
+                        v.assignKey (i, {});
+                    if (result == 4)
+                        v.captureShortcut ("User Key " + juce::String (i + 1), [safe, i] (juce::KeyPress k)
+                        {
+                            if (safe == nullptr) return;
+                            safe->owner.keyShortcuts[(size_t) i] = k;
+                            safe->owner.saveKeyShortcuts();
+                        });
+                });
                 return;
             }
 
@@ -606,7 +657,13 @@ public:
         }
 
         const auto note = owner.state()["note"].toString();
-        if (note.isNotEmpty())
+        if (owner.midi != nullptr && owner.midi->isLearning())
+        {
+            g.setColour (Theme::amber);
+            g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+            g.drawText (owner.midi->getLearnText(), area, juce::Justification::centredLeft, true);
+        }
+        else if (note.isNotEmpty())
         {
             g.setColour (Theme::textDim);
             g.setFont (juce::FontOptions (12.0f));
@@ -649,11 +706,31 @@ public:
                     t.removeFromTop (30), juce::Justification::centredLeft, true);
         g.setColour (Theme::textDim);
         g.setFont (juce::FontOptions (14.0f));
-        const auto problem = owner.live.getLastProblem();
+        auto problem = owner.live.getLastProblem();
+
+        // It announces itself here, but nothing answers: something on the way blocks it
+        if (! ever && owner.live.lastTryGotNoAnswer() && owner.owner.finder != nullptr)
+            for (auto& srv : owner.owner.finder->getServers())
+                if (srv.host == owner.live.getHost())
+                {
+                   #if JUCE_MAC
+                    problem = srv.name + " is announcing itself on the network, but this Mac can't connect to it. macOS is probably blocking "
+                              "LiveRack: in System Settings > Privacy & Security > Local Network, turn LiveRack off and on again. "
+                              "Otherwise check the firewall on " + srv.name + ".";
+                   #else
+                    problem = srv.name + " is announcing itself on the network, but this computer can't connect to it. "
+                              "Check the firewall on " + srv.name + " (Server check in its Devices can fix Windows Firewall) and on this computer.";
+                   #endif
+                    if (srv.port != owner.live.getPort())
+                        problem = srv.name + " announces its web remote on port " + juce::String (srv.port) + ", not "
+                                + juce::String (owner.live.getPort()) + ". Choose another server and pick it from the list.";
+                    break;
+                }
+
         g.drawFittedText (ever ? "Trying again. The audio keeps running on the server; only this screen is cut off."
                                : problem.isNotEmpty() ? problem
                                : "Looking for LiveRack at " + owner.live.getHost() + ":" + juce::String (owner.live.getPort()) + "...",
-                          t.removeFromTop (72), juce::Justification::topLeft, 4);
+                          t.removeFromTop (92), juce::Justification::topLeft, 5);
     }
 
     void resized() override
@@ -662,7 +739,7 @@ public:
     }
 
 private:
-    juce::Rectangle<int> box_() const { return getLocalBounds().withSizeKeepingCentre (juce::jmin (getWidth() - 40, 600), 210); }
+    juce::Rectangle<int> box_() const { return getLocalBounds().withSizeKeepingCentre (juce::jmin (getWidth() - 40, 620), 230); }
 
     ClientView& owner;
     juce::TextButton otherButton { "Choose another server" };
@@ -698,6 +775,22 @@ private:
 };
 
 //==============================================================================
+class ClientComponent::ClientView::RackWindow : public juce::DocumentWindow
+{
+public:
+    explicit RackWindow (std::function<void()> onClose)
+        : DocumentWindow ("LiveRack Client - Rack Window", Theme::background, DocumentWindow::allButtons), closeCallback (std::move (onClose))
+    {
+        setUsingNativeTitleBar (true);
+        setResizable (true, false);
+    }
+    void closeButtonPressed() override { closeCallback(); }
+
+private:
+    std::function<void()> closeCallback;
+};
+
+//==============================================================================
 ClientComponent::ClientView::ClientView (ClientComponent& o, const juce::String& host, int port, const juce::String& name)
     : live (host, port), displayName (name.isNotEmpty() ? name : host), owner (o)
 {
@@ -708,8 +801,25 @@ ClientComponent::ClientView::ClientView (ClientComponent& o, const juce::String&
                              (juce::Button*) &nextSceneButton, (juce::Button*) &storeSceneButton, (juce::Button*) &overviewButton,
                              (juce::Button*) &rackViewButton, (juce::Button*) &devicesButton, (juce::Button*) &routingButton,
                              (juce::Button*) &scanButton, (juce::Button*) &scopeButton, (juce::Button*) &addRackButton,
-                             (juce::Button*) &stackRowsButton, (juce::Button*) &tapButton })
+                             (juce::Button*) &stackRowsButton, (juce::Button*) &tapButton, (juce::Button*) &windowModeButton })
         addAndMakeVisible (b);
+    addChildComponent (appsButton);
+    appsButton.setLabel ("Apps");
+    windowModeButton.setLabel ("Rack Window");
+    windowModeButton.onClick = [this] { setTwoWindows (! isTwoWindows()); };
+    appsButton.onClick = [this]
+    {
+        juce::PopupMenu m;
+        if (auto* a = state()["apps"].getArray())
+            for (int i = 0; i < a->size(); ++i)
+                m.addItem (i + 1, (*a)[i].toString());
+        juce::Component::SafePointer<ClientView> safe (this);
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&appsButton), [safe] (int r)
+        {
+            if (safe != nullptr && r > 0)
+                safe->openApp (r - 1, safe->state()["apps"][r - 1].toString());
+        });
+    };
 
     addAndMakeVisible (hotBar);
     addAndMakeVisible (pageTabs);
@@ -806,6 +916,20 @@ ClientComponent::ClientView::ClientView (ClientComponent& o, const juce::String&
     pageTabs.onAddPage = [this] { addPage(); };
     pageTabs.onPageMenu = [this] (int p) { showPageMenu (p); };
 
+    // MIDI controllers and keyboard shortcuts belong to this computer
+    midi = std::make_unique<MidiControl> (live, *this, "client-midi-control.xml", false);
+    {
+        juce::Component::SafePointer<ClientView> safe (this);
+        midi->onChanged = [safe] { if (safe != nullptr) { safe->statusBar->repaint(); if (safe->devicesPanel != nullptr) safe->devicesPanel->refresh(); } };
+    }
+    {
+        juce::StringArray saved;
+        saved.addLines (AppSettings::get ("clientKeyShortcuts"));
+        for (int i = 0; i < numUserKeys; ++i)
+            keyShortcuts[(size_t) i] = i < saved.size() ? Shortcuts::fromText (saved[i]) : juce::KeyPress (juce::KeyPress::F1Key + i);
+    }
+    extraShortcuts = Shortcuts::loadExtras ("client-shortcuts.xml");
+
     overlay = std::make_unique<Overlay> (*this);
     addAndMakeVisible (*overlay);
 
@@ -814,6 +938,12 @@ ClientComponent::ClientView::ClientView (ClientComponent& o, const juce::String&
     setWantsKeyboardFocus (true);
     updateViewButtons();
     startTimerHz (30);
+
+    if (AppSettings::get ("clientTwoWindows") == "1")
+    {
+        juce::Component::SafePointer<ClientView> safe (this);
+        juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->setTwoWindows (true); });
+    }
 }
 
 ClientComponent::ClientView::~ClientView()
@@ -826,8 +956,15 @@ ClientComponent::ClientView::~ClientView()
             delete d.getComponent();
     popOuts.clear();
     pickerOverlay.reset();
+    if (rackWindow != nullptr)
+    {
+        AppSettings::set ("clientRackWindow", rackWindow->getWindowStateAsString());
+        rackWindow->clearContentComponent();
+        rackWindow.reset();
+    }
     dock.releaseEditor();
     tool.reset();
+    midi.reset();
 }
 
 //==============================================================================
@@ -883,6 +1020,12 @@ void ClientComponent::ClientView::changeListenerCallback (juce::ChangeBroadcaste
         strips.scrollToRack (selectedRack);
     }
     racksBefore = n;
+
+    if (const int apps = state()["apps"].size(); apps != numAppsShown)
+    {
+        numAppsShown = apps;
+        resized();
+    }
 
     refreshAll();
     overlay->setVisible (! live.isConnected());
@@ -943,15 +1086,21 @@ bool ClientComponent::ClientView::keyPressed (const juce::KeyPress& key, juce::C
         setView (view == View::rack ? View::channels : lastRackView);
         return true;
     }
-    if (key == juce::KeyPress::F1Key || key == juce::KeyPress::F2Key || key == juce::KeyPress::F3Key || key == juce::KeyPress::F4Key
-        || key == juce::KeyPress::F5Key || key == juce::KeyPress::F6Key || key == juce::KeyPress::F7Key || key == juce::KeyPress::F8Key)
-    {
-        const int k = key.getKeyCode() - juce::KeyPress::F1Key;
-        const auto a = keysBar->actionFor (k);
-        if (a.type != Action::none)
-            performAction (a, -1);
-        return true;
-    }
+    // User Key shortcuts first, then the extra ones (this computer's)
+    for (int k = 0; k < numUserKeys; ++k)
+        if (keyShortcuts[(size_t) k].isValid() && keyShortcuts[(size_t) k] == key)
+        {
+            const auto a = keysBar->actionFor (k);
+            if (a.type != Action::none)
+                performAction (a, -1);
+            return true;
+        }
+    for (auto& sc : extraShortcuts)
+        if (sc.key == key)
+        {
+            performAction (sc.action, -1);
+            return true;
+        }
     return false;
 }
 
@@ -1024,11 +1173,11 @@ void ClientComponent::ClientView::resized()
     toolbarGroups.clear();
 
     Theme::IconButton* labelled[] = { &saveButton, &loadButton, &overviewButton, &rackViewButton, &devicesButton, &routingButton,
-                                      &scanButton, &scopeButton, &addRackButton, &stackRowsButton };
+                                      &scanButton, &scopeButton, &addRackButton, &stackRowsButton, &windowModeButton, &appsButton };
     int labelledWidth = 0;
     for (auto* b : labelled)
         labelledWidth += b->getLabelledWidth() - 40;
-    const bool showLabels = bar.getWidth() >= 960 + labelledWidth;
+    const bool showLabels = bar.getWidth() >= 1040 + labelledWidth;
     for (auto* b : labelled)
         b->setShowsLabel (showLabels);
     auto w = [showLabels] (Theme::IconButton& b) { return showLabels ? b.getLabelledWidth() : 40; };
@@ -1056,8 +1205,11 @@ void ClientComponent::ClientView::resized()
     group ({ { &prevSceneButton, 34 }, { nullptr, 168 }, { &nextSceneButton, 34 }, { &storeSceneButton, 64 } }, false, &sceneChip);
     group ({ { &overviewButton, w (overviewButton) }, { &rackViewButton, w (rackViewButton) }, { &devicesButton, w (devicesButton) },
              { &routingButton, w (routingButton) }, { &scanButton, w (scanButton) }, { &scopeButton, w (scopeButton) } });
-    group ({ { &addRackButton, w (addRackButton) }, { &stackRowsButton, w (stackRowsButton) } });
+    group ({ { &addRackButton, w (addRackButton) }, { &stackRowsButton, w (stackRowsButton) }, { &windowModeButton, w (windowModeButton) } });
     group ({ { nullptr, 84 }, { &tapButton, 60 } }, true, &bpmArea);
+    appsButton.setVisible (state()["apps"].size() > 0);
+    if (appsButton.isVisible())
+        group ({ { &appsButton, w (appsButton) } }, true);
 
     statusBar->setBounds (area.removeFromBottom (30));
 
@@ -1076,11 +1228,12 @@ void ClientComponent::ClientView::resized()
     hotBar.setVisible (! toolShown);
     pageTabs.setVisible (view == View::channels);
     strips.setVisible (view == View::channels);
-    dock.setVisible (view == View::rack);
+    if (! isTwoWindows())
+        dock.setVisible (view == View::rack);
 
     if (toolShown)
         tool->setBounds (area.withTop (hotBar.getY()));
-    else if (view == View::rack)
+    else if (view == View::rack && ! isTwoWindows())
         dock.setBounds (area.withTop (pageTabs.getY()));
     else
         strips.setBounds (area);
@@ -1234,7 +1387,7 @@ void ClientComponent::ClientView::setView (View v)
 
         if (v == View::devices)
         {
-            DevicesPanel::Host h { live, nullptr, nullptr,
+            DevicesPanel::Host h { live, midi.get(),
                 [safe] (int d)
                 {
                     if (safe != nullptr)
@@ -1245,8 +1398,15 @@ void ClientComponent::ClientView::setView (View v)
                     if (safe != nullptr)
                         openDialog (new ConsoleLinkPanel (safe->live, c), "Console " + juce::String (c + 1) + " settings", safe->dialogs);
                 },
-                [] {},
-                [] { return 0; } };
+                [safe] { if (safe != nullptr) safe->showShortcuts(); },
+                [safe]
+                {
+                    if (safe == nullptr) return 0;
+                    int n = (int) safe->extraShortcuts.size();
+                    for (auto& k : safe->keyShortcuts) if (k.isValid()) ++n;
+                    return n;
+                },
+                true };
             devicesPanel = new DevicesPanel (std::move (h));
             tool.reset (devicesPanel);
         }
@@ -1327,9 +1487,19 @@ void ClientComponent::ClientView::setView (View v)
             addAndMakeVisible (*tool);
     }
 
-    // The plugin picture only streams while Rack shows it
-    dock.setFullView (view == View::rack, true);
-    dock.setEditorsShown (view == View::rack);
+    // The plugin picture only streams while it's on screen: Rack, or the rack window
+    if (isTwoWindows())
+    {
+        if (view == View::rack)
+            view = View::channels;
+        dock.setFullView (false, false);
+        dock.setEditorsShown (true);
+    }
+    else
+    {
+        dock.setFullView (view == View::rack, true);
+        dock.setEditorsShown (view == View::rack);
+    }
     updateViewButtons();
     resized();
     refreshAll();
@@ -1340,6 +1510,8 @@ void ClientComponent::ClientView::setView (View v)
 
 void ClientComponent::ClientView::updateViewButtons()
 {
+    windowModeButton.setToggleState (isTwoWindows(), juce::dontSendNotification);
+    rackViewButton.setEnabled (! isTwoWindows());
     overviewButton.setToggleState (view == View::channels, juce::dontSendNotification);
     rackViewButton.setToggleState (view == View::rack, juce::dontSendNotification);
     devicesButton.setToggleState (view == View::devices, juce::dontSendNotification);
@@ -1395,7 +1567,8 @@ void ClientComponent::ClientView::performAction (const Action& a, int value)
         case Action::fullView:     setView ((value < 0 ? view != View::rack : value > 0) ? View::rack : View::channels); break;
         case Action::storeScene:   send (makeCmd ("sceneStore", { { "number", juce::jmax (0, currentScene()) } })); break;
         case Action::showPage:     live.setCurrentPage (a.number - 1); break;
-        case Action::twoWindows: case Action::none: case Action::numTypes: default: break;
+        case Action::twoWindows:   setTwoWindows (value < 0 ? ! isTwoWindows() : value > 0); break;
+        case Action::none: case Action::numTypes: default: break;
     }
 
     keysBar->repaint();
@@ -1432,7 +1605,8 @@ bool ClientComponent::ClientView::isActionActive (const Action& a) const
         case Action::fullView:     return view == View::rack;
         case Action::showPage:     return l.getCurrentPage() == a.number - 1;
         case Action::tapTempo:     return std::fmod (juce::Time::getMillisecondCounterHiRes(), 60000.0 / bpm()) < 100.0;
-        case Action::twoWindows: case Action::nextScene: case Action::prevScene: case Action::storeScene:
+        case Action::twoWindows:   return rackWindow != nullptr;
+        case Action::nextScene: case Action::prevScene: case Action::storeScene:
         case Action::nextRack: case Action::prevRack: case Action::none: case Action::numTypes: default:
             return false;
     }
@@ -1741,6 +1915,48 @@ void ClientComponent::ClientView::showSlotMenu (int rack, int slot)
     if (! s.exists)
         return;
 
+    // Whether new snapshots (and the current one) recall it: asked of the server first
+    struct Scope { int inNew = -1, inCurrent = -1; };
+    auto scope = std::make_shared<Scope>();
+    const int scene = currentScene();
+    const bool sceneHasIt = live.hasSnapshot (scene);
+    juce::Component::SafePointer<ClientView> safe (this);
+    const int slotId = s.id;
+
+    auto inScope = [] (const juce::var& data, int r, int sl)
+    {
+        const auto v = data["snapshot"]["inScope"][r][sl];
+        return v.isVoid() ? -1 : (int) v;   // 1 in, 0 out, -1 not in the snapshot
+    };
+
+    auto extraFor = [] (int number) { auto* o = new juce::DynamicObject(); o->setProperty ("number", number); return juce::var (o); };
+
+    live.request ("snapshot", extraFor (-1), [safe, slotId, scope, scene, sceneHasIt, inScope, extraFor] (const juce::var& data)
+    {
+        int r, sl;
+        if (safe == nullptr || ! safe->live.findSlot (slotId, r, sl))
+            return;
+        scope->inNew = inScope (data, r, sl);
+        if (! sceneHasIt)
+        {
+            safe->showSlotMenuWith (r, sl, scope->inNew, -1, scene);
+            return;
+        }
+        safe->live.request ("snapshot", extraFor (scene), [safe, slotId, scope, scene, inScope] (const juce::var& d2)
+        {
+            int r2, s2;
+            if (safe != nullptr && safe->live.findSlot (slotId, r2, s2))
+                safe->showSlotMenuWith (r2, s2, scope->inNew, inScope (d2, r2, s2), scene);
+        });
+    });
+}
+
+void ClientComponent::ClientView::showSlotMenuWith (int rack, int slot, int inNew, int inCurrent, int scene)
+{
+    const auto s = live.getSlot (rack, slot);
+    if (! s.exists)
+        return;
+
     const int numSlots = live.getNumSlots (rack);
     const auto hotList = live.getHotPlugins();
     const bool hot = std::find (hotList.begin(), hotList.end(), s.id) != hotList.end();
@@ -1750,10 +1966,15 @@ void ClientComponent::ClientView::showSlotMenu (int rack, int slot)
     m.addItem (1, "Bypass", true, s.bypassed);
     m.addItem (2, "Open in its own window", (bool) state()["pluginWindows"]);
     m.addItem (8, hot ? "Unpin from Hot Plugins" : "Pin to Hot Plugins", hot || (int) hotList.size() < RackEngine::maxHotPlugins);
+    m.addItem (9, "Recalled by new snapshots", inNew >= 0, inNew == 1);
+    if (inCurrent >= 0)
+        m.addItem (11, "Recalled by snapshot " + juce::String (scene), true, inCurrent == 1);
     if (live.getRackConfig (rack).isMonoToStereo())
         m.addItem (10, "Make this the stereo point", true, live.getStereoPoint (rack) == slot);
     m.addItem (3, "Move up", slot > 0);
     m.addItem (4, "Move down", slot < numSlots - 1);
+    m.addSeparator();
+    m.addItem (13, "MIDI Learn a parameter (a controller on this computer)...");
     m.addSeparator();
     m.addItem (12, "Run in its own process (experimental)", true, s.isolated);
     m.addSeparator();
@@ -1761,13 +1982,15 @@ void ClientComponent::ClientView::showSlotMenu (int rack, int slot)
 
     juce::Component::SafePointer<ClientView> safe (this);
     const int slotId = s.id;
-    m.showMenuAsync (juce::PopupMenu::Options(), [safe, slotId, hot] (int result)
+    m.showMenuAsync (juce::PopupMenu::Options(), [safe, slotId, hot, inNew, inCurrent, scene] (int result)
     {
         if (safe == nullptr || result == 0)
             return;
         int r, sl;
         if (! safe->live.findSlot (slotId, r, sl))
             return;   // gone meanwhile
+        if (result == 9)  safe->live.setSlotInScopeFor (-1, r, sl, inNew != 1);
+        if (result == 11) safe->live.setSlotInScopeFor (scene, r, sl, inCurrent != 1);
 
         switch (result)
         {
@@ -1779,6 +2002,7 @@ void ClientComponent::ClientView::showSlotMenu (int rack, int slot)
             case 8: safe->send (makeCmd ("hot", { { "rack", r }, { "slot", sl }, { "on", ! hot } })); break;
             case 10: safe->send (makeCmd ("stereoPoint", { { "rack", r }, { "slot", sl } })); break;
             case 12: safe->send (makeCmd ("isolate", { { "rack", r }, { "slot", sl } })); break;
+            case 13: safe->learnParameterMenu (r, sl); break;
             default: break;
         }
     });
@@ -1810,6 +2034,80 @@ void ClientComponent::ClientView::popOut (int rack, int slot)
                 list.erase (std::remove_if (list.begin(), list.end(), [&what] (const auto& w) { return w->what == what; }), list.end());
             });
         }));
+}
+
+void ClientComponent::ClientView::openApp (int index, const juce::String& name)
+{
+    const auto what = "app=" + juce::String (index);
+    for (auto& w : popOuts)
+        if (w->what == what)
+        {
+            w->toFront (true);
+            return;
+        }
+
+    juce::Component::SafePointer<ClientView> safe (this);
+    popOuts.push_back (std::make_unique<RemotePluginWindow> (name + " on " + live.getServerName(), live.getHost(), live.getPort(), what,
+        [safe, what]
+        {
+            juce::MessageManager::callAsync ([safe, what]
+            {
+                if (safe == nullptr) return;
+                auto& list = safe->popOuts;
+                list.erase (std::remove_if (list.begin(), list.end(), [&what] (const auto& w) { return w->what == what; }), list.end());
+            });
+        }));
+}
+
+// The plugin panel in a window of its own (a second screen), the racks here
+void ClientComponent::ClientView::setTwoWindows (bool two)
+{
+    if (two == isTwoWindows())
+        return;
+
+    dock.releaseEditor();
+
+    if (two)
+    {
+        removeChildComponent (&dock);
+        juce::Component::SafePointer<ClientView> safe (this);
+        rackWindow = std::make_unique<RackWindow> ([safe]
+        {
+            juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->setTwoWindows (false); });
+        });
+        rackWindow->setContentNonOwned (&dock, false);
+        rackWindow->addKeyListener (this);
+        dock.setVisible (true);
+
+        const auto saved = AppSettings::get ("clientRackWindow");
+        if (saved.isEmpty() || ! rackWindow->restoreWindowStateFromString (saved))
+        {
+            const juce::Displays::Display* target = nullptr;
+            const auto mainCentre = getScreenBounds().getCentre();
+            for (auto& d : juce::Desktop::getInstance().getDisplays().displays)
+                if (! d.totalArea.contains (mainCentre))
+                {
+                    target = &d;
+                    break;
+                }
+            if (target != nullptr) rackWindow->setBounds (target->userArea.reduced (40));
+            else                   rackWindow->centreWithSize (1100, 760);
+        }
+        rackWindow->setVisible (true);
+    }
+    else
+    {
+        AppSettings::set ("clientRackWindow", rackWindow->getWindowStateAsString());
+        rackWindow->removeKeyListener (this);
+        rackWindow->clearContentComponent();
+        rackWindow.reset();
+        addChildComponent (dock);
+    }
+
+    AppSettings::set ("clientTwoWindows", two ? "1" : "0");
+    setView (two && view == View::rack ? View::channels : view);
+    if (overlay != nullptr)
+        overlay->toFront (false);
 }
 
 //==============================================================================
@@ -2004,6 +2302,166 @@ void ClientComponent::ClientView::confirm (const juce::String& title, const juce
 }
 
 //==============================================================================
+// User Keys (kept on the server) and this computer's shortcuts and controllers
+void ClientComponent::ClientView::assignKey (int index, const Action& a)
+{
+    send (makeCmd ("keySet", { { "index", index }, { "action", juce::Array<juce::var> { (int) a.type, a.rack, a.slotId, a.number } } }));
+}
+
+void ClientComponent::ClientView::saveKeyShortcuts()
+{
+    juce::StringArray lines;
+    for (auto& k : keyShortcuts)
+        lines.add (Shortcuts::toText (k));
+    AppSettings::set ("clientKeyShortcuts", lines.joinIntoString ("\n"));
+    if (shortcutsEditor != nullptr)
+        shortcutsEditor->refresh();
+    if (devicesPanel != nullptr)
+        devicesPanel->refresh();
+}
+
+juce::String ClientComponent::ClientView::shortcutOwner (const juce::KeyPress& k)
+{
+    for (int i = 0; i < numUserKeys; ++i)
+        if (keyShortcuts[(size_t) i] == k)
+            return "User Key " + juce::String (i + 1);
+    for (auto& sc : extraShortcuts)
+        if (sc.key == k)
+            return sc.action.describe (live);
+    return {};
+}
+
+void ClientComponent::ClientView::clearShortcut (const juce::KeyPress& k)
+{
+    for (auto& key : keyShortcuts)
+        if (key == k)
+            key = {};
+    extraShortcuts.erase (std::remove_if (extraShortcuts.begin(), extraShortcuts.end(), [&k] (const Shortcut& sc) { return sc.key == k; }),
+                          extraShortcuts.end());
+    Shortcuts::saveExtras (extraShortcuts, "client-shortcuts.xml");
+    saveKeyShortcuts();
+}
+
+void ClientComponent::ClientView::captureShortcut (const juce::String& forWhat, std::function<void (juce::KeyPress)> onAccepted)
+{
+    juce::Component::SafePointer<ClientView> safe (this);
+    KeyCapture::launch (forWhat, [safe, forWhat, onAccepted] (juce::KeyPress k)
+    {
+        if (safe == nullptr)
+            return;
+        if (Shortcuts::isReserved (k))
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Can't use " + Shortcuts::describe (k),
+                                                    "macOS or text editing uses that one. Pick another.");
+            return;
+        }
+        const auto taken = safe->shortcutOwner (k);
+        if (taken.isEmpty())
+        {
+            onAccepted (k);
+            if (safe->shortcutsEditor != nullptr) safe->shortcutsEditor->refresh();
+            return;
+        }
+        safe->confirm (Shortcuts::describe (k) + " is in use", "It's the shortcut for " + taken + ". Use it for " + forWhat + " instead?",
+                       "Use it here", [safe, k, onAccepted]
+                       {
+                           if (safe == nullptr) return;
+                           safe->clearShortcut (k);
+                           onAccepted (k);
+                           if (safe->shortcutsEditor != nullptr) safe->shortcutsEditor->refresh();
+                       });
+    });
+}
+
+void ClientComponent::ClientView::showShortcuts()
+{
+    if (shortcutsEditor != nullptr)
+    {
+        if (auto* w = shortcutsEditor->getTopLevelComponent())
+            w->toFront (true);
+        return;
+    }
+
+    juce::Component::SafePointer<ClientView> safe (this);
+    ShortcutsEditor::Host host {
+        [] { return (int) numUserKeys; },
+        [safe] (int i) { return safe != nullptr ? safe->keyShortcuts[(size_t) i] : juce::KeyPress(); },
+        [safe] (int i, juce::KeyPress k) { if (safe != nullptr) { safe->keyShortcuts[(size_t) i] = k; safe->saveKeyShortcuts(); } },
+        [safe] (int i)
+        {
+            if (safe == nullptr) return juce::String();
+            const auto a = safe->keysBar->actionFor (i);
+            return a.type == Action::none ? juce::String ("Empty") : a.describe (safe->live);
+        },
+        [safe]() -> std::vector<Shortcut>& { return safe->extraShortcuts; },
+        [safe] { if (safe != nullptr) Shortcuts::saveExtras (safe->extraShortcuts, "client-shortcuts.xml"); },
+        [safe] (const Action& a) { return safe != nullptr ? a.describe (safe->live) : juce::String(); },
+        [safe] (std::function<void (Action)> cb) { if (safe != nullptr) Action::showChooser (safe->live, {}, safe->selectedRack, cb); },
+        [safe] (const juce::String& what, std::function<void (juce::KeyPress)> cb) { if (safe != nullptr) safe->captureShortcut (what, cb); }
+    };
+
+    auto* editor = new ShortcutsEditor (host);
+    shortcutsEditor = editor;
+    openDialog (editor, "Keyboard Shortcuts on this computer", dialogs);
+}
+
+// The plugin's parameters, from the server; the one chosen is learned
+void ClientComponent::ClientView::learnParameterMenu (int rack, int slot)
+{
+    if (midi == nullptr)
+        return;
+
+    auto* extra = new juce::DynamicObject();
+    extra->setProperty ("view", juce::String (rack) + ":" + juce::String (slot));
+    juce::Component::SafePointer<ClientView> safe (this);
+    const int slotId = live.getSlot (rack, slot).id;
+
+    live.request ("params", juce::var (extra), [safe, slotId] (const juce::var& data)
+    {
+        int r, s;
+        if (safe == nullptr || ! safe->live.findSlot (slotId, r, s))
+            return;
+
+        std::vector<std::pair<int, juce::String>> params;
+        if (auto* list = data["view"]["params"].getArray())
+            for (auto& p : *list)
+                if (! (bool) p["ro"])
+                    params.push_back ({ (int) p["i"], p["name"].toString() });
+
+        if (params.empty())
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "No parameters",
+                                                    "The server didn't list any parameters for this plugin.");
+            return;
+        }
+
+        juce::PopupMenu fixed, follow;
+        for (int i = 0; i < (int) params.size(); ++i)
+        {
+            fixed.addItem (1 + i, params[(size_t) i].second);
+            follow.addItem (100000 + i, params[(size_t) i].second);
+        }
+
+        const auto name = safe->live.getSlot (r, s).name;
+        juce::PopupMenu m;
+        m.addSectionHeader ("MIDI Learn: move a control after choosing");
+        m.addSubMenu ("This " + name + " (in " + safe->live.getRackConfig (r).name + ")", fixed);
+        m.addSubMenu ("Plugin " + juce::String (s + 1) + " of whichever rack is selected", follow);
+
+        m.showMenuAsync (juce::PopupMenu::Options(), [safe, slotId, params] (int result)
+        {
+            int rr, ss;
+            if (safe == nullptr || result == 0 || ! safe->live.findSlot (slotId, rr, ss))
+                return;
+            const bool followSelected = result >= 100000;
+            const int i = followSelected ? result - 100000 : result - 1;
+            if (juce::isPositiveAndBelow (i, (int) params.size()))
+                safe->midi->learnParameter (rr, ss, params[(size_t) i].first, followSelected, params[(size_t) i].second);
+        });
+    });
+}
+
+//==============================================================================
 #if LIVERACK_PREVIEW_HOOKS
  #include "ClientPreview.h"
 #endif
@@ -2033,7 +2491,8 @@ void ClientComponent::connectTo (const juce::String& hostIn, int port, const juc
     // Copies: the caller's strings may belong to the screen about to go
     const juce::String host (hostIn), name (nameIn);
     connectScreen.reset();
-    finder.reset();
+    if (finder == nullptr)
+        finder = std::make_unique<ServerFinder>();   // still listening: tells "blocked" from "not there"
     view = std::make_unique<ClientView> (*this, host, port, name);
     addAndMakeVisible (*view);
     view->setBounds (getLocalBounds());

@@ -90,6 +90,8 @@ public:
     void setRackColour (int rack, int colourIndex) override;
     void setRackName (int rack, const juce::String&) override;
     void setSlotBypassed (int rack, int slot, bool) override;
+    void setParameter (int rack, int slot, int index, float value) override;
+    void toggleParameter (int rack, int slot, int index) override;
 
     std::vector<Snapshot> getSnapshots() override;
     void watchSnapshot (int number) override;
@@ -119,6 +121,7 @@ public:
     // Asks the server for something ("shows", "descriptions"...); the reply
     // arrives on the message thread. Nothing comes back if the link drops.
     void request (const juce::String& what, std::function<void (const juce::var& data)> onReply);
+    void request (const juce::String& what, const juce::var& extra, std::function<void (const juce::var& data)> onReply);   // extra: more fields
 
     juce::String getHost() const    { return host; }
     int getPort() const             { return port; }
@@ -127,6 +130,7 @@ public:
 
     // Why the last try failed, in words (empty once connected)
     juce::String getLastProblem() const { const juce::ScopedLock sl (problemLock); return lastProblem; }
+    bool lastTryGotNoAnswer() const     { return noAnswer.load(); }   // nothing at that address and port
 
 private:
     void run() override;
@@ -153,6 +157,7 @@ private:
     std::atomic<bool> connected { false };
     juce::CriticalSection problemLock;
     juce::String lastProblem;
+    std::atomic<bool> noAnswer { false };
     void setProblem (const juce::String& p) { const juce::ScopedLock sl (problemLock); lastProblem = p; }
 
     juce::CriticalSection queueLock;

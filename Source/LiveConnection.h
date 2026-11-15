@@ -172,6 +172,10 @@ public:
     virtual void setRackRouting (int rack, int driver, const int inputs[2], const int outputs[2]) = 0;   // channels 0-based, -1 = unpatched
     virtual void setSlotBypassed (int rack, int slot, bool) = 0;
 
+    // A plugin parameter (MIDI controllers): 0-1, or flip it between off and on
+    virtual void setParameter (int rack, int slot, int index, float value) = 0;
+    virtual void toggleParameter (int rack, int slot, int index) = 0;
+
     //==========================================================================
     // Snapshots. Number -1 = the scope new snapshots start with.
     struct Snapshot
@@ -474,6 +478,24 @@ public:
     void setRackColour (int r, int c) override                 { engine.setRackColour (r, c); }
     void setRackName (int r, const juce::String& n) override   { engine.setRackName (r, n); }
     void setSlotBypassed (int r, int s, bool b) override       { engine.setSlotBypassed (r, s, b); }
+
+    void setParameter (int r, int s, int index, float value) override
+    {
+        if (auto* p = engine.getPlugin (r, s))
+            if (auto* param = p->getParameters()[index])
+            {
+                param->beginChangeGesture();
+                param->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, value));
+                param->endChangeGesture();
+            }
+    }
+
+    void toggleParameter (int r, int s, int index) override
+    {
+        if (auto* p = engine.getPlugin (r, s))
+            if (auto* param = p->getParameters()[index])
+                setParameter (r, s, index, param->getValue() > 0.5f ? 0.0f : 1.0f);
+    }
 
     std::vector<Snapshot> getSnapshots() override
     {

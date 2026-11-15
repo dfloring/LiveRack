@@ -58,8 +58,10 @@ bool RemoteConnection::connectAndRun()
 {
     juce::StreamingSocket socket;
     const auto where = host + ":" + juce::String (port);
+    noAnswer = false;
     if (! socket.connect (host, port, 3000))
     {
+        noAnswer = true;
         setProblem ("Nothing answers at " + where + ". Check the address and port (the web remote card in the server's Devices shows them), "
                     "that LiveRack is running there with its web remote on, and that a firewall isn't blocking it.");
         return false;
@@ -196,7 +198,7 @@ void RemoteConnection::received (const juce::String& text)
 // What the state includes besides the basics: the live extras, and one snapshot in detail
 void RemoteConnection::sendQuery()
 {
-    juce::String q ("live=1");
+    juce::String q ("live=1&client=" + juce::URL::addEscapeChars (juce::SystemStats::getComputerName(), true));
     if (const int n = watched.load(); n != std::numeric_limits<int>::min())
         q << "&snapshot=" << n;
     if (const int c = watchedLog.load(); c >= 0)
@@ -208,10 +210,18 @@ void RemoteConnection::sendQuery()
 
 void RemoteConnection::request (const juce::String& what, std::function<void (const juce::var&)> onReply)
 {
+    request (what, {}, std::move (onReply));
+}
+
+void RemoteConnection::request (const juce::String& what, const juce::var& extra, std::function<void (const juce::var&)> onReply)
+{
     const int id = nextRequestId++;
     pendingReplies[id] = std::move (onReply);
 
     auto* o = new juce::DynamicObject();
+    if (auto* e = extra.getDynamicObject())
+        for (auto& p : e->getProperties())
+            o->setProperty (p.name, p.value);
     o->setProperty ("t", "get");
     o->setProperty ("what", what);
     o->setProperty ("id", id);
@@ -908,3 +918,13 @@ void RemoteConnection::startScan (bool all)                         { sendComman
 void RemoteConnection::cancelScan()                                 { sendCommand (make ("scanCancel", {})); }
 void RemoteConnection::forgetPlugin (const juce::String& id)        { sendCommand (make ("pluginForget", { { "id", id } })); refreshKnownPlugins(); }
 void RemoteConnection::clearFailedPlugins()                         { sendCommand (make ("failedClear", {})); refreshKnownPlugins(); }
+
+void RemoteConnection::setParameter (int rack, int slot, int index, float value)
+{
+    sendCommand (make ("param", { { "rack", rack }, { "slot", slot }, { "index", index }, { "value", juce::jlimit (0.0f, 1.0f, value) } }));
+}
+
+void RemoteConnection::toggleParameter (int rack, int slot, int index)
+{
+    sendCommand (make ("param", { { "rack", rack }, { "slot", slot }, { "index", index }, { "toggle", true } }));
+}

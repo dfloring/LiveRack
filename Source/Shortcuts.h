@@ -16,8 +16,9 @@ namespace Shortcuts
     juce::KeyPress fromText (const juce::String&);
     bool isReserved (const juce::KeyPress&);          // taken by macOS / the app menu
 
-    std::vector<Shortcut> loadExtras();
-    void saveExtras (const std::vector<Shortcut>&);
+    // shortcuts.xml (Native) or client-shortcuts.xml (LiveRack Client)
+    std::vector<Shortcut> loadExtras (const juce::String& fileName = "shortcuts.xml");
+    void saveExtras (const std::vector<Shortcut>&, const juce::String& fileName = "shortcuts.xml");
 }
 
 // "Press the keys you want": captures one key combination

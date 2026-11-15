@@ -131,6 +131,86 @@ namespace
             items.push_back (i);
         }
 
+        // Windows Firewall: the remote and LiveRack Clients connect in. Windows
+        // keeps its answer per program path, so a new copy of LiveRack (a new
+        // version in a new folder) starts out blocked until someone allows it.
+        {
+            const auto exe = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName();
+            const auto quoted = exe.replace ("'", "''");
+            const auto script =
+                "$exe = '" + quoted + "';"
+                "$cats = @(Get-NetConnectionProfile | ForEach-Object { $_.NetworkCategory.ToString() });"
+                "'CATS=' + ($cats -join ',');"
+                "'ON=' + (@(Get-NetFirewallProfile | Where-Object { $_.Enabled -eq 'True' } | ForEach-Object { $_.Name }) -join ',');"
+                "Get-NetFirewallApplicationFilter -Program $exe -ErrorAction SilentlyContinue | Get-NetFirewallRule |"
+                " Where-Object { $_.Direction -eq 'Inbound' -and $_.Enabled -eq 'True' } |"
+                " ForEach-Object { 'RULE=' + $_.Action.ToString() + '|' + $_.Profile.ToString() }";
+            const auto out = run ({ "powershell", "-NoProfile", "-NonInteractive", "-Command", script });
+
+            juce::StringArray cats, on, allow, block;
+            for (auto& line : juce::StringArray::fromLines (out))
+            {
+                const auto l = line.trim();
+                if (l.startsWith ("CATS=")) cats.addTokens (l.substring (5), ",", "");
+                if (l.startsWith ("ON="))   on.addTokens (l.substring (3), ",", "");
+                if (l.startsWith ("RULE="))
+                {
+                    const auto action = l.substring (5).upToFirstOccurrenceOf ("|", false, false);
+                    const auto profiles = l.fromFirstOccurrenceOf ("|", false, false);
+                    (action == "Allow" ? allow : block).add (profiles);
+                }
+            }
+            cats.removeEmptyStrings();
+            on.removeEmptyStrings();
+
+            // Does a rule cover the profile of a network this computer is on?
+            auto covers = [] (const juce::StringArray& rules, const juce::String& cat)
+            {
+                const auto profile = cat == "DomainAuthenticated" ? juce::String ("Domain") : cat;
+                for (auto& r : rules)
+                    if (r == "Any" || r.containsIgnoreCase (profile))
+                        return true;
+                return false;
+            };
+
+            bool blocked = false, unknown = out.isEmpty() || cats.isEmpty();
+            for (auto& cat : cats)
+            {
+                const auto profile = cat == "DomainAuthenticated" ? juce::String ("Domain") : cat;
+                if (! on.contains (profile))
+                    continue;   // the firewall is off on this network
+                if (covers (block, cat) || ! covers (allow, cat))
+                    blocked = true;
+            }
+
+            if (! unknown)
+            {
+                Item i;
+                i.state = blocked ? Item::lookAt : Item::good;
+                i.title = blocked ? "Windows Firewall blocks LiveRack" : "Windows Firewall lets LiveRack in";
+                i.detail = blocked ? "The iPad remote and LiveRack Client can't connect to this copy of LiveRack (" + exe + "). "
+                                     "Allowing it asks for an administrator's OK."
+                                   : "The iPad remote and LiveRack Client can connect.";
+                if (blocked)
+                {
+                    i.fixLabel = "Allow LiveRack";
+                    i.fix = [exe]
+                    {
+                        // An elevated PowerShell: drop rules blocking this program, add one allowing it
+                        const auto ps1 = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("liverack-firewall.ps1");
+                        const auto q = exe.replace ("'", "''");
+                        ps1.replaceWithText ("$exe = '" + q + "'\r\n"
+                                             "Get-NetFirewallApplicationFilter -Program $exe -ErrorAction SilentlyContinue | Get-NetFirewallRule |"
+                                             " Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' } | Remove-NetFirewallRule\r\n"
+                                             "New-NetFirewallRule -DisplayName 'LiveRack' -Direction Inbound -Program $exe -Action Allow -Profile Any | Out-Null\r\n");
+                        runAndRefresh ({ "powershell", "-NoProfile", "-Command",
+                                         "Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \"" + ps1.getFullPathName() + "\"'" });
+                    };
+                }
+                items.push_back (i);
+            }
+        }
+
         // Antivirus
         {
             const bool avast = juce::File ("C:\\Program Files\\Avast Software\\Avast").isDirectory()

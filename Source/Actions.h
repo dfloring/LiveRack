@@ -1,6 +1,8 @@
 #pragma once
 #include "RackEngine.h"
 
+class LiveConnection;   // the show, here or on a server
+
 // Something a User Key, a MIDI control, a keyboard shortcut or an OSC
 // command can do. The same list is used everywhere.
 struct Action
@@ -34,14 +36,14 @@ struct Action
     bool isToggle() const { return type == rackBypass || type == pluginBypass || type == twoWindows || type == fullView; }
     bool operator== (const Action& o) const { return type == o.type && rack == o.rack && slotId == o.slotId && number == o.number; }
 
-    juce::String describe (const RackEngine&) const;    // "Bypass Lead Vox"
+    juce::String describe (LiveConnection&) const;    // "Bypass Lead Vox"
     juce::String category() const;                       // "rack bypass"
 
     void writeTo (juce::XmlElement&) const;
     static Action readFrom (const juce::XmlElement&);
 
     // A menu of every action for the current racks and plugins
-    static void showChooser (const RackEngine&, const Action& current, int selectedRack,
+    static void showChooser (LiveConnection&, const Action& current, int selectedRack,
                              std::function<void (Action)> onChosen);
 };
 

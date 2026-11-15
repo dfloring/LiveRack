@@ -51,6 +51,7 @@ public:
     int  getPort() const      { return port; }
     juce::String getUrl() const;          // http://192.168.x.x:8080
     int  getNumClients() const;           // seen in the last few seconds
+    juce::StringArray getClientNames() const;   // the same, by name (LiveRack Clients send theirs) or address
     juce::uint32 getLastActivityMs() const { return lastActivityMs.load(); }
     juce::String getStatusText() const;
 
@@ -101,5 +102,6 @@ private:
 
     juce::CriticalSection clientLock;
     std::map<juce::String, juce::uint32> clients; // ip -> last request time
+    std::map<juce::String, juce::String> clientNames; // ip -> the name a Client gave
     std::atomic<juce::uint32> lastActivityMs { 0 };
 };

@@ -156,7 +156,7 @@ void HotPluginsBar::mouseUp (const juce::MouseEvent& e)
 }
 
 //==============================================================================
-UserKeysBar::UserKeysBar (RackEngine& e, ActionHost& h) : engine (e), host (h)
+UserKeysBar::UserKeysBar (RackEngine& e, LiveConnection& l, ActionHost& h) : engine (e), live (l), host (h)
 {
     load();
 }
@@ -234,7 +234,7 @@ void UserKeysBar::paint (juce::Graphics& g)
 
         g.setColour (assigned ? ink : Theme::textDim);
         g.setFont (juce::FontOptions (13.5f, juce::Font::bold));
-        g.drawFittedText (assigned ? a.describe (engine) : "Empty", inner.removeFromTop (inner.getHeight() * 0.55f).toNearestInt(),
+        g.drawFittedText (assigned ? a.describe (live) : "Empty", inner.removeFromTop (inner.getHeight() * 0.55f).toNearestInt(),
                           juce::Justification::centred, 1, 0.75f);
 
         g.setColour (ink.withAlpha (0.7f));
@@ -264,7 +264,7 @@ void UserKeysBar::mouseDown (const juce::MouseEvent& e)
                 if (safe == nullptr) return;
 
                 if (result == 1)
-                    Action::showChooser (safe->engine, safe->keys[(size_t) i], safe->host.getSelectedRack(),
+                    Action::showChooser (safe->live, safe->keys[(size_t) i], safe->host.getSelectedRack(),
                                          [safe, i] (Action a) { if (safe != nullptr) safe->setKey (i, a); });
                 if (result == 2 && safe->onMidiLearn != nullptr)
                     safe->onMidiLearn (i);

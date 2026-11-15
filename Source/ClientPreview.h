@@ -39,6 +39,90 @@ struct ClientPreview
         if (test.isEmpty())
             return;
 
+        if (test == "controls")
+        {
+            at (4000, c, [] (ClientComponent&, View& v)
+            {
+                auto& l = v.live;
+                std::cerr << "CLIENT connected " << l.isConnected() << " midi " << (v.midi != nullptr) << " key shortcut 0 '" << Shortcuts::describe (v.keyShortcuts[0]) << "'" << std::endl;
+
+                // Assign User Key 1 on the server: select rack 3
+                Action sel; sel.type = Action::selectRack; sel.rack = 2;
+                v.assignKey (0, sel);
+
+                // MIDI Learn here: a note bypasses rack 2, a CC sets parameter 0 of rack 1's first plugin
+                Action bypass; bypass.type = Action::rackBypass; bypass.rack = 1;
+                v.midi->learnAction (bypass);
+                v.midi->handle ({ "Test pad", juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100) });
+                std::cerr << "CLIENT learned " << v.midi->getMappings().size() << " '" << v.midi->getMappings().back().describeControl()
+                          << "' -> '" << v.midi->getMappings().back().describeTarget (l) << "' rack1 bypassed before " << l.isRackBypassed (1) << std::endl;
+                v.midi->handle ({ "Test pad", juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100) });
+
+                v.midi->learnParameter (0, 0, 0, false, "First parameter");
+                v.midi->handle ({ "Test pad", juce::MidiMessage::controllerEvent (1, 20, 10) });
+                // a fader: many values in one tick, only the last counts
+                {
+                    const juce::ScopedLock sl (v.midi->queueLock);
+                    for (int val : { 20, 40, 60, 96 })
+                        v.midi->queue.push_back ({ "Test pad", juce::MidiMessage::controllerEvent (1, 20, val) });
+                }
+                std::cerr << "CLIENT mappings now " << v.midi->getMappings().size() << std::endl;
+
+                // Server apps: give the server one
+                auto ss = l.getServerSettings();
+                l.setServerSettings (ss.startAtLogin, ss.restartAfterCrash, ss.multiCore, juce::StringArray { "/usr/bin/true" });
+            });
+
+            at (6500, c, [] (ClientComponent&, View& v)
+            {
+                auto& l = v.live;
+                std::cerr << "CLIENT rack1 bypassed after the note " << l.isRackBypassed (1) << " key0 label '" << v.state()["keys"][0]["label"].toString()
+                          << "' apps " << v.state()["apps"].size() << " apps button " << v.appsButton.isVisible() << std::endl;
+
+                // F1 (this computer's shortcut for User Key 1) selects rack 3
+                v.keyPressed (juce::KeyPress (juce::KeyPress::F1Key), &v);
+                std::cerr << "CLIENT after F1 selected " << v.selectedRack << " (expect 2)" << std::endl;
+
+                // The parameter the fader set
+                auto* extra = new juce::DynamicObject();
+                extra->setProperty ("view", "0:0");
+                juce::Component::SafePointer<ClientComponent> sc (&v.owner);
+                l.request ("params", juce::var (extra), [] (const juce::var& d)
+                {
+                    const auto p0 = d["view"]["params"][0];
+                    std::cerr << "CLIENT param 0 '" << p0["name"].toString() << "' value " << (double) p0["value"] << " (expect " << 96.0 / 127.0 << ")" << std::endl;
+                });
+
+                // Recalled by new snapshots, as the plugin menu asks
+                auto* e2 = new juce::DynamicObject();
+                e2->setProperty ("number", -1);
+                l.request ("snapshot", juce::var (e2), [] (const juce::var& d)
+                {
+                    std::cerr << "CLIENT new snapshots recall rack 0: " << juce::JSON::toString (d["snapshot"]["inScope"][0], true) << std::endl;
+                });
+
+                v.setTwoWindows (true);
+                v.openApp (0, "true");
+            });
+
+            at (10000, c, [] (ClientComponent&, View& v)
+            {
+                auto* pic = v.dock.remoteView.get();
+                std::cerr << "CLIENT rack window " << (v.rackWindow != nullptr) << " dock in it " << (v.dock.getParentComponent() != &v)
+                          << " picture " << (pic != nullptr && pic->picture.isValid()) << " view " << (int) v.view
+                          << " pop outs (app) " << v.popOuts.size() << " app message '" << [&] {
+                                 auto* w = v.popOuts.empty() ? nullptr : dynamic_cast<RemotePluginView*> (v.popOuts.front()->getContentComponent());
+                                 return w != nullptr ? w->message : juce::String ("-"); }() << "'" << std::endl;
+                std::cerr << "CLIENT status learn '" << v.midi->getLearnText() << "'" << std::endl;
+                v.setTwoWindows (false);
+                std::cerr << "CLIENT back to one window: dock here " << (v.dock.getParentComponent() == &v) << " rack window " << (v.rackWindow != nullptr) << std::endl;
+                v.setView (View::View::devices);
+                std::cerr << "CLIENT devices with MIDI: cards " << (v.devicesPanel != nullptr) << std::endl;
+            });
+            at (12000, c, [] (ClientComponent&, View& v) { v.setView (View::View::channels); });
+            return;
+        }
+
         if (test == "clickserver")
         {
             // As a person would: wait for the server to show up, click it

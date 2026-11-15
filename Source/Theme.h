@@ -68,6 +68,7 @@ namespace Theme
         else if (name == "snapshots") { p.addRoundedRectangle (1.5f, 3.0f, 11.0f, 8.0f, 1.5f); svg ("M5 14.5h11V6.5"); }
         else if (name == "overview") { for (float x : { 1.5f, 7.0f, 12.5f }) p.addRoundedRectangle (x, 2.0f, 4.0f, 14.0f, 1.0f); }
         else if (name == "rack")    { p.addRoundedRectangle (1.5f, 2.0f, 15.0f, 14.0f, 1.5f); svg ("M1.5 6h15M4.5 9.5h9M4.5 12.5h6"); }
+        else if (name == "apps")    { p.addRoundedRectangle (1.5f, 2.5f, 15.0f, 13.0f, 2.0f); svg ("M1.5 6h15M4 4.2h0.5M6.5 4.2h0.5"); }
         else if (name == "stack")   { p.addRoundedRectangle (2.0f, 2.0f, 14.0f, 6.0f, 1.5f); p.addRoundedRectangle (2.0f, 10.0f, 14.0f, 6.0f, 1.5f); }
         return p;
     }

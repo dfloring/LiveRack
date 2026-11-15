@@ -433,6 +433,20 @@ int WebRemote::getNumClients() const
     return n;
 }
 
+juce::StringArray WebRemote::getClientNames() const
+{
+    const juce::ScopedLock sl (clientLock);
+    const auto now = juce::Time::getMillisecondCounter();
+    juce::StringArray names;
+    for (auto& [ip, t] : clients)
+        if (now - t < 5000)
+        {
+            const auto it = clientNames.find (ip);
+            names.add (it != clientNames.end() && it->second.isNotEmpty() ? it->second : ip);
+        }
+    return names;
+}
+
 juce::String WebRemote::getStatusText() const
 {
     if (! enabled)       return "Web remote off";
@@ -659,6 +673,14 @@ void WebRemote::runLive (juce::StreamingSocket& socket, const juce::String& firs
             else if (t == "query")
             {
                 query = event["q"].toString();
+
+                // LiveRack Client says who it is: "...&client=MacBook"
+                for (auto& part : juce::StringArray::fromTokens (query, "&", ""))
+                    if (part.startsWith ("client="))
+                    {
+                        const juce::ScopedLock sl (clientLock);
+                        clientNames[socket.getHostName()] = juce::URL::removeEscapeChars (part.fromFirstOccurrenceOf ("=", false, false)).substring (0, 40);
+                    }
                 lastState.clear(); // send the new state at once
                 lastStateMs = 0;
             }
@@ -674,7 +696,8 @@ void WebRemote::runLive (juce::StreamingSocket& socket, const juce::String& firs
                 const auto what = event["what"].toString();
                 const juce::String q = what == "library" ? "lib=1" : what == "shows" ? "shows=1" : what == "devices" ? "devices=1"
                                      : what == "plugins" ? "plugins=1" : what == "descriptions" ? "descriptions=1"
-                                     : what == "snapshot" ? "snapshot=" + juce::String ((int) event["number"]) : "";
+                                     : what == "snapshot" ? "snapshot=" + juce::String ((int) event["number"])
+                                     : what == "params" ? "view=" + event["view"].toString() : "";
                 const auto json = onMessageThread ([this, q] { return buildState != nullptr ? buildState (q) : juce::String ("{}"); });
                 alive = reply (event["id"], what, json);
             }

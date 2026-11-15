@@ -221,7 +221,7 @@ private:
     HotPluginsBar hotBar { live, *this };
     PageTabs pageTabs { live };
     std::vector<Shortcut> extraShortcuts = Shortcuts::loadExtras();
-    UserKeysBar keysBar { engine, *this };
+    UserKeysBar keysBar { engine, live, *this };
 
     class StatusBar;
     std::unique_ptr<StatusBar> statusBar;

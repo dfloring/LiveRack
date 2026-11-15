@@ -22,7 +22,7 @@ struct MidiMapping
     juce::String paramName;
 
     juce::String describeControl() const;
-    juce::String describeTarget (const RackEngine&) const;
+    juce::String describeTarget (LiveConnection&) const;
     bool sameControl (const MidiMapping& o) const
     {
         return device == o.device && kind == o.kind && channel == o.channel && number == o.number;
@@ -35,7 +35,9 @@ class MidiControl : private juce::MidiInputCallback,
                     private juce::Timer
 {
 public:
-    MidiControl (RackEngine&, ActionHost&);
+    // settingsFile: where devices and mappings are kept. snapshotMidi: program
+    // changes in and out for snapshots (Native; a Client leaves those to the server)
+    MidiControl (LiveConnection&, ActionHost&, const juce::String& settingsFile = "midi-control.xml", bool snapshotMidi = true);
     ~MidiControl() override;
 
     // Only devices the user has added are opened (and listed in Devices)
@@ -52,7 +54,7 @@ public:
 
     // MIDI Learn: the next control moved is mapped to this
     void learnAction (const Action&);
-    void learnParameter (int rack, int slot, int paramIndex, bool followSelected);
+    void learnParameter (int rack, int slot, int paramIndex, bool followSelected, const juce::String& paramName);
     void cancelLearn();
     bool isLearning() const { return learning; }
     juce::String getLearnText() const;
@@ -84,6 +86,7 @@ public:
 private:
    #if LIVERACK_PREVIEW_HOOKS
     friend struct PreviewHooks;
+    friend struct ClientPreview;
    #endif
     struct Device
     {
@@ -105,8 +108,10 @@ private:
     void checkForChanges();     // plugged in / unplugged
     juce::StringArray lastSeenInputs;
 
-    RackEngine& engine;
+    LiveConnection& engine;
     ActionHost& host;
+    const juce::String settingsFile;
+    const bool snapshotMidi;
 
     std::vector<std::unique_ptr<Device>> devices;
     juce::StringArray addedDevices;

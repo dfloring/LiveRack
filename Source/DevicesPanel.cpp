@@ -795,7 +795,7 @@ public:
             {
                 juce::PopupMenu item;
                 item.addItem (1 + i, "Remove");
-                m.addSubMenu (maps[(size_t) i].describeControl() + "   >   " + maps[(size_t) i].describeTarget (*host.engine), item);
+                m.addSubMenu (maps[(size_t) i].describeControl() + "   >   " + maps[(size_t) i].describeTarget (host.live), item);
             }
 
             if (! maps.empty())
@@ -911,7 +911,9 @@ public:
         section ("Consoles", "One panel per console. Click a card slot to say what's in it and which driver channels it arrives on.");
         gridOf (consoles, &addConsole, 2, 300);
 
-        if (host.midi != nullptr)
+        if (host.midi != nullptr && host.onClient)
+            section ("Controllers", "MIDI devices plugged into this computer and its keyboard shortcuts; the iPad remote, OSC and Server mode are the server's. Lights flash as messages arrive.");
+        else if (host.midi != nullptr)
             section ("Controllers", "MIDI devices you add, keyboard shortcuts and the OSC remote. Lights flash as messages arrive.");
         else
             section ("Remote control", "The iPad remote, OSC and Server mode, on the server. Lights flash as messages arrive.");

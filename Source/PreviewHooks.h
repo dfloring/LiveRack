@@ -400,7 +400,7 @@ struct PreviewHooks
             : juce::DocumentWindow ("Devices over the network (test)", Theme::background, 0), live ("127.0.0.1", port)
         {
             setUsingNativeTitleBar (true);
-            DevicesPanel::Host h { live, &m.engine, m.midi.get(),
+            DevicesPanel::Host h { live, m.midi.get(),
                 [] (int) {}, [this] (int c) { openConsole (c); }, [] {}, [] { return 0; } };
             panel = new DevicesPanel (std::move (h));
             setContentOwned (panel, false);
@@ -728,6 +728,22 @@ struct PreviewHooks
                                   std::cerr << "STEP wrap " << m.selectedRack << " (expect " << m.engine.getNumRacks() - 1 << ")" << std::endl; m.stepRack (1); }
         if (open == "plugins")  m.showPluginScanner();
         if (open == "remote")   openRemoteWindow (m);
+        if (juce::SystemStats::getEnvironmentVariable ("LIVERACK_PREVIEW_PRINTCLIENTS", {}).isNotEmpty())
+        {
+            // Who's connected, every few seconds (for the LiveRack Client test)
+            struct Printer : juce::Timer
+            {
+                MainComponent& m;
+                explicit Printer (MainComponent& mc) : m (mc) { startTimer (3000); }
+                void timerCallback() override
+                {
+                    std::cerr << "SERVER remotes '" << m.webRemote.getClientNames().joinIntoString (", ") << "' key0 type " << (int) m.keysBar.getKey (0).type
+                              << " key0 rack " << m.keysBar.getKey (0).rack << std::endl;
+                }
+            };
+            static std::unique_ptr<Printer> printer;
+            printer = std::make_unique<Printer> (m);
+        }
         if (open == "switchmode")
         {
             // Native -> Client -> Native in one window (the logo menu)
@@ -894,8 +910,8 @@ struct PreviewHooks
         if (open == "toolstack") { m.showDevices(); m.showScope(); m.scopeWindow->close(); }
         if (open == "groupmenu")  juce::Timer::callAfterDelay (1500, [&m] { m.strips.previewMenu (0, 0); });
         if (open == "colourmenu") juce::Timer::callAfterDelay (1500, [&m] { m.strips.previewMenu (1, 1); });
-        if (open == "keymenu2")   juce::Timer::callAfterDelay (1500, [&m] { Action::showChooser (m.engine, {}, 0, [] (Action) {}); });
-        if (open == "keymenu")  { Action::showChooser (m.engine, {}, 0, [] (Action) {}); }
+        if (open == "keymenu2")   juce::Timer::callAfterDelay (1500, [&m] { Action::showChooser (m.live, {}, 0, [] (Action) {}); });
+        if (open == "keymenu")  { Action::showChooser (m.live, {}, 0, [] (Action) {}); }
         if (open == "rename")   m.strips.previewMenu (2, 2);
         if (open == "store")    m.showStoreSceneDialog();
         if (open == "slotmenu") m.showSlotMenu (5, 1, m.strips.getSlotScreenBounds (5, 1));

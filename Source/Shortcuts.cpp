@@ -43,12 +43,12 @@ namespace Shortcuts
         return k.getKeyCode() == juce::KeyPress::tabKey || k.getKeyCode() == juce::KeyPress::spaceKey;
     }
 
-    static juce::File file() { return RackEngine::getSettingsDir().getChildFile ("shortcuts.xml"); }
+    static juce::File file (const juce::String& name) { return RackEngine::getSettingsDir().getChildFile (name); }
 
-    std::vector<Shortcut> loadExtras()
+    std::vector<Shortcut> loadExtras (const juce::String& fileName)
     {
         std::vector<Shortcut> list;
-        auto xml = juce::parseXML (file());
+        auto xml = juce::parseXML (file (fileName));
 
         if (xml == nullptr)
         {
@@ -71,7 +71,7 @@ namespace Shortcuts
         return list;
     }
 
-    void saveExtras (const std::vector<Shortcut>& list)
+    void saveExtras (const std::vector<Shortcut>& list, const juce::String& fileName)
     {
         juce::XmlElement xml ("SHORTCUTS");
         for (auto& s : list)
@@ -80,7 +80,7 @@ namespace Shortcuts
             e->setAttribute ("key", toText (s.key));
             s.action.writeTo (*e);
         }
-        xml.writeTo (file());
+        xml.writeTo (file (fileName));
     }
 }
 

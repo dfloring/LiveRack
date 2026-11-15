@@ -32,7 +32,7 @@ private:
 class UserKeysBar : public juce::Component
 {
 public:
-    UserKeysBar (RackEngine&, ActionHost&);
+    UserKeysBar (RackEngine&, LiveConnection&, ActionHost&);
 
     static constexpr int numKeys = 8;
     const Action& getKey (int i) const { return keys[(size_t) i]; }
@@ -60,6 +60,7 @@ private:
     juce::Rectangle<int> keyBounds (int index) const;
 
     RackEngine& engine;
+    LiveConnection& live;
     ActionHost& host;
     std::array<Action, numKeys> keys;
     std::array<juce::KeyPress, numKeys> shortcuts;

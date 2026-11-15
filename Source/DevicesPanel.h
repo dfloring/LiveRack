@@ -14,12 +14,12 @@ public:
     struct Host
     {
         LiveConnection& live;     // drivers, consoles, remotes and server settings, here or on a server
-        RackEngine* engine;       // MIDI controllers and keyboard shortcuts stay on this computer;
-        MidiControl* midi;        // nullptr: not shown (LiveRack Client, for now)
+        MidiControl* midi;        // MIDI controllers and keyboard shortcuts: this computer's (nullptr: not shown)
         std::function<void (int driver)> openDriverSettings;
         std::function<void (int console)> openConsoleSettings;
         std::function<void()> openShortcuts;
         std::function<int()> shortcutCount;
+        bool onClient = false;    // LiveRack Client: controllers here, remotes on the server
     };
 
     explicit DevicesPanel (Host);

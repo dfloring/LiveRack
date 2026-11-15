@@ -375,6 +375,10 @@ public:
             chip (recentDrop ? Theme::amber : Theme::green, s.deviceName.substring (0, 28), rest, false);
         }
 
+        // Who else is connected: LiveRack Clients by name, the iPad by address
+        if (const auto remotes = owner.webRemote.getClientNames(); ! remotes.isEmpty())
+            chip (Theme::green, remotes.size() == 1 ? "Remote" : "Remotes", remotes.joinIntoString (", ").substring (0, 60), true);
+
         chip (owner.osc.isListening() ? (owner.osc.getNumClients() > 0 ? Theme::green : Theme::green.withAlpha (0.4f)) : Theme::textDim,
               "OSC", owner.osc.isEnabled() ? juce::String (owner.osc.getNumClients()) + " client" + (owner.osc.getNumClients() == 1 ? "" : "s") : "off", true);
 
@@ -533,7 +537,7 @@ MainComponent::MainComponent()
     pageTabs.onAddPage = [this] { addPage(); };
     pageTabs.onPageMenu = [this] (int p) { showPageMenu (p); };
 
-    midi = std::make_unique<MidiControl> (engine, *this);
+    midi = std::make_unique<MidiControl> (live, *this);
     live.setMidi (midi.get());
     live.slotLabelFor = [this] (int d, int ch) { return slotLabelFor (d, ch); };
     {
@@ -637,6 +641,9 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+   #if LIVERACK_PREVIEW_HOOKS
+    PreviewHooks::testSignal.reset();   // the test build's stand-in audio feeds this engine
+   #endif
     IsolatedPlugin::onEvent = nullptr;
     stopTimer();
     removeKeyListener (this);
@@ -1149,7 +1156,7 @@ void MainComponent::sendFeedback()
     for (int k = 0; k < UserKeysBar::numKeys; ++k)
     {
         const auto& a = keysBar.getKey (k);
-        osc.send ("/liverack/key/" + juce::String (k + 1) + "/label", a.type == Action::none ? juce::String() : a.describe (engine));
+        osc.send ("/liverack/key/" + juce::String (k + 1) + "/label", a.type == Action::none ? juce::String() : a.describe (live));
         osc.send ("/liverack/key/" + juce::String (k + 1) + "/state", a.type == Action::tapTempo ? 0 : (isActionActive (a) ? 1 : 0));
     }
 
@@ -1679,7 +1686,9 @@ void MainComponent::showParameters (int rack, int slot)
     {
         int r, s;
         if (safe != nullptr && safe->engine.findSlot (slotId, r, s))
-            safe->midi->learnParameter (r, s, param, follow);
+            if (auto* p = safe->engine.getPlugin (r, s))
+                if (auto* pa = p->getParameters()[param])
+                    safe->midi->learnParameter (r, s, param, follow, pa->getName (40));
     };
 
     const auto title = "Parameters: " + engine.getRackConfig (rack).name + " / " + plugin->getName();
@@ -2005,7 +2014,7 @@ void MainComponent::showDevices()
 
     juce::Component::SafePointer<MainComponent> safe (this);
 
-    DevicesPanel::Host host { live, &engine, midi.get(),
+    DevicesPanel::Host host { live, midi.get(),
         [safe] (int d) { if (safe != nullptr) safe->showDriverSettings (d); },
         [safe] (int c) { if (safe != nullptr) safe->showConsoleSettings (c); },
         [safe] { if (safe != nullptr) safe->showShortcuts(); },
@@ -2985,7 +2994,7 @@ juce::String MainComponent::shortcutOwner (const juce::KeyPress& k) const
 
     for (auto& sc : extraShortcuts)
         if (sc.key == k)
-            return sc.action.describe (engine);
+            return sc.action.describe (const_cast<LocalConnection&> (live));
 
     return {};
 }
@@ -3051,11 +3060,11 @@ void MainComponent::showShortcuts()
         [] { return UserKeysBar::numKeys; },
         [safe] (int i) { return safe != nullptr ? safe->keysBar.getShortcut (i) : juce::KeyPress(); },
         [safe] (int i, juce::KeyPress k) { if (safe != nullptr) safe->keysBar.setShortcut (i, k); },
-        [safe] (int i) { return safe != nullptr ? safe->keysBar.getKey (i).describe (safe->engine) : juce::String(); },
+        [safe] (int i) { return safe != nullptr ? safe->keysBar.getKey (i).describe (safe->live) : juce::String(); },
         [safe]() -> std::vector<Shortcut>& { return safe->extraShortcuts; },
         [safe] { if (safe != nullptr) Shortcuts::saveExtras (safe->extraShortcuts); },
-        [safe] (const Action& a) { return safe != nullptr ? a.describe (safe->engine) : juce::String(); },
-        [safe] (std::function<void (Action)> cb) { if (safe != nullptr) Action::showChooser (safe->engine, {}, safe->selectedRack, cb); },
+        [safe] (const Action& a) { return safe != nullptr ? a.describe (safe->live) : juce::String(); },
+        [safe] (std::function<void (Action)> cb) { if (safe != nullptr) Action::showChooser (safe->live, {}, safe->selectedRack, cb); },
         [safe] (const juce::String& what, std::function<void (juce::KeyPress)> cb) { if (safe != nullptr) safe->captureShortcut (what, cb); }
     };
 
@@ -3172,7 +3181,7 @@ juce::String MainComponent::buildWebState (const juce::String& query)
     {
         auto key = obj();
         const auto& a = keysBar.getKey (k);
-        key.getDynamicObject()->setProperty ("label", a.type == Action::none ? juce::String() : a.describe (engine));
+        key.getDynamicObject()->setProperty ("label", a.type == Action::none ? juce::String() : a.describe (live));
         key.getDynamicObject()->setProperty ("lit", a.type != Action::none && isActionActive (a));
         // What it does, so LiveRack Client can run it against its own selection
         key.getDynamicObject()->setProperty ("action", juce::Array<juce::var> { (int) a.type, a.rack, a.slotId, a.number });
@@ -4363,16 +4372,24 @@ void MainComponent::handleWebCommand (const juce::var& c)
         engine.setSlotBypassed (rack, slot, value < 0 ? ! engine.isSlotBypassed (rack, slot) : value > 0);
     else if (cmd == "param")
     {
-        if (auto* plugin = engine.getPlugin (rack, slot))
-            if (auto* param = plugin->getParameters()[(int) c["index"]])
-            {
-                param->beginChangeGesture();
-                param->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, (float) (double) c["value"]));
-                param->endChangeGesture();
-            }
+        if ((bool) c["toggle"])  live.toggleParameter (rack, slot, (int) c["index"]);   // a MIDI note on a Client
+        else                     live.setParameter (rack, slot, (int) c["index"], (float) (double) c["value"]);
     }
     else if (cmd == "key")
         keysBar.press ((int) c["index"]);
+    else if (cmd == "keySet" && juce::isPositiveAndBelow ((int) c["index"], UserKeysBar::numKeys))
+    {
+        // Assigned from LiveRack Client: [type, rack, slot id, number]
+        Action a;
+        if (auto* arr = c["action"].getArray(); arr != nullptr && arr->size() >= 4)
+        {
+            a.type = (Action::Type) juce::jlimit (0, (int) Action::numTypes - 1, (int) (*arr)[0]);
+            a.rack = (int) (*arr)[1];
+            a.slotId = (int) (*arr)[2];
+            a.number = (int) (*arr)[3];
+        }
+        keysBar.setKey ((int) c["index"], a);
+    }
     else if (cmd == "page")
         engine.setCurrentPage ((int) c["page"]);
     else if (cmd == "tap")

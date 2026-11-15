@@ -1,6 +1,7 @@
 #include "Actions.h"
+#include "LiveConnection.h"
 
-juce::String Action::describe (const RackEngine& engine) const
+juce::String Action::describe (LiveConnection& engine) const
 {
     auto rackName = [&engine] (int r) -> juce::String
     {
@@ -14,8 +15,7 @@ juce::String Action::describe (const RackEngine& engine) const
         if (id <= 0) return "selected plugin";
         int r, s;
         if (engine.findSlot (id, r, s))
-            if (auto* p = engine.getPlugin (r, s))
-                return engine.getRackConfig (r).name + " " + p->getName();
+            return engine.getRackConfig (r).name + " " + engine.getSlot (r, s).name;
         return "(removed plugin)";
     };
 
@@ -37,7 +37,7 @@ juce::String Action::describe (const RackEngine& engine) const
         case storeScene:    return "Store Snapshot";
         case showPage:
             if (number <= 0) return "Page: All";
-            if (number <= (int) engine.getPages().size()) return "Page: " + engine.getPages()[(size_t) number - 1].name;
+            if (const auto pages = engine.getPages(); number <= (int) pages.size()) return "Page: " + pages[(size_t) number - 1].name;
             return "Page " + juce::String (number);
         case none: case numTypes: default: break;
     }
@@ -85,7 +85,7 @@ Action Action::readFrom (const juce::XmlElement& x)
     return a;
 }
 
-void Action::showChooser (const RackEngine& engine, const Action& current, int selectedRack,
+void Action::showChooser (LiveConnection& engine, const Action& current, int selectedRack,
                           std::function<void (Action)> onChosen)
 {
     std::vector<Action> items;
@@ -116,10 +116,10 @@ void Action::showChooser (const RackEngine& engine, const Action& current, int s
 
         juce::PopupMenu rackPlugins, rackOpen;
         for (int s = 0; s < engine.getNumSlots (r); ++s)
-            if (auto* p = engine.getPlugin (r, s))
+            if (const auto slot = engine.getSlot (r, s); slot.exists)
             {
-                add (rackPlugins, make (pluginBypass, -1, engine.getSlotId (r, s)), p->getName());
-                add (rackOpen, make (openPlugin, -1, engine.getSlotId (r, s)), p->getName());
+                add (rackPlugins, make (pluginBypass, -1, slot.id), slot.name);
+                add (rackOpen, make (openPlugin, -1, slot.id), slot.name);
             }
 
         if (rackPlugins.getNumItems() > 0)
@@ -134,9 +134,10 @@ void Action::showChooser (const RackEngine& engine, const Action& current, int s
     for (int i = 1; i <= RackEngine::maxHotPlugins; ++i)
         add (hot, make (hotPlugin, -1, 0, i), "Hot Plugin " + juce::String (i));
 
-    for (auto& snap : engine.getSnapshots())
+    const auto snapshots = engine.getSnapshots();
+    for (auto& snap : snapshots)
         add (scenes, make (recallScene, -1, 0, snap.number), juce::String (snap.number) + (snap.name.isNotEmpty() ? "  " + snap.name : juce::String()));
-    if (engine.getSnapshots().empty())
+    if (snapshots.empty())
         for (int i = 0; i <= 30; ++i)
             add (scenes, make (recallScene, -1, 0, i), "Snapshot " + juce::String (i));
 
@@ -151,8 +152,9 @@ void Action::showChooser (const RackEngine& engine, const Action& current, int s
 
     juce::PopupMenu pagesMenu;
     add (pagesMenu, make (showPage, -1, 0, 0), "All");
-    for (int i = 0; i < (int) engine.getPages().size(); ++i)
-        add (pagesMenu, make (showPage, -1, 0, i + 1), engine.getPages()[(size_t) i].name);
+    const auto pages = engine.getPages();
+    for (int i = 0; i < (int) pages.size(); ++i)
+        add (pagesMenu, make (showPage, -1, 0, i + 1), pages[(size_t) i].name);
     m.addSubMenu ("Show page", pagesMenu);
     m.addSeparator();
     m.addSubMenu ("Recall snapshot", scenes);

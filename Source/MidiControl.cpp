@@ -1,4 +1,5 @@
 #include "MidiControl.h"
+#include "LiveConnection.h"
 
 juce::String MidiMapping::describeControl() const
 {
@@ -12,7 +13,7 @@ juce::String MidiMapping::describeControl() const
     return s;
 }
 
-juce::String MidiMapping::describeTarget (const RackEngine& engine) const
+juce::String MidiMapping::describeTarget (LiveConnection& engine) const
 {
     if (! isParameter)
         return action.describe (engine);
@@ -22,14 +23,14 @@ juce::String MidiMapping::describeTarget (const RackEngine& engine) const
 
     int r, s;
     if (engine.findSlot (slotId, r, s))
-        if (auto* p = engine.getPlugin (r, s))
-            return engine.getRackConfig (r).name + " " + p->getName() + ": " + paramName;
+        return engine.getRackConfig (r).name + " " + engine.getSlot (r, s).name + ": " + paramName;
 
     return "(removed plugin): " + paramName;
 }
 
 //==============================================================================
-MidiControl::MidiControl (RackEngine& e, ActionHost& h) : engine (e), host (h)
+MidiControl::MidiControl (LiveConnection& e, ActionHost& h, const juce::String& file, bool snapshots)
+    : engine (e), host (h), settingsFile (file), snapshotMidi (snapshots)
 {
     load();
     openDevices();
@@ -181,18 +182,15 @@ void MidiControl::learnAction (const Action& a)
     if (onChanged != nullptr) onChanged();
 }
 
-void MidiControl::learnParameter (int rack, int slot, int paramIndex, bool followSelected)
+void MidiControl::learnParameter (int rack, int slot, int paramIndex, bool followSelected, const juce::String& paramName)
 {
     learnTemplate = {};
     learnTemplate.isParameter = true;
     learnTemplate.followSelected = followSelected;
-    learnTemplate.slotId = engine.getSlotId (rack, slot);
+    learnTemplate.slotId = engine.getSlot (rack, slot).id;
     learnTemplate.slotPosition = slot;
     learnTemplate.paramIndex = paramIndex;
-
-    if (auto* p = engine.getPlugin (rack, slot))
-        if (auto* param = p->getParameters()[paramIndex])
-            learnTemplate.paramName = param->getName (40);
+    learnTemplate.paramName = paramName.substring (0, 40);
 
     learning = true;
     learnStartedMs = juce::Time::getMillisecondCounter();
@@ -231,8 +229,28 @@ void MidiControl::timerCallback()
         items.swap (queue);
     }
 
-    for (auto& in : items)
-        handle (in);
+    // A fader sends many values between ticks: only the latest of each counts
+    // (over the network especially)
+    for (size_t i = 0; i < items.size(); ++i)
+    {
+        const auto& m = items[i].message;
+        const bool forParameter = std::any_of (mappings.begin(), mappings.end(), [&] (const MidiMapping& x)
+        {
+            return x.isParameter && x.kind == 1 && (x.device.isEmpty() || x.device == items[i].device)
+                && x.channel == m.getChannel() && m.isController() && x.number == m.getControllerNumber();
+        });
+        if (forParameter && ! learning)
+        {
+            const bool later = std::any_of (items.begin() + (std::ptrdiff_t) i + 1, items.end(), [&] (const Incoming& o)
+            {
+                return o.device == items[i].device && o.message.isController() && o.message.getChannel() == m.getChannel()
+                    && o.message.getControllerNumber() == m.getControllerNumber();
+            });
+            if (later)
+                continue;
+        }
+        handle (items[i]);
+    }
 
     if (learning && juce::Time::getMillisecondCounter() - learnStartedMs > 30000)
         cancelLearn();
@@ -291,7 +309,7 @@ void MidiControl::handle (const Incoming& in)
         }
 
     // Program changes recall snapshots (a learned mapping for one wins)
-    if (! mapped && m.isProgramChange() && link.follow
+    if (! mapped && m.isProgramChange() && snapshotMidi && link.follow
         && (link.input.isEmpty() || link.input == in.device)
         && (link.channel == 0 || link.channel == m.getChannel()))
     {
@@ -327,6 +345,8 @@ juce::StringArray MidiControl::getInputNames() const { return addedDevices; }
 
 void MidiControl::openSnapshotOutput()
 {
+    if (! snapshotMidi)
+        return;
     const auto want = link.send ? link.output : juce::String();
     if (want == snapshotOutName && (snapshotOut != nullptr || want.isEmpty()))
         return;
@@ -346,7 +366,7 @@ void MidiControl::openSnapshotOutput()
 
 void MidiControl::snapshotRecalled (int number)
 {
-    if (! link.send || recallFromMidi)
+    if (! snapshotMidi || ! link.send || recallFromMidi)
         return;
 
     openSnapshotOutput(); // the device may have come back
@@ -385,22 +405,11 @@ void MidiControl::apply (const MidiMapping& mapping, const juce::MidiMessage& m)
     if (mapping.followSelected) { rack = host.getSelectedRack(); slot = mapping.slotPosition; }
     else if (! engine.findSlot (mapping.slotId, rack, slot)) return;
 
-    auto* plugin = engine.getPlugin (rack, slot);
-    if (plugin == nullptr)
+    if (! engine.getSlot (rack, slot).exists)
         return;
 
-    auto* param = plugin->getParameters()[mapping.paramIndex];
-    if (param == nullptr)
-        return;
-
-    float value = 0.0f;
-    if (m.isController())  value = m.getControllerValue() / 127.0f;
-    else if (m.isNoteOn()) value = param->getValue() > 0.5f ? 0.0f : 1.0f; // notes toggle
-    else                   return;
-
-    param->beginChangeGesture();
-    param->setValueNotifyingHost (value);
-    param->endChangeGesture();
+    if (m.isController())  engine.setParameter (rack, slot, mapping.paramIndex, (float) m.getControllerValue() / 127.0f);
+    else if (m.isNoteOn()) engine.toggleParameter (rack, slot, mapping.paramIndex);   // notes toggle
 }
 
 void MidiControl::sendFeedback()
@@ -464,12 +473,12 @@ void MidiControl::save() const
     sl->setAttribute ("output", link.output);
     sl->setAttribute ("outChannel", link.outChannel);
 
-    xml.writeTo (RackEngine::getSettingsDir().getChildFile ("midi-control.xml"));
+    xml.writeTo (RackEngine::getSettingsDir().getChildFile (settingsFile));
 }
 
 void MidiControl::load()
 {
-    auto xml = juce::parseXML (RackEngine::getSettingsDir().getChildFile ("midi-control.xml"));
+    auto xml = juce::parseXML (RackEngine::getSettingsDir().getChildFile (settingsFile));
     if (xml == nullptr)
         return;
 
