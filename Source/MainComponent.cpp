@@ -3269,6 +3269,7 @@ void MainComponent::addLiveState (juce::DynamicObject& r)
         sv.getDynamicObject()->setProperty ("progress", std::round (sc.progress * 100.0f) / 100.0f);
         sv.getDynamicObject()->setProperty ("current", sc.current);
         sv.getDynamicObject()->setProperty ("message", sc.message);
+        sv.getDynamicObject()->setProperty ("finished", sc.finished);
         r.setProperty ("scan", sv);
     }
 

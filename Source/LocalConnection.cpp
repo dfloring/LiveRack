@@ -292,14 +292,17 @@ LiveScanStatus LocalConnection::getScanStatus()
     {
         LiveScanStatus s;
         s.message = lastScanMessage;
+        s.finished = scansFinished;
         return s;
     }
     auto s = scan->status();
     if (! s.running)
     {
         lastScanMessage = s.message;
+        ++scansFinished;
         scan.reset();
     }
+    s.finished = scansFinished;
     return s;
 }
 

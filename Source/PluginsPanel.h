@@ -35,6 +35,7 @@ private:
     juce::StringArray failed;
     LiveScanStatus scan;
     bool wasScanning = false;
+    int scansSeen = -1;          // finished scans when last looked (-1: not yet)
 
    #if LIVERACK_PREVIEW_HOOKS
     friend struct PreviewHooks;

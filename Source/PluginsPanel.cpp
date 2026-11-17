@@ -71,11 +71,15 @@ void PluginsPanel::timerCallback()
     stop.setVisible (scan.running);
     retryFailed.setEnabled (! failed.isEmpty() && ! scan.running);
 
-    if (wasScanning && ! scan.running)
+    // A scan ended: a quick one can start and finish between two looks at
+    // the status, so count finished scans rather than watching for "running"
+    const bool ended = (wasScanning && ! scan.running) || (scansSeen >= 0 && scan.finished != scansSeen);
+    if (ended)
         live.refreshKnownPlugins();   // a server sends the new list; here, read it now
-    if (wasScanning && ! scan.running && live.isLocal())
+    if (ended && live.isLocal())
         reload();
     wasScanning = scan.running;
+    scansSeen = scan.finished;
     repaint (getLocalBounds().removeFromTop (110));
 }
 

@@ -911,6 +911,7 @@ LiveScanStatus RemoteConnection::getScanStatus()
     s.progress = (float) (double) v["progress"];
     s.current = v["current"].toString();
     s.message = v["message"].toString();
+    s.finished = (int) v["finished"];
     return s;
 }
 
