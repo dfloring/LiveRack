@@ -14,6 +14,13 @@ juce_add_pip(${JUCE_DIR}/examples/Plugins/DSPModulePluginDemo.h)
 juce_add_pip(${JUCE_DIR}/examples/Plugins/GainPluginDemo.h)
 juce_add_pip(${JUCE_DIR}/examples/Plugins/NoiseGatePluginDemo.h)
 
+# No web views or curl: keeps the build free of GTK / WebKit
+foreach(t DSPModulePluginDemo GainPlugin NoiseGatePlugin)
+    if(TARGET ${t})
+        target_compile_definitions(${t} PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    endif()
+endforeach()
+
 juce_add_plugin(DemoCompressor
     FORMATS VST3
     PRODUCT_NAME "DemoCompressor"
