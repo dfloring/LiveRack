@@ -1,7 +1,9 @@
 name: Build
 
-# Builds the Mac app and the Companion module on every push and pull request.
-# Pushing a tag like v0.10.0 also makes a GitHub Release with both attached.
+# Builds the Mac and Windows apps and the Companion module, and runs the
+# automated tests (tests/run.py on a Linux test build), on every push and pull
+# request. A new version number on main (CMakeLists.txt) makes a beta release
+# once all of that has passed; "Promote to stable" (promote.yml) makes it stable.
 on:
   push:
     branches: [main]
@@ -152,12 +154,75 @@ jobs:
           name: companion-module
           path: companion-module-liverack-host/*.tgz
 
+  linux-tests:
+    name: Tests (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build ccache xvfb \
+            libasound2-dev libfreetype-dev libfontconfig1-dev libx11-dev libxext-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxcomposite-dev libxrender-dev libgl1-mesa-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache JUCE
+        uses: actions/cache@v4
+        with:
+          path: juce
+          key: juce-src-8.0.4
+
+      - name: Get JUCE
+        run: test -d juce/modules || git clone --depth 1 -b 8.0.4 https://github.com/juce-framework/JUCE.git juce
+
+      - name: Cache compiler output
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-linux-${{ github.sha }}
+          restore-keys: ccache-linux-
+
+      - name: Build the test build of LiveRack
+        run: |
+          cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR=$PWD/juce -DLIVERACK_PREVIEW=ON \
+                -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build-linux
+
+      - name: Build the test plugins
+        run: |
+          cmake -S tests/demo-plugins -B build-plugins -G Ninja -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR=$PWD/juce \
+                -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build-plugins
+
+      - name: Browser for the iPad page test
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Run the tests
+        run: python3 tests/run.py --app build-linux/LiveRack_artefacts/Release/LiveRack --plugins build-plugins
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-logs
+          path: tests/out/
+
   release:
     name: Release
-    # A new version number on main (CMakeLists.txt) makes a GitHub Release once
-    # everything has built; pushing a v* tag does the same
+    # A new version number on main (CMakeLists.txt) makes a beta (pre-release)
+    # once everything has built and the tests pass; pushing a v* tag does the same
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    needs: [mac-app, windows-app, companion-module]
+    needs: [mac-app, windows-app, companion-module, linux-tests]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -182,16 +247,31 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Release notes (the changelog's section for this version)
+        if: steps.v.outputs.exists == 'false'
+        run: |
+          V="${{ steps.v.outputs.version }}"
+          {
+            echo "**Beta:** for testing on the rig before services. It becomes the stable version once it's proven (Actions > Promote to stable)."
+            echo
+            awk -v v="$V" '
+              $0 ~ "^## " { if (found) exit; if (index($0, v) == 4) { found = 1; next } }
+              found { print }' CHANGELOG.md
+            echo
+            echo "**Downloads**"
+            echo "- **Mac (Apple silicon):** \`LiveRack-$V-mac-arm64.zip\`. First launch: right-click LiveRack.app > Open (it isn't notarised)."
+            echo "- **Windows (x64, ASIO):** \`LiveRack-$V-windows-x64.zip\`. Windows may warn that it's from an unknown publisher: More info > Run anyway."
+            echo "- **Companion 5 module:** the \`.tgz\`. In Companion: Modules > Import module package."
+          } > notes.md
+          cat notes.md
+
       - uses: softprops/action-gh-release@v2
         if: steps.v.outputs.exists == 'false'
         with:
           tag_name: v${{ steps.v.outputs.version }}
           target_commitish: ${{ github.sha }}
-          name: LiveRack ${{ steps.v.outputs.version }}
+          name: LiveRack ${{ steps.v.outputs.version }} (beta)
+          prerelease: true
+          make_latest: false
           files: dist/*
-          generate_release_notes: true
-          body: |
-            **Downloads**
-            - **Mac (Apple silicon):** `LiveRack-${{ steps.v.outputs.version }}-mac-arm64.zip`. First launch: right-click LiveRack.app > Open (it isn't notarised).
-            - **Windows (x64, ASIO):** `LiveRack-${{ steps.v.outputs.version }}-windows-x64.zip`. Windows may warn that it's from an unknown publisher: More info > Run anyway.
-            - **Companion 5 module:** the `.tgz`. In Companion: Modules > Import module package.
+          body_path: notes.md

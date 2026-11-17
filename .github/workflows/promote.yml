@@ -1,0 +1,30 @@
+name: Promote to stable
+
+# A beta that has proven itself on the rig becomes the stable version: the one
+# for services, and "Latest" on the Releases page. Run it from Actions >
+# Promote to stable with the version number (e.g. 0.30.0).
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to make stable (e.g. 0.30.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Make it the stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ inputs.version }}
+        run: |
+          gh release view "v$V" --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release view "v$V" --repo "$GITHUB_REPOSITORY" --json body --jq .body \
+            | sed '1s/^\*\*Beta:\*\*.*$/**Stable:** tested on the rig./' > body.md
+          gh release edit "v$V" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest \
+            --title "LiveRack $V" --notes-file body.md
+          echo "::notice::LiveRack $V is now the stable release"
