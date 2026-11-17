@@ -17,7 +17,7 @@ git clone --depth 1 -b 8.0.4 https://github.com/juce-framework/JUCE.git juce
 cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR=$PWD/juce -DLIVERACK_PREVIEW=ON
 cmake --build build-linux
 cmake -S tests/demo-plugins -B build-plugins -G Ninja -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR=$PWD/juce
-cmake --build build-plugins
+cmake --build build-plugins --target DemoCompressor_VST3 DSPModulePluginDemo_VST3 GainPlugin_VST3 NoiseGatePlugin_VST3
 pip install playwright && python3 -m playwright install chromium   # for the iPad page
 python3 tests/run.py --app build-linux/LiveRack_artefacts/Release/LiveRack --plugins build-plugins
 ```

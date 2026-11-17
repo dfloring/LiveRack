@@ -201,7 +201,8 @@ jobs:
         run: |
           cmake -S tests/demo-plugins -B build-plugins -G Ninja -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR=$PWD/juce \
                 -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-          cmake --build build-plugins
+          # VST3 only: LiveRack hosts VST3 (JUCE would also try LV2 and Standalone here)
+          cmake --build build-plugins --target DemoCompressor_VST3 DSPModulePluginDemo_VST3 GainPlugin_VST3 NoiseGatePlugin_VST3
 
       - name: Browser for the iPad page test
         run: |
@@ -251,6 +252,7 @@ jobs:
         if: steps.v.outputs.exists == 'false'
         run: |
           V="${{ steps.v.outputs.version }}"
+          grep -q "^## $V " CHANGELOG.md || { echo "::error::CHANGELOG.md has no '## $V' section (release skill, step 3)"; exit 1; }
           {
             echo "**Beta:** for testing on the rig before services. It becomes the stable version once it's proven (Actions > Promote to stable)."
             echo

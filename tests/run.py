@@ -113,9 +113,10 @@ def scenarios():
                   r"RPLUG here now: Gain still listed 0 \(expect 0\), pages 1 last 'Band' with 2 racks, current page 0, first hot 2:1 \(expect 2:1\)",
                   r"RPLUG scan done by \d+ ms: 'Scan finished. 1 new plugin.' Gain back here 1, in the panel 1"]),
         S("cue-follow", "Following a Yamaha console's CUE (a fake CL5 on the network)",
-          server={"open": "cuefollow"}, duration=10,
+          server={"open": "cuefollow"}, duration=12,
           helpers=[(0.0, [sys.executable, os.path.join(HERE, "fake_cl5.py")])],
-          expect=[r"CUE at 2500 ms: selected rack 2 \(Snare\)", r"CUE at 3500 ms: selected rack 5 \(Pastor Mic\)"]),
+          expect=[r"CUE at 2500 ms: selected rack 2 \(Snare\)", r"CUE at 3500 ms: selected rack 5 \(Pastor Mic\)",
+                  r"CUE at 7500 ms: selected rack 5 \(Pastor Mic\)"]),   # CUE with follow off is ignored
 
         # ---- The server protocol and the iPad page, from outside
         S("protocol", "The /live server protocol from a separate client (Node)",
@@ -160,9 +161,10 @@ def scenarios():
                   r"CLIENT rack window 1 dock in it 1 picture 1",
                   r"CLIENT back to one window: dock here 1 rack window 0",
                   r"SERVER remotes '.+' key0 type 3 key0 rack 2"]),
-        S("client-click", "Client: pick a server found on the network (the 0.28.0 crash)",
+        S("client-click", "Client: pick a server on the connect screen (the 0.28.0 crash)",
           server={"open": "none"}, client={"test": "clickserver", "args": ["--client"]}, duration=11,
-          optional=[r"CLIENT clicking '", r"CLIENT after click: view 1 connected 1 racks 7"]),
+          expect=[r"CLIENT clicking '", r"CLIENT after click: view 1 connected 1 racks 7"],
+          optional=[r"CLIENT clicking '.*LiveRack 0\."]),   # found by its broadcast, not from the recent list
         S("switch-mode", "Native -> Client -> Native in one window",
           server={"open": "switchmode"}, duration=10,
           expect=[r"NATIVE up \(0\)", r"CLIENT up: connect screen 1 mode client 1", r"NATIVE up \(1\) racks 7"]),
@@ -179,6 +181,9 @@ def main():
 
     app, plugins = os.path.abspath(args.app), os.path.abspath(args.plugins)
     chosen = [s for s in scenarios() if not args.only or s.name in args.only.split(",")]
+    if not chosen:
+        print(f"No scenario called {args.only!r}; --list shows them")
+        return 1
     if args.list:
         for s in chosen:
             print(f"{s.name:18} {s.description}")
@@ -187,18 +192,25 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     gain = next((os.path.join(r, d) for r, ds, _ in os.walk(plugins) for d in ds if d == "GainPlugin.vst3"), None)
 
-    # Two screens: the server (and Native tests) on :99, a Client on :98
-    displays = [subprocess.Popen(["Xvfb", f":{n}", "-screen", "0", "1440x960x24"], stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL) for n in (99, 98)]
-    time.sleep(1.5)
-
-    results = []
+    # Two screens: the server (and Native tests) on :99, a Client on :98.
+    # LiveRack can't start without one, so wait until both answer.
+    displays = [subprocess.Popen(["Xvfb", f":{n}", "-screen", "0", "1440x960x24", "-nolisten", "tcp"],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) for n in (99, 98)]
     try:
+        if not wait_for_displays(displays, (99, 98)):
+            print("The virtual screens (Xvfb :99 and :98) didn't start. Another one running? Remove /tmp/.X99-lock and /tmp/.X98-lock.")
+            return 1
+
+        results = []
         for s in chosen:
             results.append(run_scenario(s, app, plugins, gain))
     finally:
         for d in displays:
-            d.kill()
+            d.terminate()
+            try:
+                d.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                d.kill()
 
     print()
     failed = [r for r in results if not r[1]]
@@ -206,6 +218,26 @@ def main():
         print(f"{'PASS' if ok else 'FAIL'}  {name}" + (f"   ({notes})" if notes else ""))
     print(f"\n{len(results) - len(failed)} of {len(results)} scenarios passed")
     return 1 if failed else 0
+
+
+def wait_for_displays(procs, numbers, timeout=10.0):
+    import socket
+    end = time.time() + timeout
+    while time.time() < end:
+        if any(p.poll() is not None for p in procs):
+            return False
+        ready = 0
+        for n in numbers:
+            try:
+                with socket.socket(socket.AF_UNIX) as s:
+                    s.connect(f"/tmp/.X11-unix/X{n}")
+                    ready += 1
+            except OSError:
+                pass
+        if ready == len(numbers):
+            return True
+        time.sleep(0.2)
+    return False
 
 
 def run_scenario(s, app, plugins, gain):
