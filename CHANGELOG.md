@@ -9,6 +9,7 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 
 ## Unreleased
 
+- Fixed: on LiveRack Client, the Plugins list could stay out of date after a quick scan (#17).
 - How LiveRack is built changed (nothing in the app): automated tests run on
   every change, new versions come out as betas first, and work is tracked as
   GitHub issues.
