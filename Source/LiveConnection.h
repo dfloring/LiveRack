@@ -108,6 +108,7 @@ struct LiveScanStatus
     float progress = 0.0f;               // 0..1 over all formats
     juce::String current;                // the plugin being scanned
     juce::String message;                // the result of the last scan
+    int finished = 0;                    // scans finished so far: a change means a new plugin list
 };
 
 class LiveConnection : public juce::ChangeBroadcaster
@@ -535,4 +536,5 @@ private:
     class ScanJob;
     std::unique_ptr<ScanJob> scan;
     juce::String lastScanMessage;
+    int scansFinished = 0;
 };
