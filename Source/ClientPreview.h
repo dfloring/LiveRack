@@ -127,11 +127,30 @@ struct ClientPreview
         {
             // As a person would: wait for the server to show up, click it
             juce::Component::SafePointer<ClientComponent> safe (&c);
+            auto hasServerButton = [] (ClientComponent& cc)
+            {
+                for (auto* child : cc.connectScreen->getChildren())
+                    if (auto* b = dynamic_cast<juce::TextButton*> (child); b != nullptr && b->getButtonText().contains ("LiveRack 0."))
+                        return true;
+                return false;
+            };
+            juce::Timer::callAfterDelay (3300, [safe, hasServerButton]
+            {
+                // No broadcast heard (some CI runners don't loop it back): the
+                // server as a recent one instead, so there's a button to click
+                if (safe != nullptr && safe->connectScreen != nullptr && ! hasServerButton (*safe))
+                {
+                    std::cerr << "CLIENT no broadcast heard: using a recent server" << std::endl;
+                    rememberServer ("Test server", "127.0.0.1", 8090);
+                    safe->showConnectScreen();
+                }
+            });
             juce::Timer::callAfterDelay (4000, [safe]
             {
                 if (safe == nullptr || safe->connectScreen == nullptr) { std::cerr << "CLIENT no connect screen" << std::endl; return; }
                 for (auto* child : safe->connectScreen->getChildren())
-                    if (auto* b = dynamic_cast<juce::TextButton*> (child); b != nullptr && b->getButtonText().contains ("LiveRack 0."))
+                    if (auto* b = dynamic_cast<juce::TextButton*> (child); b != nullptr
+                        && (b->getButtonText().contains ("LiveRack 0.") || b->getButtonText().contains ("127.0.0.1")))
                     {
                         std::cerr << "CLIENT clicking '" << b->getButtonText() << "'" << std::endl;
                         b->triggerClick();

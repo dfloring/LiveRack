@@ -1279,7 +1279,7 @@ struct PreviewHooks
                 s.recallScenes = true;
                 s.followSelection = true;
                 m.consoles[0]->setSettings (s);
-                for (int t : { 2500, 3500, 4500, 5500 })
+                for (int t : { 2500, 3500, 4500, 5500, 7500 })
                     juce::Timer::callAfterDelay (t, [&m, t]
                     {
                         std::cerr << "CUE at " << t << " ms: selected rack " << m.selectedRack << " (" << m.engine.getRackConfig (m.selectedRack).name << ")" << std::endl;
