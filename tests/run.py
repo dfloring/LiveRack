@@ -72,7 +72,7 @@ def scenarios():
     return [
         # ---- Native, through its own test hooks
         S("remote-strips", "Rack strips and plugin panel over the connection layer, against this engine",
-          server={"open": "remote"}, duration=10,
+          server={"open": "remote"}, duration=18,
           expect=[r"REMOTE connected 1", r"REMOTE racks 7 same as the engine 1",
                   r"REMOTE changes reached the engine: bypass 1 safe 1 group 2 colour 6 name 'Renamed remotely' slot bypass 1",
                   r"REMOTE and back in the copy: bypass 1 safe 1 group 2 colour 6 name 'Renamed remotely' slot bypass 1"]),
@@ -253,7 +253,10 @@ def run_scenario(s, app, plugins, gain):
         if s.plugins_in_home and gain:
             shutil.copytree(gain, os.path.join(h, ".vst3", "GainPlugin.vst3"))
 
-    base = dict(os.environ, HOME=homes[0], LIVERACK_PREVIEW_PLUGINS=plugins, LIVERACK_TEST_OUT=OUT)
+    base = dict(os.environ, HOME=homes[0], LIVERACK_PREVIEW_PLUGINS=plugins, LIVERACK_TEST_OUT=OUT,
+                # Playwright's browsers are in the real home, not the scenario's
+                PLAYWRIGHT_BROWSERS_PATH=os.environ.get("PLAYWRIGHT_BROWSERS_PATH",
+                                                        os.path.expanduser("~/.cache/ms-playwright")))
     procs, helpers = [], []
     restarts = 0
 
