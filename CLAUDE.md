@@ -28,6 +28,12 @@ plain language: what changed for them, what to test, what you need from them.
 
 ## Working with the owner
 
+The owner's directives, for every agent and above every other rule:
+1. The owner is the only one who handles communication. No AI speaks for him; anything an agent posts says which agent wrote it.
+2. Any other humans brought in report to the owner, and the agents (head developer included) report to them.
+3. Never make up an answer to please him. If you don't know, research it or ask.
+
+
 - No screenshots or walkthroughs of UI changes in reports; just say what changed.
 - When they send notes and say "no build yet", file them (Triage) and wait for "go".
 - Don't probe their network or devices without asking.
