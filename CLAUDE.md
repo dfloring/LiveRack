@@ -11,10 +11,15 @@ computer) and the iPad / web remote. AGPLv3. See `docs/ARCHITECTURE.md`.
 |---|---|---|
 | Product owner and tester | The repo owner | Priorities, what "done" means, approves releases, tests on the rig (Windows server, MacBook, iPad, Yamaha CL5, X32) |
 | Head developer | Claude, the main session | Plans, writes the code, runs the process below, reports to the owner |
-| Reviewer | `.claude/agents/reviewer.md` | Reads every pull request fresh before it merges |
+| Reviewer | `.claude/agents/reviewer.md`, run by Paperclip | Reads every pull request fresh before it merges; posts its review as a PR comment |
 | QA / tester | `.claude/agents/qa-tester.md` | Adds and runs automated tests for a change |
 | Release | `.claude/skills/release/` | Version, changelog, beta, the build on the rig, stable |
-| Triage | `.claude/skills/triage/` | Turns the owner's notes into issues |
+| Triage | `.claude/skills/triage/`, also run by Paperclip | Turns the owner's notes into issues; Paperclip labels issues the owner opens on GitHub |
+| Nightly | Paperclip | Opens an issue when the build of `main` is red |
+
+The Paperclip agents run on the owner's MacBook (`docs/PAPERCLIP.md`). They
+only comment and label on GitHub; they never push, merge or approve. GitHub
+issues and PRs are the record; Paperclip's own tasks are just their run log.
 
 The owner is not a C++ developer and reads reports, not code. Write to them in
 plain language: what changed for them, what to test, what you need from them.
@@ -40,8 +45,10 @@ plain language: what changed for them, what to test, what you need from them.
    in `tests/run.py`. A bug fix gets a test that would have caught it.
 4. **Pull request.** Fill in the template. CI builds Mac and Windows and runs
    the tests ("Tests (Linux)"); it must be green.
-5. **Review.** Run the reviewer agent on the PR; fix what it confirms. Note
-   anything you decline and why in the PR.
+5. **Review.** Wait for the "Paperclip reviewer for <commit>" comment on the
+   PR's latest commit, or run the reviewer agent yourself if it hasn't come
+   (the MacBook may be asleep). Fix what it confirms; note anything you
+   decline and why in the PR. A fix pushes a new commit, which gets a new review.
 6. **Merge** (squash). Add a line under **Unreleased** in `CHANGELOG.md` in the PR itself.
 7. **Release** when the owner wants a build or a milestone is done: Release skill.
    A version bump on `main` makes a **beta**; the owner tests it on the rig;

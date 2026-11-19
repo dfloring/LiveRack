@@ -3,6 +3,15 @@
 Lasting choices and why, newest first. Add one when you decide something a
 future change might otherwise undo. Format: what, why, what it costs.
 
+## 2026-11-18: Support agents run in Paperclip; GitHub stays the record
+The reviewer, triage and nightly check run as Paperclip agents on the owner's
+MacBook (`docs/PAPERCLIP.md`); the head developer stays in its own session.
+They only comment and label, and only act on the owner's own PRs and issues.
+**Why:** the owner can see and budget the agents in one place, and reviews
+happen without the head developer starting them. **Cost:** agents only run
+while the MacBook is awake; they share the owner's Claude usage; two places
+show tasks (Paperclip's is just a run log).
+
 ## 2026-11-18: Colours and text sizes come from Theme.h
 Screens take colours from `Theme::` and text sizes from `Theme::fontCaption`
 to `fontHeading` (11, 12, 13, 14, 15, 17); display sizes (21, 24, 30) and one
