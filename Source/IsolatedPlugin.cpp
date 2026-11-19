@@ -1,4 +1,5 @@
 #include "IsolatedPlugin.h"
+#include "Theme.h"
 #include "PluginViewCapture.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -174,12 +175,12 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (juce::Colour (0xff181b1f));
+        g.fillAll (Theme::panel);
         g.setColour (juce::Colours::white);
-        g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontLarge, juce::Font::bold));
         g.drawText (owner.getName(), 16, 12, getWidth() - 32, 22, juce::Justification::centredLeft);
         g.setColour (juce::Colours::lightgrey);
-        g.setFont (juce::FontOptions (13.0f));
+        g.setFont (juce::FontOptions (Theme::fontBody));
         g.drawFittedText ("This plugin runs in its own process, so its window is separate from LiveRack.",
                           16, 38, getWidth() - 32, 36, juce::Justification::topLeft, 2);
         g.setColour (owner.isRunning() ? juce::Colour (0xff6fcf97) : juce::Colour (0xffeb5757));
@@ -1422,7 +1423,7 @@ private:
     struct Window final : public juce::DocumentWindow
     {
         Window (const juce::String& name, HelperProcess& o)
-            : juce::DocumentWindow (name, juce::Colour (0xff181b1f), juce::DocumentWindow::closeButton), owner (o)
+            : juce::DocumentWindow (name, Theme::panel, juce::DocumentWindow::closeButton), owner (o)
         {
             setUsingNativeTitleBar (true);
             setAlwaysOnTop (true);

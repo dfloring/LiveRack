@@ -1,4 +1,5 @@
 #include "ConsoleLinkPanel.h"
+#include "Theme.h"
 
 ConsoleLinkPanel::ConsoleLinkPanel (LiveConnection& l, int console)
     : live (l), index (console)
@@ -36,7 +37,7 @@ ConsoleLinkPanel::ConsoleLinkPanel (LiveConnection& l, int console)
         live.learnConsoleTrigger (index);
     };
     triggerLabel.setColour (juce::Label::textColourId, juce::Colours::lightgrey);
-    triggerLabel.setFont (juce::FontOptions (12.0f));
+    triggerLabel.setFont (juce::FontOptions (Theme::fontSmall));
 
     recallToggle.setToggleState (s.recallScenes, juce::dontSendNotification);
     followToggle.setToggleState (s.followSelection, juce::dontSendNotification);
@@ -44,7 +45,7 @@ ConsoleLinkPanel::ConsoleLinkPanel (LiveConnection& l, int console)
     logView.setMultiLine (true);
     logView.setReadOnly (true);
     logView.setScrollbarsShown (true);
-    logView.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
+    logView.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), Theme::fontSmall, juce::Font::plain));
 
     folderButton.onClick = [this] { chooseFolder(); };
     applyButton.onClick  = [this] { apply(); };

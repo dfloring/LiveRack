@@ -50,10 +50,10 @@ namespace
         g.fillRoundedRectangle (r.toFloat(), 8.0f);
         auto t = r.reduced (10, 6);
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
         g.drawText (key, t.removeFromTop (14), juce::Justification::centredLeft);
         g.setColour (Theme::text);
-        g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontHeading, juce::Font::bold));
         g.drawFittedText (value, t, juce::Justification::centredLeft, 1, 0.7f);
     }
 
@@ -122,15 +122,15 @@ public:
         top.removeFromLeft (10);
 
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
         g.drawText ("DRIVER " + juce::String (index + 1), top.removeFromRight (70), juce::Justification::centredRight);
 
         g.setColour (Theme::text);
-        g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontLarge, juce::Font::bold));
         g.drawFittedText (s.open ? s.deviceName : "No device: open Settings", top, juce::Justification::centredLeft, 1, 0.8f);
 
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (12.0f));
+        g.setFont (juce::FontOptions (Theme::fontSmall));
         g.drawText (s.typeName, area.removeFromTop (18), juce::Justification::centredLeft);
         area.removeFromTop (8);
 
@@ -148,7 +148,7 @@ public:
         area.removeFromTop (12);
         auto dspRow = area.removeFromTop (16);
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (11.5f));
+        g.setFont (juce::FontOptions (Theme::fontCaption));
         g.drawText ("DSP  " + juce::String (s.threads) + (s.threads == 1 ? " core" : " cores"), dspRow, juce::Justification::centredLeft);
         g.drawText (juce::String ((int) std::ceil (s.cpu * 100.0)) + "%  (longest block " + juce::String ((int) std::ceil (s.worstBlock * 100.0)) + "%)",
                     dspRow, juce::Justification::centredRight);
@@ -175,7 +175,7 @@ public:
                                    + juce::String ((int) std::ceil (h.load * 100.0f)) + "%");
             area.removeFromTop (4);
             g.setColour (Theme::textDim);
-            g.setFont (juce::FontOptions (11.0f));
+            g.setFont (juce::FontOptions (Theme::fontCaption));
             g.drawText (names.isEmpty() ? juce::String() : "Heaviest: " + names.joinIntoString (",  "),
                         area.removeFromTop (14), juce::Justification::centredLeft, true);
         }
@@ -184,7 +184,7 @@ public:
 
         // Rack chips
         auto chips = area.removeFromTop (28);
-        g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontSmall, juce::Font::bold));
         int shown = 0;
         for (int r = 0; r < host.live.getNumRacks(); ++r)
         {
@@ -215,7 +215,7 @@ public:
         if (shown == 0)
         {
             g.setColour (Theme::textDim);
-            g.setFont (juce::FontOptions (12.0f));
+            g.setFont (juce::FontOptions (Theme::fontSmall));
             g.drawText ("No racks on this driver yet. Patch racks to it in Routing.", chips, juce::Justification::centredLeft);
         }
     }
@@ -293,13 +293,13 @@ public:
         top.removeFromLeft (10);
 
         g.setColour (Theme::text);
-        g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontHeading, juce::Font::bold));
         const auto name = l.displayName;
         g.drawText (name, top, juce::Justification::centredLeft);
-        const int nameW = juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (18.0f, juce::Font::bold), name);
+        const int nameW = juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (Theme::fontHeading, juce::Font::bold), name);
 
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (13.0f));
+        g.setFont (juce::FontOptions (Theme::fontBody));
         juce::String sub = off ? "Link off: open Settings to choose the console"
                                : s.address + "  " + (ConsoleLink::isYamaha (s.type) ? "RCP" : "OSC")
                                  + (l.connected ? "  connected" : "  not connected");
@@ -331,13 +331,13 @@ public:
 
             auto t = r.reduced (12.0f, 8.0f).toNearestInt();
             g.setColour (Theme::textDim);
-            g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
             g.drawText (c.slot.toUpperCase(), t.removeFromTop (14), juce::Justification::centredLeft, true);
             g.setColour (c.card == 0 ? Theme::textDim : Theme::text);
-            g.setFont (juce::FontOptions (14.5f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontMedium, juce::Font::bold));
             g.drawFittedText (ConsoleLink::cardTypeName (c.card), t.removeFromTop (24), juce::Justification::centredLeft, 1, 0.8f);
             g.setColour (Theme::textDim);
-            g.setFont (juce::FontOptions (12.0f));
+            g.setFont (juce::FontOptions (Theme::fontSmall));
 
             juce::String route = "Not used";
             if (c.card != 0 && c.numChannels > 0)
@@ -368,10 +368,10 @@ public:
             Theme::drawLight (g, t.removeFromLeft (10).withSizeKeepingCentre (9, 9).toFloat(), light, false);
             t.removeFromLeft (8);
             g.setColour (Theme::textDim);
-            g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
             g.drawText (k, t.removeFromTop (16), juce::Justification::centredLeft);
             g.setColour (Theme::text);
-            g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontMedium, juce::Font::bold));
             g.drawFittedText (v, t, juce::Justification::centredLeft, 1, 0.75f);
         };
 
@@ -587,10 +587,10 @@ public:
         }
 
         g.setColour (Theme::text);
-        g.setFont (juce::FontOptions (14.5f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontMedium, juce::Font::bold));
         g.drawFittedText (title, area.removeFromTop (area.getHeight() / 2), juce::Justification::bottomLeft, 1, 0.8f);
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (12.0f));
+        g.setFont (juce::FontOptions (Theme::fontSmall));
         g.drawFittedText (sub, area, juce::Justification::topLeft, 2, 0.8f);
     }
 
@@ -930,7 +930,7 @@ public:
             g.setFont (juce::FontOptions (21.0f, juce::Font::bold));
             g.drawText (h.title, 0, h.y, 260, 34, juce::Justification::centredLeft);
             g.setColour (Theme::textDim);
-            g.setFont (juce::FontOptions (13.0f));
+            g.setFont (juce::FontOptions (Theme::fontBody));
             g.drawText (h.hint, 240, h.y, getWidth() - 240, 34, juce::Justification::centredLeft, true);
         }
 
@@ -960,7 +960,7 @@ public:
         void paintButton (juce::Graphics& g, bool over, bool) override
         {
             g.setColour (Theme::textDim.brighter (over ? 0.3f : 0.0f));
-            g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontLarge, juce::Font::bold));
             g.drawText (getButtonText(), getLocalBounds(), juce::Justification::centred);
         }
     };

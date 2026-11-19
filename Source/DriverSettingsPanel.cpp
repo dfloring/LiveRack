@@ -127,7 +127,7 @@ void DriverSettingsPanel::paint (juce::Graphics& g)
     auto area = getLocalBounds().reduced (20);
 
     g.setColour (Theme::textDim);
-    g.setFont (juce::FontOptions (12.0f));
+    g.setFont (juce::FontOptions (Theme::fontSmall));
     const char* labels[] = { "Device type", "Device", "Sample rate", "Buffer size" };
     for (auto* label : labels)
     {
@@ -137,11 +137,11 @@ void DriverSettingsPanel::paint (juce::Graphics& g)
 
     area.removeFromTop (6);
     g.setColour (Theme::text);
-    g.setFont (juce::FontOptions (13.0f));
+    g.setFont (juce::FontOptions (Theme::fontBody));
     g.drawFittedText (status, area.removeFromTop (40), juce::Justification::topLeft, 2);
 
     g.setColour (Theme::textDim);
-    g.setFont (juce::FontOptions (11.5f));
+    g.setFont (juce::FontOptions (Theme::fontCaption));
     g.drawFittedText ("Changes apply straight away on " + live.getServerName() + ". Audio stops for a moment while the driver restarts.",
                       area, juce::Justification::topLeft, 2);
 }

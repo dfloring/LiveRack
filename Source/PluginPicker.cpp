@@ -1,4 +1,5 @@
 #include "PluginPicker.h"
+#include "Theme.h"
 
 namespace
 {
@@ -34,7 +35,7 @@ namespace
             g.fillRoundedRectangle (juce::Rectangle<float> (26.0f, 5.0f).withCentre ({ r.getCentreX(), r.getY() + r.getHeight() * 0.34f }), 2.5f);
 
             g.setColour (juce::Colours::white.withAlpha (0.92f));
-            g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontBody, juce::Font::bold));
             g.drawFittedText (getButtonText(), r.withTrimmedTop (r.getHeight() * 0.45f).toNearestInt().reduced (4, 0),
                               juce::Justification::centredTop, 1, 0.7f);
         }
@@ -72,11 +73,11 @@ public:
 
         const bool fav = picker.library.isFavourite (f.key);
         g.setColour (fav ? starOn : juce::Colours::white.withAlpha (0.3f));
-        g.setFont (juce::FontOptions (16.0f));
+        g.setFont (juce::FontOptions (Theme::fontLarge));
         g.drawText (starText (fav), area.removeFromLeft (24), juce::Justification::centredLeft);
 
         // Category tag on the right
-        g.setFont (juce::FontOptions (11.5f));
+        g.setFont (juce::FontOptions (Theme::fontCaption));
         g.setColour (juce::Colours::white.withAlpha (0.45f));
         g.drawText (PluginLibrary::categoryName (f.category), area.removeFromRight (90), juce::Justification::centredRight);
 
@@ -93,7 +94,7 @@ public:
         }
 
         g.setColour (juce::Colours::white);
-        g.setFont (juce::FontOptions (14.5f));
+        g.setFont (juce::FontOptions (Theme::fontMedium));
         g.drawText (name, area, juce::Justification::centredLeft, true);
     }
 
@@ -190,13 +191,13 @@ public:
         {
             const bool isHeader = r.header.toUpperCase() == r.header;
             g.setColour (juce::Colours::white.withAlpha (isHeader ? 0.5f : 0.3f));
-            g.setFont (juce::FontOptions (isHeader ? 11.0f : 12.0f, isHeader ? juce::Font::bold : juce::Font::italic));
+            g.setFont (juce::FontOptions (isHeader ? Theme::fontCaption : Theme::fontSmall, isHeader ? juce::Font::bold : juce::Font::italic));
             g.drawText (r.header, area, juce::Justification::bottomLeft);
             return;
         }
 
         g.setColour (juce::Colours::white);
-        g.setFont (juce::FontOptions (14.0f));
+        g.setFont (juce::FontOptions (Theme::fontMedium));
         g.drawText (r.family->name, area, juce::Justification::centredLeft, true);
     }
 
@@ -224,7 +225,7 @@ PluginPicker::PluginPicker (PluginLibrary& lib, WantFn want, const juce::String&
       sideModel (std::make_unique<SideModel> (*this))
 {
     search.setTextToShowWhenEmpty ("Search plugins...", juce::Colours::grey);
-    search.setFont (juce::FontOptions (16.0f));
+    search.setFont (juce::FontOptions (Theme::fontLarge));
     search.setJustification (juce::Justification::centredLeft);
     search.setIndents (12, 0);
     search.onTextChange = [this] { refilter(); };
@@ -249,7 +250,7 @@ PluginPicker::PluginPicker (PluginLibrary& lib, WantFn want, const juce::String&
     addAndMakeVisible (allVersions);
 
     countLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
-    countLabel.setFont (juce::FontOptions (12.0f));
+    countLabel.setFont (juce::FontOptions (Theme::fontSmall));
     countLabel.setJustificationType (juce::Justification::centredRight);
     addAndMakeVisible (countLabel);
 
@@ -263,7 +264,7 @@ PluginPicker::PluginPicker (PluginLibrary& lib, WantFn want, const juce::String&
 
     dragHint.setText ("Tip: drag a plugin straight onto any rack strip", juce::dontSendNotification);
     dragHint.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.5f));
-    dragHint.setFont (juce::FontOptions (12.0f));
+    dragHint.setFont (juce::FontOptions (Theme::fontSmall));
     addAndMakeVisible (dragHint);
     sideList.setColour (juce::ListBox::backgroundColourId, panelBack);
     addAndMakeVisible (sideList);

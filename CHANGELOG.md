@@ -9,6 +9,7 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 
 ## Unreleased
 
+- Screens now take their colours and text sizes from one shared theme, so they look more consistent. A few colours that were slightly off (the amber in the parameter list and gain-reduction meters, a blue in the parameter list) now match the rest. Text sizes were evened out: the half-point sizes are gone and the largest regular text is up to one point smaller (#19, #20).
 - Fixed: on LiveRack Client, the Plugins list could stay out of date after a quick scan (#17).
 - How LiveRack is built changed (nothing in the app): automated tests run on
   every change, new versions come out as betas first, and work is tracked as

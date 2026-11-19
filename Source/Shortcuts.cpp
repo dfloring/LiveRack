@@ -95,10 +95,10 @@ void KeyCapture::paint (juce::Graphics& g)
 {
     g.fillAll (Theme::panel);
     g.setColour (Theme::text);
-    g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+    g.setFont (juce::FontOptions (Theme::fontHeading, juce::Font::bold));
     g.drawText ("Press the keys you want", getLocalBounds().removeFromTop (100), juce::Justification::centred);
     g.setColour (Theme::textDim);
-    g.setFont (juce::FontOptions (13.0f));
+    g.setFont (juce::FontOptions (Theme::fontBody));
     g.drawText ("Escape cancels", getLocalBounds().withTrimmedTop (90), juce::Justification::centredTop);
 }
 
@@ -147,7 +147,7 @@ ShortcutsEditor::ShortcutsEditor (Host h) : host (std::move (h))
     help.setText ("Shortcuts work while a LiveRack window is in front (keys typed into a plugin go to the plugin). "
                   "Double-click a row to change its keys.", juce::dontSendNotification);
     help.setColour (juce::Label::textColourId, Theme::textDim);
-    help.setFont (juce::FontOptions (13.0f));
+    help.setFont (juce::FontOptions (Theme::fontBody));
     addAndMakeVisible (help);
 
     for (auto* b : { &addButton, &changeButton, &removeButton })
@@ -235,12 +235,12 @@ void ShortcutsEditor::paintListBoxItem (int row, juce::Graphics& g, int width, i
     g.setColour (key.isValid() ? Theme::raised : Theme::panel);
     g.fillRoundedRectangle (keyBox, 6.0f);
     g.setColour (key.isValid() ? Theme::text : Theme::textDim);
-    g.setFont (juce::FontOptions (13.5f, juce::Font::bold));
+    g.setFont (juce::FontOptions (Theme::fontBody, juce::Font::bold));
     g.drawText (Shortcuts::describe (key), keyBox.toNearestInt(), juce::Justification::centred);
 
     area.removeFromLeft (14);
     g.setColour (Theme::text);
-    g.setFont (juce::FontOptions (14.0f));
+    g.setFont (juce::FontOptions (Theme::fontMedium));
     g.drawText (what, area, juce::Justification::centredLeft, true);
 }
 

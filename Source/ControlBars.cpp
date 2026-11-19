@@ -8,10 +8,10 @@ namespace
     void drawHeading (juce::Graphics& g, juce::Rectangle<int> area, const juce::String& title, const juce::String& hint)
     {
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
         g.drawText (title, area.removeFromLeft (110), juce::Justification::centredLeft);
         g.setColour (Theme::textDim.withAlpha (0.75f));
-        g.setFont (juce::FontOptions (11.5f));
+        g.setFont (juce::FontOptions (Theme::fontCaption));
         g.drawText (hint, area, juce::Justification::centredLeft, true);
     }
 }
@@ -77,11 +77,11 @@ void HotPluginsBar::paint (juce::Graphics& g)
         const bool byp = plugin.bypassed || engine.isRackBypassed (rack);
 
         g.setColour (Theme::text.withAlpha (byp ? 0.5f : 1.0f));
-        g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontBody, juce::Font::bold));
         g.drawFittedText (plugin.exists ? plugin.name : "?", inner.removeFromTop (inner.getHeight() * 0.55f).toNearestInt(),
                           juce::Justification::bottomLeft, 1, 0.8f);
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (11.0f));
+        g.setFont (juce::FontOptions (Theme::fontCaption));
         g.drawText ((byp ? "BYP  " : "") + engine.getRackConfig (rack).name, inner.toNearestInt(),
                     juce::Justification::topLeft, true);
     }
@@ -225,20 +225,20 @@ void UserKeysBar::paint (juce::Graphics& g)
         g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
 
         auto inner = r.reduced (8.0f, 5.0f);
-        const auto ink = lit ? juce::Colour (0xff101214) : Theme::text;
+        const auto ink = lit ? Theme::inkOnLit : Theme::text;
 
         g.setColour (ink.withAlpha (0.55f));
-        g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
         const auto& sc = shortcuts[(size_t) i];
         g.drawText (sc.isValid() ? Shortcuts::describe (sc) : juce::String(), inner.removeFromTop (12.0f).toNearestInt(), juce::Justification::topRight);
 
         g.setColour (assigned ? ink : Theme::textDim);
-        g.setFont (juce::FontOptions (13.5f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontBody, juce::Font::bold));
         g.drawFittedText (assigned ? a.describe (live) : "Empty", inner.removeFromTop (inner.getHeight() * 0.55f).toNearestInt(),
                           juce::Justification::centred, 1, 0.75f);
 
         g.setColour (ink.withAlpha (0.7f));
-        g.setFont (juce::FontOptions (11.0f));
+        g.setFont (juce::FontOptions (Theme::fontCaption));
         g.drawText (a.category(), inner.toNearestInt(), juce::Justification::centredTop, true);
     }
 }
@@ -389,7 +389,7 @@ void PageTabs::paint (juce::Graphics& g)
         if (isAdd)
         {
             g.setColour (Theme::textDim);
-            g.setFont (juce::FontOptions (13.5f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontBody, juce::Font::bold));
             g.drawText ("+ Page", r.toNearestInt(), juce::Justification::centred);
             continue;
         }
@@ -412,10 +412,10 @@ void PageTabs::paint (juce::Graphics& g)
 
         auto t = r.reduced (12.0f, 0.0f);
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (12.0f));
+        g.setFont (juce::FontOptions (Theme::fontSmall));
         g.drawText (juce::String (n), t.removeFromRight (18.0f).toNearestInt(), juce::Justification::centredRight);
         g.setColour (on ? Theme::text : Theme::textDim);
-        g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontMedium, juce::Font::bold));
         g.drawFittedText (name, t.toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
     }
 }

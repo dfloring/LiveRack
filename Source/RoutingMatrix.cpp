@@ -81,12 +81,12 @@ public:
             g.setColour (Theme::border.brighter (0.2f));
             g.fillRect (x, 2, 2, groupH + numberH + (int) rows.size() * rowH);
             g.setColour (Theme::text.withAlpha (0.85f));
-            g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontSmall, juce::Font::bold));
             g.drawText (label, x + 8, 0, 8 * colW - 10, groupH, juce::Justification::bottomLeft, true);
         }
 
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
         g.drawText (owner.outputs ? "RACK OUTPUT  >  " + driverName : "RACK INPUT  <  " + driverName,
                     4, 0, labelW - 8, groupH + numberH - 4, juce::Justification::bottomLeft, true);
 
@@ -101,7 +101,7 @@ public:
                 g.fillRect (cell);
             }
             g.setColour (i == selColumn ? juce::Colours::white : usersOf (ch) > 0 ? Theme::text : Theme::textDim.withAlpha (0.7f));
-            g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
             g.drawText (juce::String (ch + 1), cell, juce::Justification::centred);
         }
 
@@ -123,11 +123,11 @@ public:
             g.fillRoundedRectangle (label.removeFromLeft (10).reduced (2, 5).toFloat(), 2.0f);
 
             g.setColour (Theme::text);
-            g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontBody, juce::Font::bold));
             auto right = label.removeFromRight (78);
             g.drawText (cfg.name, label.reduced (6, 0), juce::Justification::centredLeft, true);
 
-            g.setFont (juce::FontOptions (11.5f));
+            g.setFont (juce::FontOptions (Theme::fontCaption));
             g.setColour (Theme::textDim);
             const int sides = owner.outputs ? cfg.numOutputs() : cfg.numInputs();
             const juce::String side = sides == 2 ? (row.side == 0 ? "L" : "R") : "M";
@@ -308,7 +308,7 @@ RoutingMatrix::RoutingMatrix (LiveConnection& e) : engine (e)
     outputsTab.onClick = [this] { outputs = true;  page = 0; refresh(); };
 
     help.setColour (juce::Label::textColourId, Theme::textDim);
-    help.setFont (juce::FontOptions (13.0f));
+    help.setFont (juce::FontOptions (Theme::fontBody));
     addAndMakeVisible (help);
 
     viewport.setViewedComponent (grid.get(), false);

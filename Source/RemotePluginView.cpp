@@ -278,7 +278,7 @@ void RemotePluginView::paint (juce::Graphics& g)
         g.setColour (Theme::raised.withAlpha (0.95f));
         g.fillRoundedRectangle (box, 8.0f);
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (14.0f));
+        g.setFont (juce::FontOptions (Theme::fontMedium));
         g.drawFittedText (message, box.reduced (14.0f, 6.0f).toNearestInt(), juce::Justification::centred, 3);
     }
 }

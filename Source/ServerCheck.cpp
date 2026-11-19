@@ -420,7 +420,7 @@ public:
         rows.clear();
         for (auto& i : items)
         {
-            const int h = 30 + juce::jmax (1, (int) std::ceil (juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (12.5f), i.detail) / 420.0f)) * 17 + 14;
+            const int h = 30 + juce::jmax (1, (int) std::ceil (juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (Theme::fontSmall), i.detail) / 420.0f)) * 17 + 14;
             rows.push_back ({ y, h });
             if (i.fixLabel.isNotEmpty())
             {
@@ -449,7 +449,7 @@ public:
         int look = 0;
         for (auto& i : items) if (i.state == Item::lookAt) ++look;
         g.setColour (Theme::text);
-        g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontLarge, juce::Font::bold));
         g.drawText (look == 0 ? "Everything looks ready for a service" : juce::String (look) + (look == 1 ? " thing" : " things") + " to look at",
                     16, 10, getWidth() - 160, 26, juce::Justification::centredLeft);
     }
@@ -479,10 +479,10 @@ private:
                 g.fillEllipse (dot);
                 c.removeFromRight (230);
                 g.setColour (Theme::text);
-                g.setFont (juce::FontOptions (13.5f, juce::Font::bold));
+                g.setFont (juce::FontOptions (Theme::fontBody, juce::Font::bold));
                 g.drawText (i.title, c.removeFromTop (22), juce::Justification::centredLeft, true);
                 g.setColour (Theme::textDim);
-                g.setFont (juce::FontOptions (12.5f));
+                g.setFont (juce::FontOptions (Theme::fontSmall));
                 g.drawFittedText (i.detail, c, juce::Justification::topLeft, 4, 1.0f);
             }
         }

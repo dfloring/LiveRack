@@ -7,11 +7,11 @@
 namespace
 {
     const juce::Colour stripBack   { 0xff1a1d21 };
-    const juce::Colour slotBack    { 0xff23272c };
+    const juce::Colour slotBack    = Theme::raised;
     const juce::Colour meterBack   { 0xff0b0d0f };
-    const juce::Colour bypassOn    { 0xffe0a030 };
-    const juce::Colour safeOn      { 0xff3fb950 };
-    const juce::Colour buttonOff   { 0xff23272c };
+    const juce::Colour bypassOn    = Theme::amber;
+    const juce::Colour safeOn      = Theme::green;
+    const juce::Colour buttonOff   = Theme::raised;
 
     juce::String arrow() { return juce::String (juce::CharPointer_UTF8 ("\xe2\x86\x92")); }
 
@@ -55,7 +55,7 @@ namespace
             g.setColour (selected < 0 ? juce::Colour (0xff24364c) : juce::Colour (0xff2b3036));
             g.fillRoundedRectangle (a, 6.0f);
             g.setColour (juce::Colours::white.withAlpha (0.85f));
-            g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontBody, juce::Font::bold));
             g.drawText ("Automatic", a.toNearestInt(), juce::Justification::centred);
         }
 
@@ -325,7 +325,7 @@ public:
         g.setColour (juce::Colours::white.withAlpha (0.22f));
         g.fillPath (dashed);
         g.setColour (juce::Colours::white.withAlpha (0.55f));
-        g.setFont (juce::FontOptions (15.0f));
+        g.setFont (juce::FontOptions (Theme::fontLarge));
         g.drawText ("+  Add Rack", add.toNearestInt(), juce::Justification::centred);
 
         paintDropIndicator (g);
@@ -359,16 +359,16 @@ public:
         auto text = l.header.reduced (6, 0).withTrimmedTop (2);
         text.removeFromRight (l.chBadge.getWidth() + 4);
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontSmall, juce::Font::bold));
         g.drawText (juce::String (r + 1), text.removeFromLeft (18), juce::Justification::centredLeft);
         g.setColour (bypassed ? Theme::textDim : Theme::text);
-        g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontLarge, juce::Font::bold));
         g.drawFittedText (cfg.name, text, juce::Justification::centredLeft, 1, 0.75f);
 
         g.setColour (Theme::raised);
         g.fillRoundedRectangle (l.chBadge.toFloat().withTrimmedTop (2.0f), 5.0f);
         g.setColour (Theme::textDim.brighter (0.2f));
-        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
         g.drawText (cfg.consoleChannel > 0 ? "CH " + juce::String (cfg.consoleChannel) : juce::String ("CH -"),
                     l.chBadge.withTrimmedTop (2), juce::Justification::centred);
 
@@ -386,7 +386,7 @@ public:
 
         // I/O line (click to open Routing)
         g.setColour (juce::Colours::white.withAlpha (0.62f));
-        g.setFont (juce::FontOptions (12.0f));
+        g.setFont (juce::FontOptions (Theme::fontSmall));
         juce::String io;
         if (engine.getNumDrivers() > 1)
             io << "D" << (cfg.driver + 1) << "  ";
@@ -407,7 +407,7 @@ public:
                 g.setColour (juce::Colours::white.withAlpha (0.12f));
                 g.drawRoundedRectangle (l.addRow.toFloat().reduced (0.5f), 5.0f, 1.0f);
                 g.setColour (juce::Colours::white.withAlpha (0.45f));
-                g.setFont (juce::FontOptions (13.0f));
+                g.setFont (juce::FontOptions (Theme::fontBody));
                 g.drawText ("+  Add plugin", l.addRow, juce::Justification::centred);
             }
 
@@ -439,7 +439,7 @@ public:
         if (cfg.latencyGroup > 0)
             latText = "group " + RackConfig::groupName (cfg.latencyGroup) + "  " + latText;
         g.setColour (cfg.latencyGroup > 0 ? Theme::groupColour (cfg.latencyGroup).withAlpha (0.9f) : juce::Colours::white.withAlpha (0.45f));
-        g.setFont (juce::FontOptions (11.5f));
+        g.setFont (juce::FontOptions (Theme::fontCaption));
         auto latArea = l.latency;
 
         // Processing time: the longest block in the last few seconds, as a share of the block
@@ -495,7 +495,7 @@ public:
         if (slotBypassed)
         {
             g.setColour (bypassOn);
-            g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
             g.drawText ("BYP", text.removeFromRight (26), juce::Justification::centredRight);
         }
         else if (const auto* shown = shownMeter (r, s))
@@ -506,7 +506,7 @@ public:
             const auto& m = *shown;
             const bool isMuted = std::isinf (m.gr);
             const bool active = isMuted || m.gr > 0.05f;
-            const auto grColour = m.estimated ? juce::Colour (0xffc8a878) : juce::Colour (0xffe8a23a);
+            const auto grColour = m.estimated ? juce::Colour (0xffc8a878) : Theme::amber;
 
             const auto bar = area.reduced (4, 0).removeFromBottom (4).withTrimmedBottom (1);
             g.setColour (meterBack);
@@ -525,13 +525,13 @@ public:
             else if (active) label = (m.estimated ? "~-" : "-") + juce::String (m.gr, 1);
 
             g.setColour (grColour.withAlpha (active ? 1.0f : 0.45f));
-            g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
             g.drawText (label, text.removeFromRight (isMuted || m.estimated ? 38 : 32).withTrimmedBottom (3),
                         juce::Justification::centredRight);
         }
 
         g.setColour (juce::Colours::white.withAlpha (0.92f * dim));
-        g.setFont (juce::FontOptions (13.0f));
+        g.setFont (juce::FontOptions (Theme::fontBody));
         g.drawText (plugin.exists ? plugin.name : "?", text, juce::Justification::centredLeft, true);
     }
 
@@ -592,8 +592,8 @@ public:
             }
         }
 
-        g.setColour (on ? juce::Colour (0xff101214) : juce::Colours::white.withAlpha (dashed ? 0.5f : 0.75f));
-        g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+        g.setColour (on ? Theme::inkOnLit : juce::Colours::white.withAlpha (dashed ? 0.5f : 0.75f));
+        g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
         g.drawText (label, area, juce::Justification::centred);
     }
 
@@ -602,7 +602,7 @@ public:
         g.setColour (on ? onColour : buttonOff);
         g.fillRoundedRectangle (area.toFloat(), 5.0f);
         g.setColour (on ? juce::Colours::black.withAlpha (0.85f) : juce::Colours::white.withAlpha (0.6f));
-        g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
         g.drawText (label, area, juce::Justification::centred);
     }
 
@@ -734,10 +734,10 @@ public:
         renameRack = r;
         renameEditor = std::make_unique<juce::TextEditor>();
         auto& ed = *renameEditor;
-        ed.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        ed.setFont (juce::FontOptions (Theme::fontLarge, juce::Font::bold));
         ed.setText (engine.getRackConfig (r).name, false);
         ed.selectAll();
-        ed.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff101214));
+        ed.setColour (juce::TextEditor::backgroundColourId, Theme::inkOnLit);
         ed.setColour (juce::TextEditor::textColourId, juce::Colours::white);
         ed.setColour (juce::TextEditor::outlineColourId, juce::Colours::white);
         ed.onReturnKey = [this] { finishRename (true); };

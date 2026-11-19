@@ -96,12 +96,12 @@ void PluginsPanel::paintListBoxItem (int row, juce::Graphics& g, int width, int 
 
     auto r = juce::Rectangle<int> (0, 0, width, height).reduced (10, 0);
     g.setColour (Theme::textDim);
-    g.setFont (juce::FontOptions (12.0f));
+    g.setFont (juce::FontOptions (Theme::fontSmall));
     g.drawText (p.format, r.removeFromRight (70), juce::Justification::centredRight);
     g.drawText (p.category, r.removeFromRight (130), juce::Justification::centredLeft, true);
     g.drawText (p.manufacturer, r.removeFromRight (170), juce::Justification::centredLeft, true);
     g.setColour (Theme::text);
-    g.setFont (juce::FontOptions (13.5f, juce::Font::bold));
+    g.setFont (juce::FontOptions (Theme::fontBody, juce::Font::bold));
     g.drawText (p.name, r, juce::Justification::centredLeft, true);
 
     g.setColour (Theme::border);
@@ -135,10 +135,10 @@ void PluginsPanel::paint (juce::Graphics& g)
 
     auto head = area.removeFromTop (28);
     g.setColour (Theme::text);
-    g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
+    g.setFont (juce::FontOptions (Theme::fontHeading, juce::Font::bold));
     g.drawText ("Plugins", head, juce::Justification::centredLeft);
     g.setColour (Theme::textDim);
-    g.setFont (juce::FontOptions (12.5f));
+    g.setFont (juce::FontOptions (Theme::fontSmall));
     g.drawText (juce::String ((int) all.size()) + " scanned" + (live.isLocal() ? juce::String() : " on " + live.getServerName())
                     + (failed.isEmpty() ? juce::String() : ", " + juce::String (failed.size()) + " failed"),
                 head, juce::Justification::centredRight);
@@ -154,14 +154,14 @@ void PluginsPanel::paint (juce::Graphics& g)
         g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * juce::jlimit (0.0f, 1.0f, scan.progress)), 4.0f);
         status.removeFromLeft (12);
         g.setColour (Theme::text);
-        g.setFont (juce::FontOptions (12.5f));
+        g.setFont (juce::FontOptions (Theme::fontSmall));
         g.drawText ("Scanning " + juce::File::createFileWithoutCheckingPath (scan.current).getFileName(), status,
                     juce::Justification::centredLeft, true);
     }
     else
     {
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (12.5f));
+        g.setFont (juce::FontOptions (Theme::fontSmall));
         g.drawText (! live.isConnected() ? "Not connected to " + live.getServerName()
                     : scan.message.isNotEmpty() ? scan.message
                     : juce::String ("Plugins that crash while scanning are skipped and listed as failed."),
