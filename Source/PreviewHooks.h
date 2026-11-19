@@ -778,6 +778,22 @@ struct PreviewHooks
             feeder = std::make_unique<Feeder> (m);
             juce::Timer::callAfterDelay (3000, [&m] { m.showDevices(); });
         }
+        if (open == "bigblock")
+        {
+            // A block larger than the rack buffer must not resize (allocate in) it
+            m.engine.previewPrepare (48000.0, 128);
+            juce::AudioBuffer<float> small (16, 128), big (16, 8192), out (16, 8192);
+            small.clear();
+            big.clear();
+            m.engine.previewProcess (small, out);
+            const auto* before = m.engine.previewRackBuffer (0);
+            m.engine.previewProcess (big, out);
+            const auto* afterBig = m.engine.previewRackBuffer (0);
+            m.engine.previewProcess (small, out);
+            const auto* afterSmall = m.engine.previewRackBuffer (0);
+            std::cerr << "BIGBLOCK buffer kept after 8192-sample block " << (before == afterBig)
+                      << ", after a small one " << (before == afterSmall) << " (expect 1, 1)" << std::endl;
+        }
         if (open == "reconfig")
         {
             // Racks are reconfigured while the audio runs; the audio thread must not wait on it

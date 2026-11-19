@@ -323,6 +323,7 @@ private:
    #if LIVERACK_PREVIEW_HOOKS
     friend struct PreviewHooks;
     void previewPrepare (double sr, int bs);
+    const float* previewRackBuffer (int rack) const;
     void previewProcess (juce::AudioBuffer<float>& in, juce::AudioBuffer<float>& out);
    #endif
 };
