@@ -8,8 +8,8 @@ and is the only one who merges and releases. The owner is the board.
 | Agent | Model | Does | Background (from [The Agency](https://github.com/msitarzewski/agency-agents)) |
 |---|---|---|---|
 | COO | Sonnet | Syncs GitHub issues into tasks, assigns ready work, routes PRs to review, chases what's stuck, daily status | Chief of Staff |
-| Engineer 1 | Opus | One assigned issue → one pull request | Minimal Change Engineer |
-| Engineer 2 | Opus | Same | Embedded Firmware Engineer (real-time discipline) |
+| Engineer 1 | Sonnet | One assigned issue → one pull request | Minimal Change Engineer |
+| Engineer 2 | Sonnet | Same | Embedded Firmware Engineer (real-time discipline) |
 | Head of Design | Opus | Specs UI changes, design-reviews UI PRs, small UI-only PRs | UI Designer + UI Finish-Gate Reviewer |
 | Head of Review | Opus | Reviews every PR (`.claude/agents/reviewer.md`) and posts the report on GitHub | Code Reviewer + Reality Checker |
 
