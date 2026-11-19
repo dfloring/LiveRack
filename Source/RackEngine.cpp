@@ -868,10 +868,10 @@ void RackEngine::configureRack (Rack& r, bool updateLists)
 {
     auto* d = getDriverFor (r);
 
-    {
-        const juce::SpinLock::ScopedLockType lock (d->rackLock);
-        r.configure (d->sampleRate, d->blockSize, d->running);
-    }
+    // Off the audio list first (a short lock), so preparing the plugins never
+    // holds up the audio thread. Callers put it back with rebuildDriverLists().
+    detachRack (r);
+    r.configure (d->sampleRate, d->blockSize, d->running);
 
     if (updateLists)
         rebuildDriverLists();
