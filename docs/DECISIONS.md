@@ -5,8 +5,8 @@ future change might otherwise undo. Format: what, why, what it costs.
 
 ## 2026-11-18: Colours and text sizes come from Theme.h
 Screens take colours from `Theme::` and text sizes from `Theme::fontCaption`
-to `fontHeading` (11, 12, 13, 14, 15, 17); display sizes (21, 24, 30) stay
-where they're used. **Why:** one place to change the look, and the same look on
+to `fontHeading` (11, 12, 13, 14, 15, 17); display sizes (21, 24, 30) and one
+bold 10 in the plugin dock stay where they're used. **Why:** one place to change the look, and the same look on
 Native, Client and the rest. **Cost:** sizes moved by at most a point (16 became
 15, 18 became 17), and some one-off colours (routing matrix cells, plugin picker
 swatches, white-with-alpha text) are still local until a later pass.
