@@ -3,6 +3,19 @@
 Lasting choices and why, newest first. Add one when you decide something a
 future change might otherwise undo. Format: what, why, what it costs.
 
+## 2026-11-19: Reliability work is back on
+Isolation (#8, #9, #25), the watchdog (#7), the event log (#5), the soak test (#6)
+and measuring latency (#12) move from `Later` to 0.31 at P2. **Why:** the owner
+wants it, and PRs #28–#31 already started it. **Cost:** 0.31 is a big milestone.
+
+## 2026-11-19: A Paperclip team, with the head developer outside it
+COO, two engineers, Head of Design and Head of Review run in Paperclip on the
+owner's MacBook (`docs/PAPERCLIP.md`), built on The Agency's personas plus
+LiveRack's rules. The head developer assigns work and alone merges. **Why:** the
+single Paperclip "Head Developer" agent worked unprompted on parked work and
+merged without review; the owner wants more done in parallel. **Cost:** agents
+share the owner's Claude usage and only run while the MacBook is awake.
+
 ## 2026-11-18: Colours and text sizes come from Theme.h
 Screens take colours from `Theme::` and text sizes from `Theme::fontCaption`
 to `fontHeading` (11, 12, 13, 14, 15, 17); display sizes (21, 24, 30) and one

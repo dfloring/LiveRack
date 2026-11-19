@@ -11,15 +11,28 @@ computer) and the iPad / web remote. AGPLv3. See `docs/ARCHITECTURE.md`.
 |---|---|---|
 | Product owner and tester | The repo owner | Priorities, what "done" means, approves releases, tests on the rig (Windows server, MacBook, iPad, Yamaha CL5, X32) |
 | Head developer | Claude, the main session | Plans, writes the code, runs the process below, reports to the owner |
-| Reviewer | `.claude/agents/reviewer.md` | Reads every pull request fresh before it merges |
+| COO | Paperclip | Keeps the queue moving: tasks, assignments, review routing, daily status |
+| Engineers 1 and 2 | Paperclip | Implement assigned issues, one PR each |
+| Head of Design | Paperclip | UI specs and design review |
+| Head of Review | Paperclip, using `.claude/agents/reviewer.md` | Reviews every pull request before it merges; posts the report on the PR |
 | QA / tester | `.claude/agents/qa-tester.md` | Adds and runs automated tests for a change |
 | Release | `.claude/skills/release/` | Version, changelog, beta, the build on the rig, stable |
 | Triage | `.claude/skills/triage/` | Turns the owner's notes into issues |
+
+The Paperclip team runs on the owner's MacBook in the LiveRack project
+(`docs/PAPERCLIP.md`). The head developer assigns work there (the `ready` label
+on an issue) and is the only one who merges. GitHub issues and PRs are the record.
 
 The owner is not a C++ developer and reads reports, not code. Write to them in
 plain language: what changed for them, what to test, what you need from them.
 
 ## Working with the owner
+
+The owner's directives, for every agent and above every other rule:
+1. The owner is the only one who handles communication. No AI speaks for him; anything an agent posts says which agent wrote it.
+2. Any other humans brought in report to the owner, and the agents (head developer included) report to them.
+3. Never make up an answer to please him. If you don't know, research it or ask.
+
 
 - No screenshots or walkthroughs of UI changes in reports; just say what changed.
 - When they send notes and say "no build yet", file them (Triage) and wait for "go".
@@ -40,8 +53,11 @@ plain language: what changed for them, what to test, what you need from them.
    in `tests/run.py`. A bug fix gets a test that would have caught it.
 4. **Pull request.** Fill in the template. CI builds Mac and Windows and runs
    the tests ("Tests (Linux)"); it must be green.
-5. **Review.** Run the reviewer agent on the PR; fix what it confirms. Note
-   anything you decline and why in the PR.
+5. **Review.** Every PR gets a "Head of Review for <commit>" comment on its
+   latest commit (Paperclip), or the head developer runs the reviewer agent
+   itself if the team can't (the MacBook asleep). Confirmed findings get fixed;
+   anything declined is noted on the PR. The head developer reads the diff
+   and the review before merging.
 6. **Merge** (squash). Add a line under **Unreleased** in `CHANGELOG.md` in the PR itself.
 7. **Release** when the owner wants a build or a milestone is done: Release skill.
    A version bump on `main` makes a **beta**; the owner tests it on the rig;
