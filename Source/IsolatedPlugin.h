@@ -50,6 +50,10 @@ public:
     // Called on the message thread: "<plugin> crashed and was restarted" etc.
     static std::function<void (const juce::String&)> onEvent;
 
+    // Called on the message thread when this plugin has failed too often and is
+    // given up on (the rack uses it to switch the slot to bypass)
+    std::function<void()> onStopped;
+
     void requestLayout (int ins, int outs);
     void crashHelper();                 // test: makes the helper crash
     bool isRunning() const              { return alive.load(); }

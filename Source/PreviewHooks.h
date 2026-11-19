@@ -1255,6 +1255,46 @@ struct PreviewHooks
                 });
             });
 
+        if (open == "isowatchdog")
+            juce::Timer::callAfterDelay (800, [&m]
+            {
+                // A helper that keeps crashing is given up on: the slot ends up bypassed
+                // (and says so); a single crash leaves it switched on.
+                auto& e = m.engine;
+                juce::String err;
+                const bool ok = e.setSlotIsolated (0, 1, true, err);
+                std::cerr << "ISOWATCH isolated " << ok << " bypassed " << e.isSlotBypassed (0, 1) << " (expect 1, 0) '" << err << "'" << std::endl;
+
+                struct Crasher : juce::Timer
+                {
+                    MainComponent& m;
+                    int crashes = 0, ticks = 0;
+                    explicit Crasher (MainComponent& mc) : m (mc) {}
+                    void timerCallback() override
+                    {
+                        auto* p = dynamic_cast<IsolatedPlugin*> (m.engine.getPlugin (0, 1));
+                        ++ticks;
+
+                        if (m.engine.isSlotBypassed (0, 1) || ticks > 90)
+                        {
+                            std::cerr << "ISOWATCH after " << crashes << " crashes: bypassed " << m.engine.isSlotBypassed (0, 1)
+                                      << " status '" << (p != nullptr ? p->getStatusText() : juce::String()) << "' (expect bypassed 1)" << std::endl;
+                            delete this;
+                            return;
+                        }
+
+                        if (p != nullptr && p->isRunning() && p->getRestartCount() == crashes)
+                        {
+                            if (crashes == 1)
+                                std::cerr << "ISOWATCH after one crash: bypassed " << m.engine.isSlotBypassed (0, 1) << " (expect 0)" << std::endl;
+                            ++crashes;
+                            p->crashHelper();
+                        }
+                    }
+                };
+                (new Crasher (m))->startTimer (300);
+            });
+
         if (open == "isolate")
             juce::Timer::callAfterDelay (800, [&m]
             {

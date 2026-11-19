@@ -563,6 +563,8 @@ void IsolatedPlugin::restart (const juce::String& reason)
         gaveUp = true;
         if (onEvent != nullptr)
             onEvent (description.name + " " + reason + " repeatedly and is stopped: audio passes through it unprocessed");
+        if (onStopped != nullptr)
+            onStopped();
         return;
     }
 
@@ -649,6 +651,8 @@ void IsolatedPlugin::finishRestart (bool ok, const juce::String& error, const ju
         gaveUp = true;
         tell (reason + " and couldn't be restarted" + (error.isNotEmpty() ? " (" + error + ")" : juce::String())
               + ": audio passes through it unprocessed");
+        if (onStopped != nullptr)
+            onStopped();
         return;
     }
 
