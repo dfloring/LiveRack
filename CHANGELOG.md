@@ -9,6 +9,7 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 
 ## Unreleased
 
+- Fixed: changing a rack's device, buffer size or format no longer makes the audio wait while the rack's plugins are re-prepared, which could cause clicks and dropouts mid-show (#26).
 - Screens now take their colours and text sizes from one shared theme, so they look more consistent. A few colours that were slightly off (the amber in the parameter list and gain-reduction meters, a blue in the parameter list) now match the rest. Text sizes were evened out: the half-point sizes are gone and the largest regular text is up to one point smaller and the smallest labels half a point bigger (#19, #20).
 - Fixed: on LiveRack Client, the Plugins list could stay out of date after a quick scan (#17).
 - How LiveRack is built changed (nothing in the app): automated tests run on

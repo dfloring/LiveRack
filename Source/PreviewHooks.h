@@ -778,6 +778,55 @@ struct PreviewHooks
             feeder = std::make_unique<Feeder> (m);
             juce::Timer::callAfterDelay (3000, [&m] { m.showDevices(); });
         }
+        if (open == "reconfig")
+        {
+            // Racks are reconfigured while the audio runs; the audio thread must not wait on it
+            m.engine.previewPrepare (48000.0, 128);
+            struct Audio : juce::Thread
+            {
+                RackEngine& e;
+                std::atomic<double> worstMs { 0.0 };
+                std::atomic<int> blocks { 0 };
+                explicit Audio (RackEngine& en) : juce::Thread ("reconfig audio"), e (en) {}
+                void run() override
+                {
+                    juce::AudioBuffer<float> in (16, 128), out (16, 128);
+                    in.clear();
+                    while (! threadShouldExit())
+                    {
+                        const auto t = juce::Time::getMillisecondCounterHiRes();
+                        e.previewProcess (in, out);
+                        const auto ms = juce::Time::getMillisecondCounterHiRes() - t;
+                        if (ms > worstMs.load()) worstMs = ms;
+                        ++blocks;
+                        wait (2);
+                    }
+                }
+            };
+            static std::unique_ptr<Audio> audio;
+            audio = std::make_unique<Audio> (m.engine);
+            audio->startThread();
+
+            juce::Timer::callAfterDelay (500, [&m]
+            {
+                for (int i = 0; i < 20; ++i)
+                {
+                    auto c = m.engine.getRackConfig (3);
+                    c.stereo = ! c.stereo;
+                    m.engine.setRackConfig (3, c);
+                    juce::Thread::sleep (20);
+                }
+
+                juce::Timer::callAfterDelay (500, []
+                {
+                    const auto worst = audio->worstMs.load();
+                    const auto blocks = audio->blocks.load();
+                    audio->stopThread (2000);
+                    std::cerr << "RECONFIG 20 changes, " << blocks << " blocks ran; longest block "
+                              << (int) worst << " ms, under 100 ms " << (worst < 100.0) << " (expect 1)" << std::endl;
+                });
+            });
+        }
         if (open == "servercheck")
         {
             for (auto& i : ServerCheck::getAppItems (m.engine, m.webRemote))
