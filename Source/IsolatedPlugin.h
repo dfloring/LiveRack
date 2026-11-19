@@ -19,10 +19,7 @@ class PluginViewCapture;
 // audio passes through it unprocessed while a fresh helper is started and the
 // last known settings are put back.
 //
-// Limits of this stage: the plugin's window is a separate window owned by the
-// helper (it can't be shown inside the LiveRack panel; the web remote shows it
-// by capturing it in the helper), MIDI isn't passed, and VST3 gain-reduction
-// metering isn't available.
+// Limits of this stage: VST3 gain-reduction metering isn't available.
 namespace Isolation
 {
     constexpr const char* workerUID = "liverackpluginhost";
@@ -74,8 +71,8 @@ public:
     using juce::AudioProcessor::processBlockBypassed;
     bool isBusesLayoutSupported (const BusesLayout&) const override;
     double getTailLengthSeconds() const override                   { return 0.0; }
-    bool acceptsMidi() const override                              { return false; }
-    bool producesMidi() const override                             { return false; }
+    bool acceptsMidi() const override                              { return pluginAcceptsMidi; }
+    bool producesMidi() const override                             { return pluginProducesMidi; }
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override                                { return true; }
     int getNumPrograms() override                                  { return 1; }
@@ -111,7 +108,7 @@ private:
     void messageFromHelper (const juce::MemoryBlock&);  // connection thread
     void connectionLost();                              // connection thread
     void handleEvent (int type, const juce::MemoryBlock& payload); // message thread
-    void handOff (juce::AudioBuffer<float>&, bool bypassed);
+    void handOff (juce::AudioBuffer<float>&, juce::MidiBuffer&, bool bypassed);
     void sendParam (int index, float value);
     void applyParamChanges (juce::InputStream&);
     void timerCallback() override;
@@ -146,6 +143,7 @@ private:
     double preparedRate = 0.0;
     int preparedBlock = 0, wantedIns = 2, wantedOuts = 2;
     bool wantPrepared = false, wantWindow = false, gaveUp = false;
+    bool pluginAcceptsMidi = false, pluginProducesMidi = false;
     std::atomic<bool> expectingLoss { false };
     int restarts = 0;
     juce::Array<juce::uint32> restartTimes;
