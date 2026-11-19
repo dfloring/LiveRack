@@ -171,7 +171,7 @@ struct RackEngine::Rack
 
         rebuildConnections();
 
-        buffer.setSize (ch, juce::jmax (bs, 512));
+        buffer.setSize (ch, juce::jmax (bs, 512)); // the only allocation; the audio callback never resizes it
         delay.clear();
         delayWrite = 0;
 
@@ -500,7 +500,8 @@ struct RackEngine::Driver : public juce::AudioIODeviceCallback,
                     const int dst = r.config.output[c];
 
                     if (juce::isPositiveAndBelow (dst, numOutputs) && outputs[dst] != nullptr)
-                        juce::FloatVectorOperations::add (outputs[dst], r.buffer.getReadPointer (c), numSamples);
+                        juce::FloatVectorOperations::add (outputs[dst], r.buffer.getReadPointer (c),
+                                                          juce::jmin (numSamples, r.buffer.getNumSamples()));
                 }
             }
         }
@@ -516,24 +517,26 @@ struct RackEngine::Driver : public juce::AudioIODeviceCallback,
     {
         auto& r = *active[(size_t) index];
         const auto startTicks = juce::Time::getHighResolutionTicks();
-        const int numSamples = blockNumSamples;
+        // Never grow the buffer here (that allocates): an oversized block is cut to what it holds,
+        // and the rest stays silent (the outputs were cleared)
+        const int numSamples = juce::jmin (blockNumSamples, r.buffer.getNumSamples());
         const int ch = r.config.numOutputs();
         const int ins = r.config.numInputs();
-        r.buffer.setSize (ch, numSamples, false, false, true);
+        juce::AudioBuffer<float> block (r.buffer.getArrayOfWritePointers(), ch, numSamples); // a view, no allocation
 
         for (int c = ins; c < ch; ++c)
-            r.buffer.clear (c, 0, numSamples);
+            block.clear (c, 0, numSamples);
 
         for (int c = 0; c < ins; ++c)
         {
             const int src = r.config.input[c];
 
             if (juce::isPositiveAndBelow (src, blockNumInputs) && blockInputs[src] != nullptr)
-                r.buffer.copyFrom (c, 0, blockInputs[src], numSamples);
+                block.copyFrom (c, 0, blockInputs[src], numSamples);
             else
-                r.buffer.clear (c, 0, numSamples);
+                block.clear (c, 0, numSamples);
 
-            storePeak (r.peaks[0][c], r.buffer.getMagnitude (c, 0, numSamples));
+            storePeak (r.peaks[0][c], block.getMagnitude (c, 0, numSamples));
         }
 
         if (! r.bypassed.load())
@@ -541,7 +544,7 @@ struct RackEngine::Driver : public juce::AudioIODeviceCallback,
             r.midi.clear();
             r.clock.blockTicks = blockTicks;
             r.clock.last = juce::Time::getHighResolutionTicks();
-            r.graph.processBlock (r.buffer, r.midi);
+            r.graph.processBlock (block, r.midi);
             r.applyDelay (numSamples, r.padSamples.load());
         }
         else
@@ -559,7 +562,7 @@ struct RackEngine::Driver : public juce::AudioIODeviceCallback,
        #endif
 
         for (int c = 0; c < ch; ++c)
-            storePeak (r.peaks[1][c], r.buffer.getMagnitude (c, 0, numSamples));
+            storePeak (r.peaks[1][c], block.getMagnitude (c, 0, numSamples));
 
         if (blockTicks > 0.0)
         {
@@ -987,6 +990,11 @@ void RackEngine::previewPrepare (double sr, int bs)
         configureRack (*r, false);
 
     rebuildDriverLists();
+}
+
+const float* RackEngine::previewRackBuffer (int rack) const
+{
+    return racks[(size_t) rack]->buffer.getReadPointer (0);
 }
 
 void RackEngine::previewProcess (juce::AudioBuffer<float>& in, juce::AudioBuffer<float>& out)
