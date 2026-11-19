@@ -10,8 +10,10 @@ and is the only one who merges and releases. The owner is the board.
 | COO | Sonnet | Syncs GitHub issues into tasks, assigns ready work, routes PRs to review, chases what's stuck, daily status | Chief of Staff |
 | Engineer 1 | Sonnet | One assigned issue → one pull request | Minimal Change Engineer |
 | Engineer 2 | Sonnet | Same | Embedded Firmware Engineer (real-time discipline) |
-| Head of Design | Opus | Specs UI changes, design-reviews UI PRs, small UI-only PRs | UI Designer + UI Finish-Gate Reviewer |
-| Head of Review | Opus | Reviews every PR (`.claude/agents/reviewer.md`) and posts the report on GitHub | Code Reviewer + Reality Checker |
+| Head of Design | Sonnet | Specs UI changes, design-reviews UI PRs, small UI-only PRs | UI Designer + UI Finish-Gate Reviewer |
+| Head of Review | Sonnet | Reviews every PR (`.claude/agents/reviewer.md`) and posts the report on GitHub | Code Reviewer + Reality Checker |
+
+**Model:** Sonnet for every agent, and for any new agent, unless the owner says otherwise.
 
 **GitHub is the record.** Every task names its GitHub issue; every change is a
 pull request with green CI and a Head of Review comment; the head developer merges.
