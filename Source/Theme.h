@@ -12,6 +12,8 @@ namespace Theme
     const juce::Colour raised     { 0xff23272c };
     const juce::Colour well       { 0xff121417 };   // sunken group behind toolbar buttons
     const juce::Colour border     { 0xff2a2f35 };
+    const juce::Colour backdrop   { 0xff0d0f11 };   // behind the screens, darker than background
+    const juce::Colour inkOnLit   { 0xff101214 };   // text and icons on a lit (coloured) button
     const juce::Colour text       { 0xffe8eaed };
     const juce::Colour textDim    { 0xff9aa3ad };
     const juce::Colour accent     { 0xff4fb3d9 };
@@ -19,6 +21,15 @@ namespace Theme
     const juce::Colour amber      { 0xffe0a030 };
     const juce::Colour green      { 0xff3fb950 };
     const juce::Colour red        { 0xffe5534b };
+
+    // Text sizes: a short named set instead of one-off numbers. Bigger display
+    // sizes (headline, large number) stay where they are used.
+    constexpr float fontCaption = 11.0f;
+    constexpr float fontSmall   = 12.0f;
+    constexpr float fontBody    = 13.0f;
+    constexpr float fontMedium  = 14.0f;
+    constexpr float fontLarge   = 15.0f;
+    constexpr float fontHeading = 17.0f;
 
     // Latency group letters A-H
     inline juce::Colour groupColour (int g)
@@ -89,7 +100,7 @@ namespace Theme
         void setShowsLabel (bool shouldShow) { if (showLabel != shouldShow) { showLabel = shouldShow; repaint(); } }
         bool hasLabel() const { return label.isNotEmpty(); }
 
-        static juce::Font labelFont() { return juce::Font (juce::FontOptions (11.0f)); }
+        static juce::Font labelFont() { return juce::Font (juce::FontOptions (Theme::fontCaption)); }
         int getLabelledWidth() const
         {
             juce::GlyphArrangement ga;
@@ -180,7 +191,7 @@ namespace Theme
 
         juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override
         {
-            return juce::FontOptions (juce::jmin (15.0f, buttonHeight * 0.42f), juce::Font::bold);
+            return juce::FontOptions (juce::jmin (fontLarge, buttonHeight * 0.42f), juce::Font::bold);
         }
     };
 }

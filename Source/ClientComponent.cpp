@@ -81,7 +81,7 @@ namespace
     void drawHeading (juce::Graphics& g, juce::Rectangle<int> area, const juce::String& title)
     {
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
         g.drawText (title, area, juce::Justification::centredLeft);
     }
 
@@ -95,10 +95,10 @@ namespace
             g.fillRoundedRectangle (logo.getX() + 7.0f, logo.getY() + 8.0f + (float) i * 5.0f, 14.0f, 2.0f, 1.0f);
 
         g.setColour (Theme::text);
-        g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontHeading, juce::Font::bold));
         g.drawText ("LiveRack", 52, 0, 90, toolbarHeight / 2 + 9, juce::Justification::bottomLeft);
         g.setColour (Theme::accent);
-        g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
         g.drawText (tag, 53, toolbarHeight / 2 + 9, 90, 14, juce::Justification::topLeft);
     }
 
@@ -126,7 +126,7 @@ public:
     {
         addAndMakeVisible (address);
         address.setTextToShowWhenEmpty ("Address: name or IP, e.g. 192.168.1.20", Theme::textDim);
-        address.setFont (juce::FontOptions (15.0f));
+        address.setFont (juce::FontOptions (Theme::fontLarge));
         address.setJustification (juce::Justification::centredLeft);
         address.setIndents (10, 0);
         address.onReturnKey = [this] { connectToTyped(); };
@@ -161,7 +161,7 @@ public:
         g.drawText ("Connect to a LiveRack server", col.removeFromTop (40), juce::Justification::bottomLeft);
         col.removeFromTop (8);
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (14.0f));
+        g.setFont (juce::FontOptions (Theme::fontMedium));
         g.drawFittedText ("The server is LiveRack running on the computer with the audio (Server mode). "
                           "The Client shows its racks and plugins here and controls it over the network. "
                           "The server's web remote must be on (Devices, iPad / web remote).",
@@ -173,7 +173,7 @@ public:
         if (serverButtons.isEmpty())
         {
             g.setColour (Theme::textDim.withAlpha (0.8f));
-            g.setFont (juce::FontOptions (13.5f));
+            g.setFont (juce::FontOptions (Theme::fontBody));
             g.drawText (finder.isListening() ? "Looking for servers on this network..." : "Can't listen for servers here: type the address below.",
                         emptyArea, juce::Justification::centredLeft);
         }
@@ -494,14 +494,14 @@ public:
             g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
 
             auto inner = r.reduced (8.0f, 5.0f);
-            const auto ink = lit ? juce::Colour (0xff101214) : Theme::text;
+            const auto ink = lit ? Theme::inkOnLit : Theme::text;
             inner.removeFromTop (12.0f);
             g.setColour (assigned ? ink : Theme::textDim);
-            g.setFont (juce::FontOptions (13.5f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontBody, juce::Font::bold));
             g.drawFittedText (assigned ? k["label"].toString() : "Empty", inner.removeFromTop (inner.getHeight() * 0.55f).toNearestInt(),
                               juce::Justification::centred, 1, 0.75f);
             g.setColour (ink.withAlpha (0.7f));
-            g.setFont (juce::FontOptions (11.0f));
+            g.setFont (juce::FontOptions (Theme::fontCaption));
             g.drawText (k["category"].toString(), inner.toNearestInt(), juce::Justification::centredTop, true);
         }
     }
@@ -585,7 +585,7 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (juce::Colour (0xff0d0f11));
+        g.fillAll (Theme::backdrop);
         g.setColour (Theme::border);
         g.fillRect (0, 0, getWidth(), 1);
 
@@ -594,17 +594,17 @@ public:
 
         {
             const juce::String version ("LiveRack Client " JUCE_APPLICATION_VERSION_STRING);
-            g.setFont (juce::FontOptions (11.5f));
+            g.setFont (juce::FontOptions (Theme::fontCaption));
             g.setColour (Theme::textDim);
-            g.drawText (version, area.removeFromRight (juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (11.5f), version) + 4),
+            g.drawText (version, area.removeFromRight (juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (Theme::fontCaption), version) + 4),
                         juce::Justification::centredRight);
             area.removeFromRight (10);
         }
 
         auto chip = [&g, &area] (juce::Colour light, const juce::String& bold, const juce::String& rest, bool fromRight)
         {
-            const int w = juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (12.0f, juce::Font::bold), bold)
-                        + juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (12.0f), rest) + 56;
+            const int w = juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (Theme::fontSmall, juce::Font::bold), bold)
+                        + juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (Theme::fontSmall), rest) + 56;
             auto r = (fromRight ? area.removeFromRight (w) : area.removeFromLeft (w)).toFloat();
             if (fromRight) area.removeFromRight (8); else area.removeFromLeft (8);
 
@@ -614,11 +614,11 @@ public:
             Theme::drawLight (g, t.removeFromLeft (8.0f).withSizeKeepingCentre (8.0f, 8.0f), light, false);
             t.removeFromLeft (8.0f);
             g.setColour (Theme::text);
-            g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontSmall, juce::Font::bold));
             g.drawText (bold, t.toNearestInt(), juce::Justification::centredLeft);
-            t.removeFromLeft ((float) juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (12.0f, juce::Font::bold), bold) + 6.0f);
+            t.removeFromLeft ((float) juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (Theme::fontSmall, juce::Font::bold), bold) + 6.0f);
             g.setColour (Theme::textDim.brighter (0.2f));
-            g.setFont (juce::FontOptions (12.0f));
+            g.setFont (juce::FontOptions (Theme::fontSmall));
             g.drawText (rest, t.toNearestInt(), juce::Justification::centredLeft);
         };
 
@@ -660,13 +660,13 @@ public:
         if (owner.midi != nullptr && owner.midi->isLearning())
         {
             g.setColour (Theme::amber);
-            g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontSmall, juce::Font::bold));
             g.drawText (owner.midi->getLearnText(), area, juce::Justification::centredLeft, true);
         }
         else if (note.isNotEmpty())
         {
             g.setColour (Theme::textDim);
-            g.setFont (juce::FontOptions (12.0f));
+            g.setFont (juce::FontOptions (Theme::fontSmall));
             g.drawText (note, area, juce::Justification::centredLeft, true);
         }
     }
@@ -699,13 +699,13 @@ public:
 
         auto t = box.reduced (24, 20);
         g.setColour (Theme::text);
-        g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontHeading, juce::Font::bold));
         const bool ever = owner.live.hasEverConnected();
         const auto name = owner.live.hasEverConnected() ? owner.live.getServerName() : owner.displayName;
         g.drawText (ever ? "Lost the connection to " + name : "Connecting to " + name + "...",
                     t.removeFromTop (30), juce::Justification::centredLeft, true);
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (14.0f));
+        g.setFont (juce::FontOptions (Theme::fontMedium));
         auto problem = owner.live.getLastProblem();
 
         // It announces itself here, but nothing answers: something on the way blocks it
@@ -1131,11 +1131,11 @@ void ClientComponent::ClientView::paint (juce::Graphics& g)
     const int scene = currentScene();
     auto t = chip.withTrimmedLeft (22.0f).reduced (0.0f, 3.0f);
     g.setColour (Theme::textDim);
-    g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+    g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
     g.drawText (scene >= 0 ? "SNAPSHOT " + juce::String (scene) : juce::String ("SNAPSHOTS"),
                 t.removeFromTop (t.getHeight() * 0.42f).toNearestInt(), juce::Justification::bottomLeft);
     g.setColour (Theme::text);
-    g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+    g.setFont (juce::FontOptions (Theme::fontMedium, juce::Font::bold));
     const auto snapshots = live.getSnapshots();
     const bool stored = live.hasSnapshot (scene);
     const auto name = scene < 0 ? juce::String ((int) snapshots.size()) + " in show"
@@ -1153,10 +1153,10 @@ void ClientComponent::ClientView::paint (juce::Graphics& g)
                           onBeat ? Theme::amber : Theme::border, onBeat);
         auto bt = r.withTrimmedLeft (26.0f).reduced (4.0f, 3.0f);
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
         g.drawText ("BPM", bt.removeFromTop (12.0f).toNearestInt(), juce::Justification::centredLeft);
         g.setColour (Theme::text);
-        g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontHeading, juce::Font::bold));
         const double b = bpm();
         g.drawText (juce::String (b, std::abs (b - std::round (b)) < 0.05 ? 0 : 1), bt.toNearestInt(), juce::Justification::centredLeft);
     }

@@ -402,13 +402,13 @@ void PluginDock::paint (juce::Graphics& g)
         h.removeFromLeft (10);
 
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontBody, juce::Font::bold));
         const auto num = juce::String (rack + 1);
         g.drawText (num, h.removeFromLeft (20), juce::Justification::centredLeft);
 
         g.setColour (rackBypassed ? Theme::textDim : Theme::text);
-        g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
-        const int nameW = juce::jmin (240, juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (17.0f, juce::Font::bold), cfg.name) + 4);
+        g.setFont (juce::FontOptions (Theme::fontHeading, juce::Font::bold));
+        const int nameW = juce::jmin (240, juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (Theme::fontHeading, juce::Font::bold), cfg.name) + 4);
         g.drawText (cfg.name, h.removeFromLeft (nameW), juce::Justification::centredLeft, true);
         h.removeFromLeft (14);
 
@@ -419,7 +419,7 @@ void PluginDock::paint (juce::Graphics& g)
         if (cfg.latencyGroup > 0)
             sub << "   group " << RackConfig::groupName (cfg.latencyGroup);
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (12.0f));
+        g.setFont (juce::FontOptions (Theme::fontSmall));
         g.drawText (sub, h.removeFromLeft (220), juce::Justification::centredLeft, true);
 
         // In / out meters, side by side
@@ -446,7 +446,7 @@ void PluginDock::paint (juce::Graphics& g)
     if (message.isNotEmpty())
     {
         g.setColour (juce::Colours::white.withAlpha (0.5f));
-        g.setFont (juce::FontOptions (15.0f));
+        g.setFont (juce::FontOptions (Theme::fontLarge));
         g.drawText (message, editorHolder.getBounds(), juce::Justification::centred);
     }
 }

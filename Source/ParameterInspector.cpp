@@ -1,15 +1,16 @@
 #include "ParameterInspector.h"
+#include "Theme.h"
 
 ParameterInspector::ParameterInspector (juce::AudioPluginInstance& p, const juce::PluginDescription& loadedFrom,
                                         PluginLibrary& lib, std::function<void()> changed)
     : plugin (p), library (lib), onChanged (std::move (changed)),
       familyKey (PluginLibrary::familyKey (loadedFrom))
 {
-    sourceLabel.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+    sourceLabel.setFont (juce::FontOptions (Theme::fontMedium, juce::Font::bold));
     hint.setText ("Values update live. Make the plugin compress and watch for a value that moves with it, "
                   "then select that row and press Use for GR.", juce::dontSendNotification);
     hint.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.6f));
-    hint.setFont (juce::FontOptions (12.5f));
+    hint.setFont (juce::FontOptions (Theme::fontSmall));
 
     filter.setTextToShowWhenEmpty ("Filter parameters...", juce::Colours::grey);
     filter.onTextChange = [this] { refilter(); };
@@ -108,9 +109,9 @@ void ParameterInspector::paintListBoxItem (int row, juce::Graphics& g, int width
                       && probe.source != GainReduction::Source::none;
 
     if (selected)
-        g.fillAll (juce::Colours::steelblue.withAlpha (0.5f));
+        g.fillAll (Theme::accent.withAlpha (0.5f));
     else if (isGr)
-        g.fillAll (juce::Colour (0xffe8a23a).withAlpha (0.18f));
+        g.fillAll (Theme::amber.withAlpha (0.18f));
 
     juce::String flagText;
     if (! param->isAutomatable()) flagText << "read-only ";
@@ -118,7 +119,7 @@ void ParameterInspector::paintListBoxItem (int row, juce::Graphics& g, int width
     if (isGr)                     flagText << "GR ";
 
     auto area = juce::Rectangle<int> (0, 0, width, height).reduced (6, 0);
-    g.setFont (juce::FontOptions (13.0f));
+    g.setFont (juce::FontOptions (Theme::fontBody));
 
     g.setColour (juce::Colours::white.withAlpha (0.5f));
     g.drawText ("#" + juce::String (index), area.removeFromLeft (44), juce::Justification::centredLeft);
@@ -133,13 +134,13 @@ void ParameterInspector::paintListBoxItem (int row, juce::Graphics& g, int width
     g.setColour (juce::Colours::white.withAlpha (0.5f));
     g.drawText (juce::String (param->getValue(), 3), area.removeFromLeft (60), juce::Justification::centredLeft);
 
-    g.setColour (juce::Colour (0xffe8a23a));
+    g.setColour (Theme::amber);
     g.drawText (flagText.trim(), area, juce::Justification::centredRight, true);
 }
 
 void ParameterInspector::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour (0xff23272c));
+    g.fillAll (Theme::raised);
 }
 
 void ParameterInspector::resized()

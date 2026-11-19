@@ -46,7 +46,7 @@ public:
         if (list.empty())
         {
             g.setColour (Theme::textDim);
-            g.setFont (juce::FontOptions (13.0f));
+            g.setFont (juce::FontOptions (Theme::fontBody));
             g.drawFittedText ("No snapshots yet. Store one above, or with STORE in the top bar.",
                               getLocalBounds().reduced (14, 0), juce::Justification::centredLeft, 2);
             return;
@@ -71,7 +71,7 @@ public:
 
             auto r = row.reduced (14, 0);
             g.setColour (Theme::textDim);
-            g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontMedium, juce::Font::bold));
             g.drawText (juce::String (s.number), r.removeFromLeft (40), juce::Justification::centredLeft);
 
             // The dot: plugins changed since it was stored
@@ -93,22 +93,22 @@ public:
             auto text = r;
             auto top = text.removeFromTop (text.getHeight() / 2 + (triggers.isEmpty() ? text.getHeight() / 2 : 2));
             g.setColour (Theme::text);
-            g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontMedium, juce::Font::bold));
             const auto name = s.name.isNotEmpty() ? s.name : juce::String ("(no name)");
-            const int nameW = juce::jmin (top.getWidth() - 70, juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (14.0f, juce::Font::bold), name) + 4);
+            const int nameW = juce::jmin (top.getWidth() - 70, juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (Theme::fontMedium, juce::Font::bold), name) + 4);
             g.drawText (name, top.removeFromLeft (nameW), triggers.isEmpty() ? juce::Justification::centredLeft : juce::Justification::bottomLeft, true);
 
             if (s.number == current)
             {
                 g.setColour (Theme::green);
-                g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+                g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
                 g.drawText ("CURRENT", top.withTrimmedLeft (8), triggers.isEmpty() ? juce::Justification::centredLeft : juce::Justification::bottomLeft);
             }
 
             if (! triggers.isEmpty())
             {
                 g.setColour (Theme::textDim);
-                g.setFont (juce::FontOptions (11.5f));
+                g.setFont (juce::FontOptions (Theme::fontCaption));
                 g.drawText (triggers.joinIntoString (juce::String::fromUTF8 ("  " "\xc2\xb7" "  ")), text, juce::Justification::topLeft, true);
             }
         }
@@ -172,7 +172,7 @@ public:
             {
                 const auto p = engine.getSlot (r, s);
                 const auto label = p.exists ? p.name : juce::String ("?");
-                const int w = juce::jlimit (90, 240, juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (12.5f, juce::Font::bold), label) + 40);
+                const int w = juce::jlimit (90, 240, juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (Theme::fontSmall, juce::Font::bold), label) + 40);
                 if (x + w > width - 14 && x > 14 + nameW)
                 {
                     x = 14 + nameW;
@@ -214,13 +214,13 @@ public:
             name.removeFromLeft (8);
 
             g.setColour (cfg.recallSafe ? Theme::textDim : Theme::text);
-            g.setFont (juce::FontOptions (13.5f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontBody, juce::Font::bold));
             auto top = name.removeFromTop (padY + chipH);
             g.drawFittedText (cfg.name, top.withTrimmedTop (padY), juce::Justification::centredLeft, 1, 0.8f);
             if (cfg.recallSafe)
             {
                 g.setColour (Theme::amber);
-                g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+                g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
                 g.drawText ("RECALL SAFE", name.removeFromTop (14), juce::Justification::centredLeft);
             }
         }
@@ -263,7 +263,7 @@ public:
             const auto mark = owner.picking ? (picked ? juce::String::fromUTF8 ("\xe2\x9c\x93") : juce::String())
                                             : (in ? juce::String::fromUTF8 ("\xe2\x97\x8f") : juce::String::fromUTF8 ("\xe2\x97\x8b"));
             g.setColour (owner.picking ? (picked ? Theme::amber : Theme::textDim) : (in ? Theme::text : Theme::textDim));
-            g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontSmall, juce::Font::bold));
             if (mark.isNotEmpty())
                 g.drawText (mark, label.removeFromLeft (14), juce::Justification::centredLeft);
             g.drawFittedText ((p.exists ? p.name : juce::String ("?")) + (absent ? "  (not stored)" : juce::String()),
@@ -369,7 +369,7 @@ public:
         if (owner.selected < 0)
         {
             g.setColour (Theme::textDim);
-            g.setFont (juce::FontOptions (13.0f));
+            g.setFont (juce::FontOptions (Theme::fontBody));
             g.drawFittedText ("Pick a snapshot to see what recalling it would change.", getLocalBounds().reduced (14, 10),
                               juce::Justification::topLeft, 3);
             return;
@@ -378,7 +378,7 @@ public:
         if (owner.differences.empty())
         {
             g.setColour (Theme::textDim);
-            g.setFont (juce::FontOptions (13.0f));
+            g.setFont (juce::FontOptions (Theme::fontBody));
             g.drawFittedText ("Nothing: everything it recalls is as it has it.", getLocalBounds().reduced (14, 10),
                               juce::Justification::topLeft, 3);
             return;
@@ -420,20 +420,20 @@ public:
                              : d.changedSettings > 0 ? juce::String (d.changedSettings) + (d.changedSettings == 1 ? " setting" : " settings")
                              : juce::String ("bypass");
             g.setColour (Theme::amber);
-            g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontSmall, juce::Font::bold));
             g.drawText (count, line.removeFromRight (80), juce::Justification::centredRight);
 
             g.setColour (Theme::text);
-            g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontBody, juce::Font::bold));
             const auto rackName = engine.getRackConfig (d.rack).name;
-            const int rw = juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (13.0f, juce::Font::bold), rackName) + 8;
+            const int rw = juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (Theme::fontBody, juce::Font::bold), rackName) + 8;
             g.drawText (rackName, line.removeFromLeft (rw), juce::Justification::centredLeft, true);
             g.setColour (Theme::textDim);
-            g.setFont (juce::FontOptions (13.0f));
+            g.setFont (juce::FontOptions (Theme::fontBody));
             const auto p = d.slot >= 0 ? engine.getSlot (d.rack, d.slot) : LiveSlot();
             g.drawText (p.exists ? p.name : juce::String ("Rack"), line, juce::Justification::centredLeft, true);
 
-            g.setFont (juce::FontOptions (11.5f));
+            g.setFont (juce::FontOptions (Theme::fontCaption));
             for (auto& detail : d.details)
                 g.drawText (detail, r.removeFromTop (17).withTrimmedLeft (26), juce::Justification::centredLeft, true);
         }
@@ -515,7 +515,7 @@ SnapshotsPanel::SnapshotsPanel (Host h) : host (std::move (h)), engine (host.eng
 
     // The snapshot picked
     styleEditor (nameEdit);
-    nameEdit.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+    nameEdit.setFont (juce::FontOptions (Theme::fontLarge, juce::Font::bold));
     auto rename = [this]
     {
         if (hasSelection())
@@ -971,7 +971,7 @@ void SnapshotsPanel::paint (juce::Graphics& g)
     auto smallHead = [&g] (juce::Rectangle<int> r, const juce::String& text)
     {
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
         g.drawText (text, r, juce::Justification::centredLeft);
     };
 
@@ -987,11 +987,11 @@ void SnapshotsPanel::paint (juce::Graphics& g)
         if (! hasSelection())
         {
             g.setColour (Theme::text);
-            g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontLarge, juce::Font::bold));
             g.drawText ("Snapshots stored from now on", nameEdit.getBounds(), juce::Justification::centredLeft);
         }
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (12.0f));
+        g.setFont (juce::FontOptions (Theme::fontSmall));
         g.drawText (infoLine, headerPanel.reduced (16, 12).removeFromBottom (18).withTrimmedRight (consoleSceneButton.getWidth() + 10),
                     juce::Justification::centredLeft, true);
     }
@@ -1000,28 +1000,28 @@ void SnapshotsPanel::paint (juce::Graphics& g)
     {
         auto t = scopePanel.reduced (14, 0).removeFromTop (44);
         g.setColour (Theme::text);
-        g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontMedium, juce::Font::bold));
         g.drawText ("What it recalls", t, juce::Justification::centredLeft);
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (12.0f));
+        g.setFont (juce::FontOptions (Theme::fontSmall));
         g.drawText (picking ? "" : "Click a plugin to include it or leave it alone, or a rack's name for the whole rack",
                     t.withTrimmedLeft (120), juce::Justification::centredLeft, true);
 
         auto d = diffPanel.reduced (14, 0).removeFromTop (44);
         g.setColour (Theme::text);
-        g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontMedium, juce::Font::bold));
         g.drawText ("Differs from now", d.removeFromTop (26).withTrimmedTop (8), juce::Justification::centredLeft);
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (12.0f));
+        g.setFont (juce::FontOptions (Theme::fontSmall));
         g.drawText ("What recalling it would change", d, juce::Justification::centredLeft);
 
         auto m = midiPanel.reduced (14, 0).removeFromTop (30);
         g.setColour (Theme::text);
-        g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontBody, juce::Font::bold));
         g.drawText ("MIDI program changes", m, juce::Justification::centredLeft);
 
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (12.0f));
+        g.setFont (juce::FontOptions (Theme::fontSmall));
         g.drawText ("Program 1 recalls snapshot", firstSnapshot.getBounds().withX (midiPanel.getX() + 14).withRight (firstSnapshot.getX() - 8),
                     juce::Justification::centredLeft);
     }
@@ -1031,7 +1031,7 @@ void SnapshotsPanel::paint (juce::Graphics& g)
         g.setColour (Theme::amber.withAlpha (0.15f));
         g.fillRoundedRectangle (pickBar.toFloat(), 6.0f);
         g.setColour (Theme::amber);
-        g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontSmall, juce::Font::bold));
         g.drawText ("Click the plugins (or a rack's name) to store over: " + juce::String ((int) pickedSlots.size()) + " picked",
                     pickBar.reduced (10, 0).withTrimmedRight (200), juce::Justification::centredLeft, true);
     }

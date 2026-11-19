@@ -181,7 +181,7 @@ private:
                 return;
 
             g.setColour (Theme::text);
-            g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontLarge, juce::Font::bold));
             g.drawText (tool.title, getLocalBounds().removeFromTop (headerHeight).withTrimmedLeft (12),
                         juce::Justification::centredLeft);
         }
@@ -276,10 +276,10 @@ public:
 
         auto t = r.withTrimmedLeft (26.0f).reduced (4.0f, 3.0f);
         g.setColour (Theme::textDim);
-        g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
         g.drawText ("BPM", t.removeFromTop (12.0f).toNearestInt(), juce::Justification::centredLeft);
         g.setColour (Theme::text);
-        g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (Theme::fontHeading, juce::Font::bold));
         const double bpm = engine.getBpm();
         g.drawText (juce::String (bpm, std::abs (bpm - std::round (bpm)) < 0.05 ? 0 : 1),
                     t.toNearestInt(), juce::Justification::centredLeft);
@@ -312,7 +312,7 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (juce::Colour (0xff0d0f11));
+        g.fillAll (Theme::backdrop);
         g.setColour (Theme::border);
         g.fillRect (0, 0, getWidth(), 1);
 
@@ -322,18 +322,18 @@ public:
         // Which LiveRack this is, at the far right (the title bar is hidden in full screen)
         {
             const juce::String version ("LiveRack " JUCE_APPLICATION_VERSION_STRING);
-            g.setFont (juce::FontOptions (11.5f));
+            g.setFont (juce::FontOptions (Theme::fontCaption));
             g.setColour (Theme::textDim);
-            g.drawText (version, area.removeFromRight (juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (11.5f), version) + 4),
+            g.drawText (version, area.removeFromRight (juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (Theme::fontCaption), version) + 4),
                         juce::Justification::centredRight);
             area.removeFromRight (10);
         }
-        g.setFont (juce::FontOptions (12.0f));
+        g.setFont (juce::FontOptions (Theme::fontSmall));
 
         auto chip = [&g, &area] (juce::Colour light, const juce::String& bold, const juce::String& rest, bool fromRight)
         {
-            const int w = juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (12.0f, juce::Font::bold), bold)
-                        + juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (12.0f), rest) + 56;
+            const int w = juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (Theme::fontSmall, juce::Font::bold), bold)
+                        + juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (Theme::fontSmall), rest) + 56;
             auto r = (fromRight ? area.removeFromRight (w) : area.removeFromLeft (w)).toFloat();
             if (fromRight) area.removeFromRight (8); else area.removeFromLeft (8);
 
@@ -343,11 +343,11 @@ public:
             Theme::drawLight (g, t.removeFromLeft (8.0f).withSizeKeepingCentre (8.0f, 8.0f), light, false);
             t.removeFromLeft (8.0f);
             g.setColour (Theme::text);
-            g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontSmall, juce::Font::bold));
             g.drawText (bold, t.toNearestInt(), juce::Justification::centredLeft);
-            t.removeFromLeft ((float) juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (12.0f, juce::Font::bold), bold) + 6.0f);
+            t.removeFromLeft ((float) juce::GlyphArrangement::getStringWidthInt (juce::FontOptions (Theme::fontSmall, juce::Font::bold), bold) + 6.0f);
             g.setColour (Theme::textDim.brighter (0.2f));
-            g.setFont (juce::FontOptions (12.0f));
+            g.setFont (juce::FontOptions (Theme::fontSmall));
             g.drawText (rest, t.toNearestInt(), juce::Justification::centredLeft);
         };
 
@@ -394,7 +394,7 @@ public:
         if (owner.midi != nullptr && owner.midi->isLearning())
         {
             g.setColour (Theme::amber);
-            g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+            g.setFont (juce::FontOptions (Theme::fontSmall, juce::Font::bold));
             g.drawText (owner.midi->getLearnText(), area, juce::Justification::centredLeft, true);
         }
         else if (owner.consoleNote.isNotEmpty())
@@ -710,7 +710,7 @@ void MainComponent::paint (juce::Graphics& g)
         g.fillRoundedRectangle (logo.getX() + 7.0f, logo.getY() + 8.0f + i * 5.0f, 14.0f, 2.0f, 1.0f);
 
     g.setColour (Theme::text);
-    g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
+    g.setFont (juce::FontOptions (Theme::fontHeading, juce::Font::bold));
     g.drawText ("LiveRack", 52, 0, 90, toolbarHeight, juce::Justification::centredLeft);
 
     // Button groups sit in sunken wells
@@ -732,11 +732,11 @@ void MainComponent::paint (juce::Graphics& g)
     auto t = chip.withTrimmedLeft (22.0f).reduced (0.0f, 3.0f);
     const auto* info = engine.getSnapshotInfo (currentScene);
     g.setColour (Theme::textDim);
-    g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+    g.setFont (juce::FontOptions (Theme::fontCaption, juce::Font::bold));
     g.drawText (currentScene >= 0 ? "SNAPSHOT " + juce::String (currentScene) : juce::String ("SNAPSHOTS"),
                 t.removeFromTop (t.getHeight() * 0.42f).toNearestInt(), juce::Justification::bottomLeft);
     g.setColour (Theme::text);
-    g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+    g.setFont (juce::FontOptions (Theme::fontMedium, juce::Font::bold));
     juce::String name = currentScene < 0 ? juce::String ((int) engine.getSnapshots().size()) + " in show"
                       : info == nullptr ? juce::String ("Not stored")
                       : info->name.isNotEmpty() ? info->name : juce::String ("Untitled");
