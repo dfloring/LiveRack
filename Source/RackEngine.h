@@ -180,6 +180,13 @@ public:
     bool setSlotIsolated (int rack, int slot, bool isolated, juce::String& error);
     void crashIsolatedSlot (int rack, int slot); // test: makes the helper crash
 
+    // "Isolate all plugins": one switch for the show. Turning it on moves every
+    // plugin into its own helper process and keeps new ones there. Turning it
+    // off only stops isolating new plugins (running ones stay as they are).
+    // Off for every show until someone turns it on (the default is unchanged).
+    bool isIsolateAll() const { return isolateAll; }
+    bool setIsolateAll (bool on, juce::String& error);
+
     // Each loaded plugin has an id that stays the same while it is moved
     // around (used by Hot Plugins, User Keys and controller mappings)
     int  getSlotId (int rack, int slot) const;
@@ -314,6 +321,7 @@ private:
     std::vector<RackPage> pages;
     int currentPage = -1;
     std::vector<int> hotPlugins;
+    bool isolateAll = false; // saved in the show file
     std::atomic<double> bpm { 120.0 };
     std::atomic<bool> multiCore { true };
     std::map<const Rack*, std::pair<float, juce::uint32>> rackLoadHolds;

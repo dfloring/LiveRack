@@ -109,6 +109,7 @@ private:
     void openRecentShow (int index);
     void showShowMenu();
     void afterShowLoaded();
+    void setIsolateAll (bool on);
     void checkUnsavedThen (std::function<void()>);
     void updateWindowTitle();
     void storeWindowLayout();                       // into the show

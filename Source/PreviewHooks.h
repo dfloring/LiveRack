@@ -1162,6 +1162,99 @@ struct PreviewHooks
                 });
             });
 
+        if (open == "isolateall")
+            juce::Timer::callAfterDelay (800, [&m]
+            {
+                // One switch isolates every plugin (loaded and added later, kept in the show
+                // file, off in a new show); then a helper crashes while audio keeps flowing.
+                auto& e = m.engine;
+                auto countIsolated = [&e]
+                {
+                    int total = 0, iso = 0;
+                    for (int r = 0; r < e.getNumRacks(); ++r)
+                        for (int sl = 0; sl < e.getNumSlots (r); ++sl)
+                        {
+                            ++total;
+                            iso += e.isSlotIsolated (r, sl) ? 1 : 0;
+                        }
+                    return std::pair<int, int> (total, iso);
+                };
+                auto [total0, iso0] = countIsolated();
+                std::cerr << "ISOALL before: isolated " << iso0 << " of " << total0 << " (expect 0), switch " << e.isIsolateAll() << " (expect 0)" << std::endl;
+
+                m.setIsolateAll (true);
+                auto [total1, iso1] = countIsolated();
+                std::cerr << "ISOALL on: all isolated " << (iso1 == total1 && total1 > 0) << " switch " << e.isIsolateAll() << " (expect 1, 1)" << std::endl;
+
+                juce::String err;
+                const bool added = e.addPlugin (0, e.getSlotDescription (0, 0), err);
+                const int last = e.getNumSlots (0) - 1;
+                std::cerr << "ISOALL added later: ok " << added << " isolated " << e.isSlotIsolated (0, last) << " (expect 1, 1) '" << err << "'" << std::endl;
+
+                auto f = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("Isolate All Test.liverack");
+                f.deleteFile();
+                e.setShowFile (f);
+                m.saveShow (false);
+                m.startNewShow();
+                std::cerr << "ISOALL new show: switch " << e.isIsolateAll() << " (expect 0)" << std::endl;
+                m.openShowFile (f);
+                auto [total2, iso2] = countIsolated();
+                std::cerr << "ISOALL reopened: switch " << e.isIsolateAll() << " all isolated " << (iso2 == total2 && total2 > 0) << " (expect 1, 1)" << std::endl;
+
+                juce::Timer::callAfterDelay (1500, [&m]
+                {
+                    auto& e = m.engine;
+                    auto* p = dynamic_cast<IsolatedPlugin*> (e.getPlugin (0, 1));
+                    if (p == nullptr) { std::cerr << "ISOALL crash test: no isolated plugin" << std::endl; return; }
+
+                    e.previewPrepare (48000.0, 128);
+                    struct Audio : juce::Thread
+                    {
+                        RackEngine& e;
+                        std::atomic<int> blocks { 0 }, silent { 0 };
+                        explicit Audio (RackEngine& en) : juce::Thread ("isolateall audio"), e (en) {}
+                        void run() override
+                        {
+                            juce::AudioBuffer<float> in (16, 128), out (16, 128);
+                            double phase = 0.0;
+                            while (! threadShouldExit())
+                            {
+                                for (int i = 0; i < 128; ++i)
+                                {
+                                    const float v = 0.5f * (float) std::sin (phase);
+                                    phase += 0.05;
+                                    for (int c = 0; c < 16; ++c) in.setSample (c, i, v);
+                                }
+                                e.previewProcess (in, out);
+                                const int n = ++blocks;
+                                if (n > 20 && out.getMagnitude (0, 128) < 1.0e-4f)
+                                    ++silent;
+                                wait (3);
+                            }
+                        }
+                    };
+                    static std::unique_ptr<Audio> audio;
+                    audio = std::make_unique<Audio> (e);
+                    audio->startThread();
+
+                    juce::Timer::callAfterDelay (500, [&m, p]
+                    {
+                        std::cerr << "ISOALL crashing a plugin at block " << audio->blocks.load() << std::endl;
+                        m.engine.crashIsolatedSlot (0, 1);
+                    });
+                    juce::Timer::callAfterDelay (5000, [&m]
+                    {
+                        auto* p = dynamic_cast<IsolatedPlugin*> (m.engine.getPlugin (0, 1));
+                        const int blocks = audio->blocks.load(), silent = audio->silent.load();
+                        audio->stopThread (2000);
+                        std::cerr << "ISOALL after the crash: app alive 1, plugin restarts " << (p != nullptr ? p->getRestartCount() : -1)
+                                  << " (expect 1), passed through " << (p != nullptr ? p->getBlocksMissed() : -1)
+                                  << " blocks; audio blocks " << blocks << ", silent " << silent
+                                  << ", audio kept flowing " << (blocks > 100 && silent * 10 < blocks) << " (expect 1)" << std::endl;
+                    });
+                });
+            });
+
         if (open == "isolate")
             juce::Timer::callAfterDelay (800, [&m]
             {

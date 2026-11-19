@@ -1326,6 +1326,27 @@ bool RackEngine::setSlotIsolated (int rack, int slot, bool isolated, juce::Strin
     return replacePlugin (rack, slot, getSlotDescription (rack, slot), error, isolated ? 1 : 0);
 }
 
+bool RackEngine::setIsolateAll (bool on, juce::String& error)
+{
+    isolateAll = on;
+    showEdited = true;
+    error.clear();
+    if (! on)
+        return true;
+
+    juce::StringArray failures;
+    for (int r = 0; r < getNumRacks(); ++r)
+        for (int s = 0; s < getNumSlots (r); ++s)
+        {
+            juce::String err;
+            if (! setSlotIsolated (r, s, true, err))
+                failures.add (getSlotDescription (r, s).name + ": " + err);
+        }
+
+    error = failures.joinIntoString ("; ");
+    return failures.isEmpty();
+}
+
 void RackEngine::crashIsolatedSlot (int rack, int slot)
 {
     if (auto* p = dynamic_cast<IsolatedPlugin*> (getPlugin (rack, slot)))
@@ -1342,7 +1363,7 @@ bool RackEngine::replacePlugin (int index, int slot, const juce::PluginDescripti
         return false;
     }
 
-    const bool isolated = isolate < 0 ? isSlotIsolated (index, slot) : isolate > 0;
+    const bool isolated = isolate < 0 ? (isolateAll || isSlotIsolated (index, slot)) : isolate > 0;
     auto instance = createInstance (formatManager, desc, isolated, r->sampleRate, r->blockSize, error);
     if (instance == nullptr)
     {
@@ -1428,7 +1449,7 @@ bool RackEngine::addPlugin (int index, const juce::PluginDescription& desc, juce
         return false;
     }
 
-    auto instance = createInstance (formatManager, desc, isolated, r->sampleRate, r->blockSize, error);
+    auto instance = createInstance (formatManager, desc, isolated || isolateAll, r->sampleRate, r->blockSize, error);
 
     if (instance == nullptr)
     {
@@ -1764,6 +1785,8 @@ std::unique_ptr<juce::XmlElement> RackEngine::createSnapshot() const
     auto xml = std::make_unique<juce::XmlElement> ("LIVERACK");
     xml->setAttribute ("version", 3);
     xml->setAttribute ("bpm", bpm.load());
+    if (isolateAll)
+        xml->setAttribute ("isolateAll", true);
 
     writeScope (*xml->createNewChildElement ("SCOPE"), scope);
 
@@ -1897,6 +1920,8 @@ bool RackEngine::loadRig (const juce::XmlElement& xml, juce::String& error)
         error = "This isn't a LiveRack show file.";
         return false;
     }
+
+    isolateAll = xml.getBoolAttribute ("isolateAll", false); // before plugins load, so they honour it
 
     if (snapshotMatchesCurrentLayout (xml))
     {
@@ -2728,6 +2753,7 @@ void RackEngine::newShow()
     showExtras.clear();
     scope = {};
     bpm = 120.0;
+    isolateAll = false;
     showFile = juce::File();
     showEdited = false;
     sendChangeMessage();

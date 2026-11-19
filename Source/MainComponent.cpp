@@ -2384,6 +2384,27 @@ void MainComponent::startNewShow()
     consoleNote = "New show";
 }
 
+// One switch for the whole show: every plugin runs in its own helper process,
+// and so do the ones added later. Plugin editors are closed first (their
+// plugin is swapped for the helper's copy).
+void MainComponent::setIsolateAll (bool on)
+{
+    if (on == engine.isIsolateAll())
+        return;
+
+    if (on)
+    {
+        dock.releaseEditor();
+        closeAllEditors();
+    }
+
+    juce::String error;
+    const bool ok = engine.setIsolateAll (on, error);
+    consoleNote = on ? (ok ? "All plugins now run in their own process" : "Some plugins couldn't move: " + error)
+                     : "New plugins run inside LiveRack again";
+    refreshAll();
+}
+
 void MainComponent::afterShowLoaded()
 {
     engine.setShowEdited (false);
@@ -2421,6 +2442,8 @@ void MainComponent::showShowMenu()
     m.addSeparator();
     m.addItem (4, "New Show");
     m.addSeparator();
+    m.addItem (6, "Run all plugins in their own process (experimental)", true, engine.isIsolateAll());
+    m.addSeparator();
     m.addItem (-1, "LiveRack " + juce::String (JUCE_APPLICATION_VERSION_STRING), false);
 
     juce::Component::SafePointer<MainComponent> safe (this);
@@ -2432,6 +2455,7 @@ void MainComponent::showShowMenu()
         if (r == 3) safe->openShow();
         if (r == 4) safe->newShow();
         if (r == 5) AppSettings::set ("recentShows", {});
+        if (r == 6) safe->setIsolateAll (! safe->engine.isIsolateAll());
         if (r >= 100) safe->openRecentShow (r - 100);
     });
 }
@@ -3422,6 +3446,7 @@ void MainComponent::addLiveState (juce::DynamicObject& r)
         extra.add (ev);
     }
     r.setProperty ("rackInfo", extra);
+    r.setProperty ("isolateAll", engine.isIsolateAll());
 
     // What each latency group is aligned to (0 = no group)
     juce::Array<juce::var> groupMs;
@@ -3879,6 +3904,10 @@ bool MainComponent::handleServerCommand (const juce::String& cmd, const juce::va
                             : "Couldn't change " + name + ": " + error;
             refreshAll();
         }
+    }
+    else if (cmd == "isolateAll")
+    {
+        setIsolateAll (c.hasProperty ("on") ? (bool) c["on"] : ! engine.isIsolateAll());
     }
     else if (cmd == "server")
     {
