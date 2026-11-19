@@ -3,14 +3,13 @@
 Lasting choices and why, newest first. Add one when you decide something a
 future change might otherwise undo. Format: what, why, what it costs.
 
-## 2026-11-18: Support agents run in Paperclip; GitHub stays the record
-The reviewer, triage and nightly check run as Paperclip agents on the owner's
-MacBook (`docs/PAPERCLIP.md`); the head developer stays in its own session.
-They only comment and label, and only act on the owner's own PRs and issues.
-**Why:** the owner can see and budget the agents in one place, and reviews
-happen without the head developer starting them. **Cost:** agents only run
-while the MacBook is awake; they share the owner's Claude usage; two places
-show tasks (Paperclip's is just a run log).
+## 2026-11-19: A Paperclip team, with the head developer outside it
+COO, two engineers, Head of Design and Head of Review run in Paperclip on the
+owner's MacBook (`docs/PAPERCLIP.md`), built on The Agency's personas plus
+LiveRack's rules. The head developer assigns work and alone merges. **Why:** the
+single Paperclip "Head Developer" agent worked unprompted on parked work and
+merged without review; the owner wants more done in parallel. **Cost:** agents
+share the owner's Claude usage and only run while the MacBook is awake.
 
 ## 2026-11-18: Colours and text sizes come from Theme.h
 Screens take colours from `Theme::` and text sizes from `Theme::fontCaption`

@@ -11,15 +11,17 @@ computer) and the iPad / web remote. AGPLv3. See `docs/ARCHITECTURE.md`.
 |---|---|---|
 | Product owner and tester | The repo owner | Priorities, what "done" means, approves releases, tests on the rig (Windows server, MacBook, iPad, Yamaha CL5, X32) |
 | Head developer | Claude, the main session | Plans, writes the code, runs the process below, reports to the owner |
-| Reviewer | `.claude/agents/reviewer.md`, run by Paperclip | Reads every pull request fresh before it merges; posts its review as a PR comment |
+| COO | Paperclip | Keeps the queue moving: tasks, assignments, review routing, daily status |
+| Engineers 1 and 2 | Paperclip | Implement assigned issues, one PR each |
+| Head of Design | Paperclip | UI specs and design review |
+| Head of Review | Paperclip, using `.claude/agents/reviewer.md` | Reviews every pull request before it merges; posts the report on the PR |
 | QA / tester | `.claude/agents/qa-tester.md` | Adds and runs automated tests for a change |
 | Release | `.claude/skills/release/` | Version, changelog, beta, the build on the rig, stable |
-| Triage | `.claude/skills/triage/`, also run by Paperclip | Turns the owner's notes into issues; Paperclip labels issues the owner opens on GitHub |
-| Nightly | Paperclip | Opens an issue when the build of `main` is red |
+| Triage | `.claude/skills/triage/` | Turns the owner's notes into issues |
 
-The Paperclip agents run on the owner's MacBook (`docs/PAPERCLIP.md`). They
-only comment and label on GitHub; they never push, merge or approve. GitHub
-issues and PRs are the record; Paperclip's own tasks are just their run log.
+The Paperclip team runs on the owner's MacBook in the LiveRack project
+(`docs/PAPERCLIP.md`). The head developer assigns work there (the `ready` label
+on an issue) and is the only one who merges. GitHub issues and PRs are the record.
 
 The owner is not a C++ developer and reads reports, not code. Write to them in
 plain language: what changed for them, what to test, what you need from them.
@@ -45,10 +47,11 @@ plain language: what changed for them, what to test, what you need from them.
    in `tests/run.py`. A bug fix gets a test that would have caught it.
 4. **Pull request.** Fill in the template. CI builds Mac and Windows and runs
    the tests ("Tests (Linux)"); it must be green.
-5. **Review.** Wait for the "Paperclip reviewer for <commit>" comment on the
-   PR's latest commit, or run the reviewer agent yourself if it hasn't come
-   (the MacBook may be asleep). Fix what it confirms; note anything you
-   decline and why in the PR. A fix pushes a new commit, which gets a new review.
+5. **Review.** Every PR gets a "Head of Review for <commit>" comment on its
+   latest commit (Paperclip), or the head developer runs the reviewer agent
+   itself if the team can't (the MacBook asleep). Confirmed findings get fixed;
+   anything declined is noted on the PR. The head developer reads the diff
+   and the review before merging.
 6. **Merge** (squash). Add a line under **Unreleased** in `CHANGELOG.md` in the PR itself.
 7. **Release** when the owner wants a build or a milestone is done: Release skill.
    A version bump on `main` makes a **beta**; the owner tests it on the rig;
