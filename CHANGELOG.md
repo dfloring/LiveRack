@@ -9,6 +9,7 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 
 ## Unreleased
 
+- How LiveRack is built changed (nothing in the app): every night main is built from scratch and the automated tests run; if it fails, a "Nightly check failed" issue is opened (#3).
 - Fixed: with Run all plugins in their own process on, a plugin that couldn't move to a helper disappeared when the show was reopened or LiveRack restarted after a crash. It now comes back where it was (#32).
 - New: show menu > Run all plugins in their own process (experimental), one step to isolate every plugin in the show, including ones added later, so a crashing plugin no longer takes LiveRack down. Saved in the show; off unless you turn it on (the default is unchanged until isolated plugins' latency, window and MIDI gaps are dealt with) (#25).
 - Tests (nothing in the app): the reconfigure test now also covers removing a device and re-preparing racks, the path the audio-wait fix (#26) changed (#34).

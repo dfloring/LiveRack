@@ -1,0 +1,93 @@
+name: Nightly
+
+# Every night, builds main from scratch and runs the automated tests (the same
+# steps as "Tests (Linux)" in build.yml), so a problem shows up before a build
+# reaches the rig. If it fails, the run goes red (GitHub emails the repo owner)
+# and a "Nightly check failed" issue is opened (or commented on, if one is
+# already open). It does not build the Mac or Windows apps and never releases.
+on:
+  schedule:
+    - cron: '17 6 * * *'   # 06:17 UTC; scheduled runs always use the default branch (main)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  nightly-tests:
+    name: Nightly tests (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Linux packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build xvfb \
+            libasound2-dev libfreetype-dev libfontconfig1-dev libx11-dev libxext-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxcomposite-dev libxrender-dev libgl1-mesa-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache JUCE
+        uses: actions/cache@v4
+        with:
+          path: juce
+          key: juce-src-8.0.4
+
+      - name: Get JUCE
+        run: test -d juce/modules || git clone --depth 1 -b 8.0.4 https://github.com/juce-framework/JUCE.git juce
+
+      - name: Build the test build of LiveRack
+        run: |
+          cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR=$PWD/juce -DLIVERACK_PREVIEW=ON
+          cmake --build build-linux
+
+      - name: Build the test plugins
+        run: |
+          cmake -S tests/demo-plugins -B build-plugins -G Ninja -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR=$PWD/juce
+          cmake --build build-plugins --target DemoCompressor_VST3 DSPModulePluginDemo_VST3 GainPlugin_VST3 NoiseGatePlugin_VST3
+
+      - name: Browser for the iPad page test
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Run the tests
+        run: python3 tests/run.py --app build-linux/LiveRack_artefacts/Release/LiveRack --plugins build-plugins
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-test-logs
+          path: tests/out/
+
+  report-failure:
+    name: Report a failed night
+    needs: nightly-tests
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open or update the "Nightly check failed" issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          TITLE="Nightly check failed"
+          BODY="The nightly build and test run of main failed: $RUN_URL (test logs are attached to the run)."
+          N=$(gh issue list --repo "${{ github.repository }}" --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number')
+          if [ -n "$N" ]; then
+            gh issue comment "$N" --repo "${{ github.repository }}" --body "Failed again: $RUN_URL"
+          else
+            gh issue create --repo "${{ github.repository }}" --title "$TITLE" --body "$BODY"
+          fi
