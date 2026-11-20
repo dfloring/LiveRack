@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/banner.png" alt="LiveRack: live audio plugin host for Mac and Windows" width="100%"></p>
 
-**LiveRack** hosts racks of VST3 and Audio Unit plugins for live mixing, in the spirit of Waves SuperRack and Fourier transform.engine. It runs on a Mac with Apple silicon, talks to your console over Dante or the Waves SoundGrid Driver, follows scene recalls and channel selection from Yamaha CL/QL/DM7 (by CUE) and Behringer X32 consoles, and can be driven from a Stream Deck through Bitfocus Companion.
+**LiveRack** hosts racks of VST3 and Audio Unit plugins for live mixing, in the spirit of Waves SuperRack and Fourier transform.engine. It runs on a Mac (Apple silicon) or a Windows PC, talks to your console over Dante or the Waves SoundGrid Driver (ASIO on Windows), follows scene recalls and channel selection from Yamaha CL/QL/DM7 (by CUE) and Behringer X32 consoles, and can be driven from a Stream Deck through Bitfocus Companion.
 
 <p align="center"><img src="docs/screenshot-main.png" alt="LiveRack main window: Channels, every rack's strip" width="100%"></p>
 
