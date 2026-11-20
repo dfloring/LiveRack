@@ -264,6 +264,15 @@ bool PluginViewCapture::isSupported()
     return true;
 }
 
+bool PluginViewCapture::canCaptureCovered()
+{
+   #if JUCE_WINDOWS
+    return false;
+   #else
+    return true;
+   #endif
+}
+
 std::shared_ptr<PluginViewCapture> PluginViewCapture::create (juce::DocumentWindow& window, Options options, juce::String& error)
 {
    #if JUCE_WINDOWS

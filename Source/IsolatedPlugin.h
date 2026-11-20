@@ -47,6 +47,10 @@ public:
     // Called on the message thread: "<plugin> crashed and was restarted" etc.
     static std::function<void (const juce::String&)> onEvent;
 
+    // Message thread: is this key one of LiveRack's own shortcuts? The panel
+    // showing the plugin's window lets those through instead of typing them
+    static std::function<bool (const juce::KeyPress&)> isAppShortcut;
+
     void requestLayout (int ins, int outs);
     void crashHelper();                 // test: makes the helper crash
     bool isRunning() const              { return alive.load(); }
@@ -59,7 +63,7 @@ public:
     void showHelperWindow (bool shouldShow);
 
     // The plugin's own window on the web remote (message thread)
-    std::shared_ptr<PluginViewCapture> openRemoteView (float scale, float quality, juce::String& error);
+    std::shared_ptr<PluginViewCapture> openRemoteView (float scale, float quality, juce::String& error, bool raiseWindow = true);
 
     //==========================================================================
     const juce::String getName() const override                    { return description.name; }

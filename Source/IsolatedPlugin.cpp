@@ -15,6 +15,7 @@
 #endif
 
 std::function<void (const juce::String&)> IsolatedPlugin::onEvent;
+std::function<bool (const juce::KeyPress&)> IsolatedPlugin::isAppShortcut;
 
 //==============================================================================
 // The audio hand-off area, mapped by both processes
@@ -87,9 +88,12 @@ namespace
         {
             if (count >= maxEvents)
                 break;
+            if (meta.numBytes > (int) Shared::maxMidiEventBytes)
+                continue; // a cut-short SysEx would be worse than none
+
             auto& ev = dest[count];
             ev.samplePosition = meta.samplePosition;
-            ev.size = (juce::uint8) juce::jmin ((int) Shared::maxMidiEventBytes, meta.numBytes);
+            ev.size = (juce::uint8) meta.numBytes;
             std::memcpy (ev.data, meta.data, (size_t) ev.size);
             ++count;
         }
@@ -102,7 +106,7 @@ namespace
         {
             const auto& ev = src[i];
             if (ev.size > 0)
-                dest.addEvent (juce::MidiMessage (ev.data, (int) ev.size), (int) ev.samplePosition);
+                dest.addEvent (ev.data, (int) ev.size, (int) ev.samplePosition);
         }
     }
 }
@@ -318,6 +322,10 @@ public:
         if (mods.isCommandDown() || key == juce::KeyPress::escapeKey)
             return false; // LiveRack's own shortcuts
 
+        // Keys the user set for LiveRack (tap tempo, User Keys) win over the plugin
+        if (isAppShortcut != nullptr && isAppShortcut (key))
+            return false;
+
         auto* o = new juce::DynamicObject();
         o->setProperty ("mods", modsOf (mods));
         const int code = key.getKeyCode();
@@ -353,7 +361,8 @@ public:
 private:
     void openCapture()
     {
-        if (! PluginViewCapture::isSupported())
+        failedToStart = false;
+        if (! PluginViewCapture::isSupported() || ! PluginViewCapture::canCaptureCovered())
         {
             message = "This plugin's window can't be shown in the panel on this system. "
                       "Use Show Plugin Window below to open it on its own.";
@@ -361,7 +370,9 @@ private:
         }
 
         juce::String error;
-        capture = owner.openRemoteView (captureScale, 0.85f, error);
+        restartsAtOpen = owner.getRestartCount();
+        capture = owner.openRemoteView (captureScale, 0.85f, error, false);
+        failedToStart = capture == nullptr;
         message = capture == nullptr ? error : juce::String();
         lastTryMs = juce::Time::getMillisecondCounter();
     }
@@ -370,10 +381,13 @@ private:
     {
         if (capture == nullptr)
         {
-            // The plugin may have been restarting when the view was opened, or
-            // the view may have ended with it; keep trying while it's running
+            // Try again only if the view never started (the plugin was
+            // restarting) or the plugin's helper has restarted since. After an
+            // error or a window the user closed, leave it: every try builds the
+            // plugin's window in the helper again
             const auto now = juce::Time::getMillisecondCounter();
-            if (owner.isRunning() && now - lastTryMs > 1000)
+            const bool helperRestarted = owner.getRestartCount() != restartsAtOpen;
+            if (owner.isRunning() && (failedToStart || helperRestarted) && now - lastTryMs > 1000)
                 openCapture();
             repaint();
             return;
@@ -468,6 +482,8 @@ private:
     juce::var pendingMove;
     float captureScale = 1.0f;
     juce::uint32 lastTryMs = 0;
+    int restartsAtOpen = 0;
+    bool failedToStart = false;
     bool sizedOnce = false;
 };
 
@@ -546,7 +562,7 @@ std::vector<std::shared_ptr<IsolatedPlugin::RemoteView>> IsolatedPlugin::liveVie
     return list;
 }
 
-std::shared_ptr<PluginViewCapture> IsolatedPlugin::openRemoteView (float scale, float quality, juce::String& error)
+std::shared_ptr<PluginViewCapture> IsolatedPlugin::openRemoteView (float scale, float quality, juce::String& error, bool raiseWindow)
 {
     if (gaveUp)
     {
@@ -581,6 +597,7 @@ std::shared_ptr<PluginViewCapture> IsolatedPlugin::openRemoteView (float scale, 
         juce::MemoryOutputStream o;
         o.writeFloat (scale);
         o.writeFloat (quality);
+        o.writeBool (raiseWindow);
         send (msgViewOpen, o.getMemoryBlock());
     }
 
@@ -1527,7 +1544,8 @@ private:
             {
                 const float scale = in.readFloat();
                 const float quality = in.readFloat();
-                openView (scale, quality);
+                const bool raise = in.readBool();
+                openView (scale, quality, raise);
                 break;
             }
 
@@ -1788,7 +1806,7 @@ private:
 
     //==========================================================================
     // The plugin's window on the web remote: captured here, where the window is
-    void openView (float scale, float quality)
+    void openView (float scale, float quality, bool raiseWindow)
     {
         if (view != nullptr)
             return; // already showing: another device joins it
@@ -1806,6 +1824,7 @@ private:
         PluginViewCapture::Options options;
         options.scale = scale;
         options.quality = quality;
+        options.raiseWindow = raiseWindow;
         juce::String error;
 
         if (auto capture = PluginViewCapture::create (*window, options, error))
@@ -1895,6 +1914,8 @@ private:
                 const juce::ScopedLock sl (processLock);
                 if (plugin != nullptr && prepared)
                     processOne();
+                else
+                    shared->midiOutCount = 0; // or the host replays the last block's MIDI
             }
 
             handled = wanted;

@@ -9,6 +9,7 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 
 ## Unreleased
 
+- New: an isolated plugin's panel shows a live picture of its window instead of a button, on Mac (on Windows it keeps the Show Plugin Window button). The real window stays out of the way, and the panel doesn't keep reopening it if it can't be shown or you close it. Keys set for LiveRack (tap tempo, User Keys) still work with the picture focused (#8).
 - New: show menu > Run all plugins in their own process (experimental), one step to isolate every plugin in the show, including ones added later, so a crashing plugin no longer takes LiveRack down. Saved in the show; off unless you turn it on (the default is unchanged until isolated plugins' latency, window and MIDI gaps are dealt with) (#25).
 - Fixed: the audio no longer resizes a rack's buffer while running, which could allocate memory on the audio thread and cause a click if the device sent a larger block than expected (#27).
 - Fixed: changing a rack's device, buffer size or format no longer makes the audio wait while the rack's plugins are re-prepared, which could cause clicks and dropouts mid-show (#26).
