@@ -920,7 +920,7 @@ ClientComponent::ClientView::ClientView (ClientComponent& o, const juce::String&
     midi = std::make_unique<MidiControl> (live, *this, "client-midi-control.xml", false);
     {
         juce::Component::SafePointer<ClientView> safe (this);
-        midi->onChanged = [safe] { if (safe != nullptr) { safe->statusBar->repaint(); if (safe->devicesPanel != nullptr) safe->devicesPanel->refresh(); } };
+        midi->onChanged = [safe] { if (safe != nullptr) { safe->statusBar->repaint(); if (safe->devicesPanel != nullptr) safe->devicesPanel->refresh(); if (safe->snapshotsPanel != nullptr) safe->snapshotsPanel->refresh(); } };
     }
     {
         juce::StringArray saved;
@@ -1478,6 +1478,24 @@ void ClientComponent::ClientView::setView (View v)
                     if (safe == nullptr || safe->live.getNumConsoles() == 0) return juce::String();
                     const auto c = safe->live.getConsole (0);
                     return c.currentScene >= 0 ? juce::String (c.currentScene) : juce::String();
+                },
+                [safe] (int n)
+                {
+                    if (safe == nullptr || safe->midi == nullptr) return;
+                    Action a;
+                    a.type = Action::recallScene;
+                    a.number = n;
+                    safe->midi->learnAction (a);
+                },
+                [safe] (int n) -> juce::String
+                {
+                    // Only this computer's learned controls: the Client's MIDI isn't part of the show
+                    if (safe == nullptr || safe->midi == nullptr) return {};
+                    juce::StringArray parts;
+                    for (auto& mm : safe->midi->getMappings())
+                        if (! mm.isParameter && mm.action.type == Action::recallScene && mm.action.number == n)
+                            parts.add (mm.describeControl());
+                    return parts.joinIntoString (", ");
                 } };
             snapshotsPanel = new SnapshotsPanel (std::move (h));
             tool.reset (snapshotsPanel);
