@@ -47,6 +47,10 @@ public:
     // Called on the message thread: "<plugin> crashed and was restarted" etc.
     static std::function<void (const juce::String&)> onEvent;
 
+    // Called on the message thread when this plugin has failed too often and is
+    // given up on (the rack uses it to switch the slot to bypass)
+    std::function<void()> onStopped;
+
     // Message thread: is this key one of LiveRack's own shortcuts? The panel
     // showing the plugin's window lets those through instead of typing them
     static std::function<bool (const juce::KeyPress&)> isAppShortcut;

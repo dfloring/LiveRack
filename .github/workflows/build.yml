@@ -275,5 +275,8 @@ jobs:
           name: LiveRack ${{ steps.v.outputs.version }} (beta)
           prerelease: true
           make_latest: false
-          files: dist/*
+          # Only the downloads: the test logs and screenshots in dist/ stay on the CI run
+          files: |
+            dist/LiveRack-*.zip
+            dist/*.tgz
           body_path: notes.md

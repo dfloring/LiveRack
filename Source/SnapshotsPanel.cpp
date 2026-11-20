@@ -87,8 +87,8 @@ public:
             if (owner.host.consoleSceneFor != nullptr)
                 if (auto c = owner.host.consoleSceneFor (s.number); c.isNotEmpty())
                     triggers.add (c);
-            if (s.midi.isNotEmpty())
-                triggers.add (s.midi);
+            if (auto m = owner.midiTriggers (s.number, s.midi); m.isNotEmpty())
+                triggers.add (m);
 
             auto text = r;
             auto top = text.removeFromTop (text.getHeight() / 2 + (triggers.isEmpty() ? text.getHeight() / 2 : 2));
@@ -566,6 +566,16 @@ SnapshotsPanel::SnapshotsPanel (Host h) : host (std::move (h)), engine (host.eng
     consoleSceneButton.onClick = [this] { linkConsoleScene(); };
     addAndMakeVisible (consoleSceneButton);
 
+    midiLearnButton.setButtonText (juce::String::fromUTF8 ("MIDI Learn" "\xe2\x80\xa6"));
+    midiLearnButton.setTooltip ("Press, then hit a note or button on your controller: it recalls this snapshot (no User Key needed)");
+    midiLearnButton.onClick = [this]
+    {
+        if (host.midiLearn == nullptr || ! hasSelection()) return;
+        host.midiLearn (selected);
+        if (host.note != nullptr) host.note ("MIDI Learn: hit a note on your controller for snapshot " + juce::String (selected));
+    };
+    addAndMakeVisible (midiLearnButton);
+
     // What it recalls
     for (auto& def : pillDefs)
     {
@@ -673,6 +683,17 @@ void SnapshotsPanel::updateDifferences()
     diffs->update();
 }
 
+juce::String SnapshotsPanel::midiTriggers (int number, const juce::String& fromShow) const
+{
+    juce::StringArray parts;
+    if (fromShow.isNotEmpty())
+        parts.add (fromShow);
+    if (host.thisComputerMidi != nullptr)
+        if (auto m = host.thisComputerMidi (number); m.isNotEmpty())
+            parts.add (m);
+    return parts.joinIntoString (", ");
+}
+
 void SnapshotsPanel::updateHeader()
 {
     const bool has = hasSelection();
@@ -681,6 +702,7 @@ void SnapshotsPanel::updateHeader()
     nameEdit.setEnabled (has);
     for (auto* b : { &recallButton, &storeOverButton, &duplicateButton, &renumberButton, &deleteButton, &consoleSceneButton })
         b->setEnabled (has);
+    midiLearnButton.setEnabled (has && host.midiLearn != nullptr);
 
     const auto sc = engine.getScopeFor (selected);
     int i = 0;
@@ -710,8 +732,9 @@ void SnapshotsPanel::updateHeader()
             parts.add ("Stored " + stored.toString (true, true, false, true));
         parts.add ("Recalls " + juce::String (in) + " of " + juce::String (total) + " plugins");
         for (auto& sn : engine.getSnapshots())
-            if (sn.number == selected && sn.midi.isNotEmpty())
-                parts.add ("MIDI: " + sn.midi);
+            if (sn.number == selected)
+                if (auto m = midiTriggers (selected, sn.midi); m.isNotEmpty())
+                    parts.add ("MIDI: " + m);
         parts.add ("OSC: /liverack/scene/recall " + juce::String (selected));
     }
     else
@@ -992,7 +1015,7 @@ void SnapshotsPanel::paint (juce::Graphics& g)
         }
         g.setColour (Theme::textDim);
         g.setFont (juce::FontOptions (Theme::fontSmall));
-        g.drawText (infoLine, headerPanel.reduced (16, 12).removeFromBottom (18).withTrimmedRight (consoleSceneButton.getWidth() + 10),
+        g.drawText (infoLine, headerPanel.reduced (16, 12).removeFromBottom (18).withTrimmedRight (consoleSceneButton.getWidth() + midiLearnButton.getWidth() + 20),
                     juce::Justification::centredLeft, true);
     }
 
@@ -1093,7 +1116,10 @@ void SnapshotsPanel::resized()
         top.removeFromLeft (80);
         auto buttons = top.removeFromRight (juce::jmin (top.getWidth() - 200, 470));
         nameEdit.setBounds (top.withTrimmedRight (12).withSizeKeepingCentre (top.getWidth() - 12, 36));
-        consoleSceneButton.setBounds (h.removeFromBottom (24).removeFromRight (140));
+        auto lower = h.removeFromBottom (24);
+        consoleSceneButton.setBounds (lower.removeFromRight (140));
+        lower.removeFromRight (10);
+        midiLearnButton.setBounds (lower.removeFromRight (120));
         const int bw = (buttons.getWidth() - 4 * 6) / 5;
         for (auto* b : { &recallButton, &storeOverButton, &duplicateButton, &renumberButton, &deleteButton })
         {

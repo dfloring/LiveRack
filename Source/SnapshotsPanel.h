@@ -20,6 +20,8 @@ public:
         std::function<juce::String (int)> consoleSceneFor;   // "FOH CL5 scene 3", or empty
         std::function<void (const juce::String&)> note;      // a line for the status bar
         std::function<juce::String()> lastConsoleScene;      // as the console last reported it ("4.10")
+        std::function<void (int)> midiLearn;                 // MIDI Learn: the next control on this computer recalls this snapshot
+        std::function<juce::String (int)> thisComputerMidi;  // that control, when it isn't part of the show (the Client's own MIDI)
     };
 
     explicit SnapshotsPanel (Host);
@@ -71,6 +73,8 @@ private:
     juce::String infoLine;
     juce::TextButton consoleSceneButton { "Console scene" };
     void linkConsoleScene();
+    juce::TextButton midiLearnButton { "MIDI Learn" };
+    juce::String midiTriggers (int number, const juce::String& fromShow) const;
 
     // What it recalls
     juce::OwnedArray<juce::TextButton> pills;

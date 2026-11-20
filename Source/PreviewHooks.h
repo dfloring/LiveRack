@@ -964,6 +964,26 @@ struct PreviewHooks
                     m.midi->setSnapshotLink (link);
                     m.recallScene (2);
                 }
+                // MIDI Learn on the Snapshots screen: a note recalls snapshot 10, no User Key
+                {
+                    m.scopeEditor->select (10);
+                    juce::TextButton* learn = nullptr;
+                    for (auto* c : m.scopeEditor->getChildren())
+                        if (auto* b = dynamic_cast<juce::TextButton*> (c))
+                            if (b->getButtonText().startsWith ("MIDI Learn"))
+                                learn = b;
+                    std::cerr << "SNAP learn button " << (learn != nullptr) << " enabled " << (learn != nullptr && learn->isEnabled()) << std::endl;
+                    if (learn != nullptr)
+                        learn->onClick();   // the click handler itself: a posted click can be late while the app is busy starting
+                    juce::Timer::callAfterDelay (200, [&m]
+                    {
+                        std::cerr << "SNAP learning " << m.midi->isLearning() << " '" << m.midi->getLearnText() << "'" << std::endl;
+                        m.midi->handle ({ "Test pad", juce::MidiMessage::noteOn (1, 72, (juce::uint8) 100) });
+                        m.recallScene (2);
+                        m.midi->handle ({ "Test pad", juce::MidiMessage::noteOn (1, 72, (juce::uint8) 100) });
+                        std::cerr << "SNAP note 72 -> current " << m.currentScene << " (expect 10) trigger '" << m.midi->describeTriggerFor (10) << "'" << std::endl;
+                    });
+                }
                 if (open == "snapshotspick")
                     juce::Timer::callAfterDelay (300, [&m]
                     {
@@ -1289,6 +1309,46 @@ struct PreviewHooks
                                   << ", audio kept flowing " << (blocks > 100 && silent * 10 < blocks) << " (expect 1)" << std::endl;
                     });
                 });
+            });
+
+        if (open == "isowatchdog")
+            juce::Timer::callAfterDelay (800, [&m]
+            {
+                // A helper that keeps crashing is given up on: the slot ends up bypassed
+                // (and says so); a single crash leaves it switched on.
+                auto& e = m.engine;
+                juce::String err;
+                const bool ok = e.setSlotIsolated (0, 1, true, err);
+                std::cerr << "ISOWATCH isolated " << ok << " bypassed " << e.isSlotBypassed (0, 1) << " (expect 1, 0) '" << err << "'" << std::endl;
+
+                struct Crasher : juce::Timer
+                {
+                    MainComponent& m;
+                    int crashes = 0, ticks = 0;
+                    explicit Crasher (MainComponent& mc) : m (mc) {}
+                    void timerCallback() override
+                    {
+                        auto* p = dynamic_cast<IsolatedPlugin*> (m.engine.getPlugin (0, 1));
+                        ++ticks;
+
+                        if (m.engine.isSlotBypassed (0, 1) || ticks > 90)
+                        {
+                            std::cerr << "ISOWATCH after " << crashes << " crashes: bypassed " << m.engine.isSlotBypassed (0, 1)
+                                      << " status '" << (p != nullptr ? p->getStatusText() : juce::String()) << "' (expect bypassed 1)" << std::endl;
+                            delete this;
+                            return;
+                        }
+
+                        if (p != nullptr && p->isRunning() && p->getRestartCount() == crashes)
+                        {
+                            if (crashes == 1)
+                                std::cerr << "ISOWATCH after one crash: bypassed " << m.engine.isSlotBypassed (0, 1) << " (expect 0)" << std::endl;
+                            ++crashes;
+                            p->crashHelper();
+                        }
+                    }
+                };
+                (new Crasher (m))->startTimer (300);
             });
 
         if (open == "isolate")
