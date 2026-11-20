@@ -2,6 +2,7 @@
 #include "Theme.h"
 #include "PluginViewCapture.h"
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <cstring>
 
 #if JUCE_WINDOWS
  #ifndef NOMINMAX
@@ -14,18 +15,32 @@
 #endif
 
 std::function<void (const juce::String&)> IsolatedPlugin::onEvent;
+std::function<bool (const juce::KeyPress&)> IsolatedPlugin::isAppShortcut;
 
 //==============================================================================
 // The audio hand-off area, mapped by both processes
 struct IsolatedPluginShared
 {
     static constexpr int maxChannels = 8, maxBlock = 8192;
+    static constexpr int maxMidiEvents = 512, maxMidiEventBytes = 16;
+
+    struct MidiEvent
+    {
+        juce::int32 samplePosition = 0;
+        juce::uint8 size = 0;
+        juce::uint8 data[maxMidiEventBytes];
+    };
 
     std::atomic<juce::uint32> request { 0 }, done { 0 }; // block counters
     juce::int32 numSamples = 0, numChannels = 0, bypassed = 0, playing = 0;
     double bpm = 120.0, ppq = 0.0;
     juce::int64 timeSamples = 0;
     float audio[maxChannels][maxBlock];
+
+    // Midi in and out for the block just handed off, same way as the audio
+    juce::int32 midiInCount = 0, midiOutCount = 0;
+    MidiEvent midiIn[maxMidiEvents];
+    MidiEvent midiOut[maxMidiEvents];
 };
 
 using Shared = IsolatedPluginShared;
@@ -64,6 +79,36 @@ namespace
     }
 
     juce::AudioChannelSet setFor (int n) { return n == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo(); }
+
+    // Midi across the shared block, the same way the audio crosses it
+    void midiToShared (const juce::MidiBuffer& buffer, Shared::MidiEvent* dest, juce::int32& count, int maxEvents)
+    {
+        count = 0;
+        for (const auto meta : buffer)
+        {
+            if (count >= maxEvents)
+                break;
+            if (meta.numBytes > (int) Shared::maxMidiEventBytes)
+                continue; // a cut-short SysEx would be worse than none
+
+            auto& ev = dest[count];
+            ev.samplePosition = meta.samplePosition;
+            ev.size = (juce::uint8) meta.numBytes;
+            std::memcpy (ev.data, meta.data, (size_t) ev.size);
+            ++count;
+        }
+    }
+
+    void sharedToMidi (const Shared::MidiEvent* src, juce::int32 count, juce::MidiBuffer& dest)
+    {
+        dest.clear();
+        for (juce::int32 i = 0; i < count; ++i)
+        {
+            const auto& ev = src[i];
+            if (ev.size > 0)
+                dest.addEvent (ev.data, (int) ev.size, (int) ev.samplePosition);
+        }
+    }
 }
 
 void Isolation::requestLayout (juce::AudioPluginInstance& plugin, int ins, int outs)
@@ -157,43 +202,289 @@ private:
     float textValue = -1.0f;
 };
 
-// Shown in the LiveRack panel in place of the plugin's own window
+// Shown in the LiveRack panel in place of the plugin's own window: a live
+// picture of it, the same way the web remote and LiveRack Client show a
+// plugin's window (captured in the helper, played back here).
 class IsolatedPlugin::Placeholder final : public juce::AudioProcessorEditor,
                                           private juce::Timer
 {
 public:
     explicit Placeholder (IsolatedPlugin& o) : juce::AudioProcessorEditor (o), owner (o)
     {
+        if (auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+            captureScale = (float) juce::jlimit (1.0, 2.0, d->scale);
+
+        setResizable (true, false);
+        setWantsKeyboardFocus (true);
+        setMouseClickGrabsKeyboardFocus (true);
         addAndMakeVisible (button);
         button.onClick = [this] { owner.showHelperWindow (true); };
-        setSize (480, 150);
-        owner.showHelperWindow (true);
-        startTimerHz (4);
+        setSize (560, 360);
+        openCapture();
+        startTimerHz (30);
     }
 
-    ~Placeholder() override { owner.showHelperWindow (false); }
+    ~Placeholder() override
+    {
+        if (capture != nullptr)
+            capture->stop();
+        owner.showHelperWindow (false);
+    }
 
     void paint (juce::Graphics& g) override
     {
         g.fillAll (Theme::panel);
-        g.setColour (juce::Colours::white);
-        g.setFont (juce::FontOptions (Theme::fontLarge, juce::Font::bold));
-        g.drawText (owner.getName(), 16, 12, getWidth() - 32, 22, juce::Justification::centredLeft);
-        g.setColour (juce::Colours::lightgrey);
-        g.setFont (juce::FontOptions (Theme::fontBody));
-        g.drawFittedText ("This plugin runs in its own process, so its window is separate from LiveRack.",
-                          16, 38, getWidth() - 32, 36, juce::Justification::topLeft, 2);
+
+        const auto area = pictureArea();
+        if (picture.isValid() && ! area.isEmpty())
+        {
+            g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+            g.drawImage (picture, area);
+        }
+
+        if (message.isNotEmpty())
+        {
+            auto box = getLocalBounds().withTrimmedBottom (36).withSizeKeepingCentre (juce::jmin (getWidth() - 20, 460), 86).toFloat();
+            g.setColour (Theme::raised.withAlpha (0.95f));
+            g.fillRoundedRectangle (box, 8.0f);
+            g.setColour (juce::Colours::lightgrey);
+            g.setFont (juce::FontOptions (Theme::fontMedium));
+            g.drawFittedText (message, box.reduced (14.0f, 10.0f).toNearestInt(), juce::Justification::centred, 3);
+        }
+
         g.setColour (owner.isRunning() ? juce::Colour (0xff6fcf97) : juce::Colour (0xffeb5757));
-        g.drawText (owner.getStatusText(), 16, 76, getWidth() - 32, 20, juce::Justification::centredLeft);
+        g.setFont (juce::FontOptions (Theme::fontSmall));
+        g.drawText (owner.getStatusText(), 10, getHeight() - 24, getWidth() - 210, 20, juce::Justification::centredLeft);
     }
 
-    void resized() override { button.setBounds (16, getHeight() - 42, 190, 28); }
+    void resized() override { button.setBounds (getWidth() - 194, getHeight() - 32, 184, 24); }
+
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        lastMouse = e.getPosition();
+        if (capture != nullptr && pictureArea().contains (e.position))
+            pendingMove = pointerEvent ("move", e);
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        lastMouse = e.getPosition();
+        grabKeyboardFocus();
+        if (capture == nullptr)
+            return;
+        buttonDown = e.mods.isPopupMenu() ? "r" : "l";
+        auto ev = pointerEvent ("down", e);
+        ev.getDynamicObject()->setProperty ("b", buttonDown);
+        ev.getDynamicObject()->setProperty ("n", juce::jlimit (1, 3, e.getNumberOfClicks()));
+        pendingMove = juce::var();
+        capture->input (ev);
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        lastMouse = e.getPosition();
+        if (capture != nullptr)
+            pendingMove = pointerEvent ("move", e);
+    }
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        lastMouse = e.getPosition();
+        if (capture == nullptr)
+            return;
+        if (! pendingMove.isVoid())
+        {
+            capture->input (pendingMove);
+            pendingMove = juce::var();
+        }
+        auto ev = pointerEvent ("up", e);
+        ev.getDynamicObject()->setProperty ("b", buttonDown);
+        ev.getDynamicObject()->setProperty ("n", juce::jlimit (1, 3, e.getNumberOfClicks()));
+        capture->input (ev);
+    }
+
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
+    {
+        if (capture == nullptr)
+            return;
+        auto ev = pointerEvent ("wheel", e);
+        ev.getDynamicObject()->setProperty ("dx", wheel.deltaX * 200.0f);
+        ev.getDynamicObject()->setProperty ("dy", wheel.deltaY * 200.0f);
+        capture->input (ev);
+    }
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (capture == nullptr)
+            return false;
+
+        const auto mods = key.getModifiers();
+        if (mods.isCommandDown() || key == juce::KeyPress::escapeKey)
+            return false; // LiveRack's own shortcuts
+
+        // Keys the user set for LiveRack (tap tempo, User Keys) win over the plugin
+        if (isAppShortcut != nullptr && isAppShortcut (key))
+            return false;
+
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("mods", modsOf (mods));
+        const int code = key.getKeyCode();
+        juce::String name;
+        if      (code == juce::KeyPress::returnKey)    name = "Enter";
+        else if (code == juce::KeyPress::backspaceKey) name = "Backspace";
+        else if (code == juce::KeyPress::deleteKey)    name = "Backspace";
+        else if (code == juce::KeyPress::tabKey)       name = "Tab";
+        else if (code == juce::KeyPress::leftKey)      name = "ArrowLeft";
+        else if (code == juce::KeyPress::rightKey)     name = "ArrowRight";
+        else if (code == juce::KeyPress::upKey)        name = "ArrowUp";
+        else if (code == juce::KeyPress::downKey)      name = "ArrowDown";
+
+        if (name.isNotEmpty())
+        {
+            o->setProperty ("t", "key");
+            o->setProperty ("k", name);
+        }
+        else if (key.getTextCharacter() >= ' ')
+        {
+            o->setProperty ("t", "text");
+            o->setProperty ("s", juce::String::charToString (key.getTextCharacter()));
+        }
+        else
+        {
+            return false;
+        }
+
+        capture->input (juce::var (o));
+        return true;
+    }
 
 private:
-    void timerCallback() override { repaint(); }
+    void openCapture()
+    {
+        failedToStart = false;
+        if (! PluginViewCapture::isSupported() || ! PluginViewCapture::canCaptureCovered())
+        {
+            message = "This plugin's window can't be shown in the panel on this system. "
+                      "Use Show Plugin Window below to open it on its own.";
+            return;
+        }
+
+        juce::String error;
+        restartsAtOpen = owner.getRestartCount();
+        capture = owner.openRemoteView (captureScale, 0.85f, error, false);
+        failedToStart = capture == nullptr;
+        message = capture == nullptr ? error : juce::String();
+        lastTryMs = juce::Time::getMillisecondCounter();
+    }
+
+    void timerCallback() override
+    {
+        if (capture == nullptr)
+        {
+            // Try again only if the view never started (the plugin was
+            // restarting) or the plugin's helper has restarted since. After an
+            // error or a window the user closed, leave it: every try builds the
+            // plugin's window in the helper again
+            const auto now = juce::Time::getMillisecondCounter();
+            const bool helperRestarted = owner.getRestartCount() != restartsAtOpen;
+            if (owner.isRunning() && (failedToStart || helperRestarted) && now - lastTryMs > 1000)
+                openCapture();
+            repaint();
+            return;
+        }
+
+        bool updated = false;
+        juce::MemoryBlock jpeg;
+        while (capture->takeFrame (jpeg))
+        {
+            if (auto image = juce::ImageFileFormat::loadFrom (jpeg.getData(), jpeg.getSize()); image.isValid())
+            {
+                picture = image;
+                const juce::Point<int> size (juce::roundToInt ((float) image.getWidth() / captureScale),
+                                             juce::roundToInt ((float) image.getHeight() / captureScale));
+                if (size != naturalSize)
+                {
+                    naturalSize = size;
+                    // Opens at the plugin's own size, once; after that the panel decides
+                    if (! sizedOnce && naturalSize.x > 0 && naturalSize.y > 0)
+                    {
+                        sizedOnce = true;
+                        setSize (naturalSize.x, naturalSize.y + 32);
+                    }
+                }
+                message.clear();
+                updated = true;
+            }
+        }
+
+        juce::String json;
+        while (capture->takeMessage (json))
+        {
+            const auto t = juce::JSON::parse (json)["t"].toString();
+            if (t == "error" || t == "closed")
+                message = juce::JSON::parse (json)["msg"].toString();
+        }
+
+        if (capture->hasEnded())
+        {
+            capture.reset();
+            picture = {};
+            if (message.isEmpty())
+                message = "The plugin's window closed.";
+            lastTryMs = juce::Time::getMillisecondCounter();
+            updated = true;
+        }
+
+        if (updated)
+            repaint();
+    }
+
+    juce::Rectangle<float> pictureArea() const
+    {
+        if (naturalSize.x <= 0 || naturalSize.y <= 0)
+            return {};
+
+        const auto b = getLocalBounds().withTrimmedBottom (32).toFloat();
+        const float s = juce::jmin (1.0f, b.getWidth() / (float) naturalSize.x, b.getHeight() / (float) naturalSize.y);
+        const float w = (float) naturalSize.x * s, h = (float) naturalSize.y * s;
+        return { b.getX() + (b.getWidth() - w) / 2.0f, b.getY() + (b.getHeight() - h) / 2.0f, w, h };
+    }
+
+    juce::var pointerEvent (const juce::String& type, const juce::MouseEvent& e) const
+    {
+        const auto area = pictureArea();
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("t", type);
+        o->setProperty ("x", area.isEmpty() ? 0.0 : juce::jlimit (0.0, 1.0, (double) ((e.position.x - area.getX()) / area.getWidth())));
+        o->setProperty ("y", area.isEmpty() ? 0.0 : juce::jlimit (0.0, 1.0, (double) ((e.position.y - area.getY()) / area.getHeight())));
+        o->setProperty ("mods", modsOf (e.mods));
+        return juce::var (o);
+    }
+
+    static juce::String modsOf (juce::ModifierKeys k)
+    {
+        juce::String s;
+        if (k.isShiftDown())   s << "s";
+        if (k.isAltDown())     s << "a";
+        if (k.isCtrlDown())    s << "c";
+        if (k.isCommandDown() && ! k.isCtrlDown()) s << "m";
+        return s;
+    }
 
     IsolatedPlugin& owner;
+    std::shared_ptr<PluginViewCapture> capture;
+    juce::Image picture;
+    juce::Point<int> naturalSize;
+    juce::String message;
     juce::TextButton button { "Show Plugin Window" };
+    juce::Point<int> lastMouse;
+    juce::String buttonDown { "l" };
+    juce::var pendingMove;
+    float captureScale = 1.0f;
+    juce::uint32 lastTryMs = 0;
+    int restartsAtOpen = 0;
+    bool failedToStart = false;
+    bool sizedOnce = false;
 };
 
 // The plugin's window on the web remote. The helper owns the window, so it
@@ -271,7 +562,7 @@ std::vector<std::shared_ptr<IsolatedPlugin::RemoteView>> IsolatedPlugin::liveVie
     return list;
 }
 
-std::shared_ptr<PluginViewCapture> IsolatedPlugin::openRemoteView (float scale, float quality, juce::String& error)
+std::shared_ptr<PluginViewCapture> IsolatedPlugin::openRemoteView (float scale, float quality, juce::String& error, bool raiseWindow)
 {
     if (gaveUp)
     {
@@ -306,6 +597,7 @@ std::shared_ptr<PluginViewCapture> IsolatedPlugin::openRemoteView (float scale, 
         juce::MemoryOutputStream o;
         o.writeFloat (scale);
         o.writeFloat (quality);
+        o.writeBool (raiseWindow);
         send (msgViewOpen, o.getMemoryBlock());
     }
 
@@ -488,6 +780,8 @@ void IsolatedPlugin::applyLoadReply (const juce::MemoryBlock& reply)
     in.readBool();
     in.readString(); // error text (empty)
     const int ins = in.readInt(), outs = in.readInt();
+    pluginAcceptsMidi = in.readBool();
+    pluginProducesMidi = in.readBool();
     setLatencySamples (in.readInt());
     const int numParams = in.readInt();
     const bool firstLoad = params.isEmpty();
@@ -1012,15 +1306,16 @@ void IsolatedPlugin::showHelperWindow (bool shouldShow)
 void IsolatedPlugin::crashHelper() { send (msgCrash, {}); }
 
 //==============================================================================
-void IsolatedPlugin::processBlock (juce::AudioBuffer<float>& b, juce::MidiBuffer&)         { handOff (b, false); }
-void IsolatedPlugin::processBlockBypassed (juce::AudioBuffer<float>& b, juce::MidiBuffer&) { handOff (b, true); }
+void IsolatedPlugin::processBlock (juce::AudioBuffer<float>& b, juce::MidiBuffer& m)         { handOff (b, m, false); }
+void IsolatedPlugin::processBlockBypassed (juce::AudioBuffer<float>& b, juce::MidiBuffer& m) { handOff (b, m, true); }
 
-void IsolatedPlugin::handOff (juce::AudioBuffer<float>& buffer, bool bypassed)
+void IsolatedPlugin::handOff (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi, bool bypassed)
 {
     const int n = buffer.getNumSamples();
     const int chans = juce::jmin (buffer.getNumChannels(), (int) Shared::maxChannels);
 
     // What comes out while the helper isn't there: the input, unprocessed
+    // (including the midi, which just carries on to whatever is next)
     auto dry = [&]
     {
         ++blocksMissed;
@@ -1072,6 +1367,8 @@ void IsolatedPlugin::handOff (juce::AudioBuffer<float>& buffer, bool bypassed)
     for (int c = 0; c < chans; ++c)
         juce::FloatVectorOperations::copy (shared->audio[c], buffer.getReadPointer (c), n);
 
+    midiToShared (midi, shared->midiIn, shared->midiInCount, Shared::maxMidiEvents);
+
     const auto wanted = shared->request.fetch_add (1) + 1;
     wake = 1;
     pipe->write (&wake, 1, 5);
@@ -1097,6 +1394,8 @@ void IsolatedPlugin::handOff (juce::AudioBuffer<float>& buffer, bool bypassed)
 
     for (int c = 0; c < chans; ++c)
         buffer.copyFrom (c, 0, shared->audio[c], n);
+
+    sharedToMidi (shared->midiOut, shared->midiOutCount, midi);
 
     ++blocksDone;
     const int us = (int) ((juce::Time::getMillisecondCounterHiRes() - sentAt) * 1000.0);
@@ -1249,7 +1548,8 @@ private:
             {
                 const float scale = in.readFloat();
                 const float quality = in.readFloat();
-                openView (scale, quality);
+                const bool raise = in.readBool();
+                openView (scale, quality, raise);
                 break;
             }
 
@@ -1317,6 +1617,8 @@ private:
         out.writeString ({});
         out.writeInt (plugin->getMainBusNumInputChannels());
         out.writeInt (plugin->getMainBusNumOutputChannels());
+        out.writeBool (plugin->acceptsMidi());
+        out.writeBool (plugin->producesMidi());
         out.writeInt (lastLatency);
 
         const auto& ps = plugin->getParameters();
@@ -1430,7 +1732,6 @@ private:
             : juce::DocumentWindow (name, Theme::panel, juce::DocumentWindow::closeButton), owner (o)
         {
             setUsingNativeTitleBar (true);
-            setAlwaysOnTop (true);
         }
 
         void closeButtonPressed() override { owner.windowClosedByUser(); }
@@ -1438,7 +1739,8 @@ private:
     };
 
     // LiveRack asks for the window (its panel shows the plugin, or "Show Plugin
-    // Window"); the web remote also needs it while it shows the plugin
+    // Window"); the web remote and LiveRack's own panel also need it while
+    // either is showing a live picture of the plugin
     void showWindow (bool shouldShow)
     {
         wantedByLiveRack = shouldShow;
@@ -1488,6 +1790,10 @@ private:
 
             window->setVisible (true);
         }
+
+        // Only float over everything when the user deliberately asked to see
+        // the real window; a picture taken just for a panel shouldn't intrude
+        window->setAlwaysOnTop (wantedByLiveRack);
     }
 
     void windowClosedByUser()
@@ -1504,7 +1810,7 @@ private:
 
     //==========================================================================
     // The plugin's window on the web remote: captured here, where the window is
-    void openView (float scale, float quality)
+    void openView (float scale, float quality, bool raiseWindow)
     {
         if (view != nullptr)
             return; // already showing: another device joins it
@@ -1522,6 +1828,7 @@ private:
         PluginViewCapture::Options options;
         options.scale = scale;
         options.quality = quality;
+        options.raiseWindow = raiseWindow;
         juce::String error;
 
         if (auto capture = PluginViewCapture::create (*window, options, error))
@@ -1611,6 +1918,8 @@ private:
                 const juce::ScopedLock sl (processLock);
                 if (plugin != nullptr && prepared)
                     processOne();
+                else
+                    shared->midiOutCount = 0; // or the host replays the last block's MIDI
             }
 
             handled = wanted;
@@ -1637,6 +1946,7 @@ private:
 
         juce::AudioBuffer<float> buffer (channels, chans, n);
         juce::MidiBuffer midi;
+        sharedToMidi (shared->midiIn, shared->midiInCount, midi);
         const juce::ScopedNoDenormals noDenormals;
         const bool bypass = shared->bypassed != 0;
 
@@ -1656,6 +1966,8 @@ private:
         {
             plugin->processBlock (buffer, midi);
         }
+
+        midiToShared (midi, shared->midiOut, shared->midiOutCount, Shared::maxMidiEvents);
     }
 
     void stopAudioThread()

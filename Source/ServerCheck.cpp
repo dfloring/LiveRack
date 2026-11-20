@@ -382,6 +382,107 @@ std::vector<Item> getAppItems (RackEngine& engine, WebRemote& web)
     return items;
 }
 
+std::vector<BeforeRow> getBeforeService (LiveConnection& live)
+{
+    std::vector<BeforeRow> rows;
+    if (! live.isConnected())
+        return rows;
+
+    const auto items = live.getServerCheck();
+    const bool checked = ! items.empty();
+
+    {
+        BeforeRow r;
+        r.title = "Audio drivers";
+        int drivers = 0;
+        const LiveCheckItem* bad = nullptr;
+        for (auto& i : items)
+            if (i.title.startsWith ("Audio driver "))
+            {
+                ++drivers;
+                if (bad == nullptr && i.state == Item::lookAt)
+                    bad = &i;
+            }
+        if (! checked || drivers == 0)
+            r.detail = checked ? "No audio driver is set up." : "Checking...";
+        else if (bad != nullptr)
+        {
+            r.light = BeforeRow::lookAt;
+            r.detail = bad->title + ": " + bad->detail;
+        }
+        else
+        {
+            r.light = BeforeRow::good;
+            r.detail = "All " + juce::String (drivers) + " running, no recent dropouts.";
+        }
+        rows.push_back (r);
+    }
+    {
+        BeforeRow r;
+        r.title = "Console link";
+        const int n = live.getNumConsoles();
+        int down = 0;
+        for (int c = 0; c < n; ++c)
+            if (! live.getConsole (c).connected)
+                ++down;
+        if (n == 0)
+            r.detail = "No console is linked.";
+        else if (down > 0)
+        {
+            r.light = BeforeRow::lookAt;
+            r.detail = juce::String (down) + (down == 1 ? " console isn't" : " consoles aren't") + " connected.";
+        }
+        else
+        {
+            r.light = BeforeRow::good;
+            r.detail = n == 1 ? "Connected." : "All " + juce::String (n) + " connected.";
+        }
+        rows.push_back (r);
+    }
+    {
+        BeforeRow r;
+        r.title = "Remotes";
+        const auto web = live.getWebSettings(), osc = live.getOscSettings();
+        const int on = (web.enabled ? 1 : 0) + (osc.enabled ? 1 : 0);
+        if (on == 0)
+            r.detail = "No remote is turned on.";
+        else if ((web.enabled && ! web.listening) || (osc.enabled && ! osc.listening))
+        {
+            r.light = BeforeRow::lookAt;
+            r.detail = web.enabled && ! web.listening ? "The web remote isn't answering: " + web.statusText
+                                                      : "The OSC remote isn't answering: " + osc.statusText;
+        }
+        else
+        {
+            r.light = BeforeRow::good;
+            r.detail = juce::String (web.clients + osc.clients) + " connected now.";
+        }
+        rows.push_back (r);
+    }
+    {
+        BeforeRow r;
+        r.title = "Server check";
+        int look = 0;
+        for (auto& i : items)
+            if (i.state == Item::lookAt)
+                ++look;
+        if (! checked)
+            r.detail = "Checking...";
+        else if (look > 0)
+        {
+            r.light = BeforeRow::lookAt;
+            r.detail = juce::String (look) + (look == 1 ? " thing" : " things") + " to look at below.";
+        }
+        else
+        {
+            r.light = BeforeRow::good;
+            r.detail = "Nothing to look at.";
+        }
+        rows.push_back (r);
+    }
+    return rows;
+}
+
 //==============================================================================
 namespace
 {
@@ -408,6 +509,7 @@ public:
 
     void rebuild()
     {
+        updateBefore();
         const auto now = live.getServerCheck();
         if (! buttons.isEmpty() && now.size() == items.size()
             && std::equal (now.begin(), now.end(), items.begin(), [] (const LiveCheckItem& a, const LiveCheckItem& b)
@@ -452,16 +554,87 @@ public:
         g.setFont (juce::FontOptions (Theme::fontLarge, juce::Font::bold));
         g.drawText (look == 0 ? "Everything looks ready for a service" : juce::String (look) + (look == 1 ? " thing" : " things") + " to look at",
                     16, 10, getWidth() - 160, 26, juce::Justification::centredLeft);
+        paintBefore (g, juce::Rectangle<int> (12, 46, getWidth() - 24, beforeHeight() - 4));
     }
 
     void resized() override
     {
         recheck.setBounds (getWidth() - 116, 10, 100, 28);
-        viewport.setBounds (getLocalBounds().withTrimmedTop (46));
+        viewport.setBounds (getLocalBounds().withTrimmedTop (46 + beforeHeight()));
         rebuild();
     }
 
 private:
+    static constexpr int rowHeight = 36;   // tappable on the iPad
+
+    int beforeHeight() const { return before.empty() ? 36 : 44 + (int) before.size() * rowHeight + 8; }
+
+    void updateBefore()
+    {
+        auto now = getBeforeService (live);
+        const bool same = now.size() == before.size()
+            && std::equal (now.begin(), now.end(), before.begin(), [] (const BeforeRow& a, const BeforeRow& b)
+                           { return a.light == b.light && a.title == b.title && a.detail == b.detail; });
+        if (same && connectedBefore == live.isConnected())
+            return;
+        const bool resize = now.size() != before.size();
+        before = std::move (now);
+        connectedBefore = live.isConnected();
+        if (resize)
+            resized();
+        repaint();
+    }
+
+    void paintBefore (juce::Graphics& g, juce::Rectangle<int> area)
+    {
+        g.setColour (Theme::panel);
+        g.fillRoundedRectangle (area.toFloat(), 6.0f);
+        g.setColour (Theme::border);
+        g.drawRoundedRectangle (area.toFloat().reduced (0.5f), 6.0f, 1.0f);
+        auto c = area.reduced (14, 6);
+
+        if (before.empty())
+        {
+            g.setColour (Theme::textDim);
+            g.setFont (juce::FontOptions (Theme::fontMedium));
+            g.drawText ("Connect to a server to check it", c, juce::Justification::centredLeft);
+            return;
+        }
+
+        int look = 0;
+        for (auto& r : before) if (r.light == BeforeRow::lookAt) ++look;
+        bool unsure = false;
+        for (auto& r : before) unsure = unsure || r.light == BeforeRow::unknown;
+
+        auto head = c.removeFromTop (32);
+        g.setColour (Theme::text);
+        g.setFont (juce::FontOptions (Theme::fontHeading, juce::Font::bold));
+        g.drawText ("Before the service", head.removeFromLeft (head.getWidth() / 2), juce::Justification::centredLeft);
+        g.setColour (look > 0 ? Theme::amber : unsure ? Theme::textDim : Theme::green);
+        g.setFont (juce::FontOptions (Theme::fontMedium, juce::Font::bold));
+        g.drawText (look > 0 ? juce::String (look) + (look == 1 ? " thing" : " things") + " to look at" : unsure ? "Nothing to look at" : "All clear",
+                    head, juce::Justification::centredRight);
+
+        for (auto& r : before)
+        {
+            auto row = c.removeFromTop (rowHeight);
+            auto dot = row.removeFromLeft (22).withSizeKeepingCentre (10, 10).toFloat();
+            if (r.light == BeforeRow::unknown)
+            {
+                g.setColour (Theme::textDim);
+                g.drawEllipse (dot, 1.5f);   // hollow: LiveRack can't tell
+            }
+            else
+                Theme::drawLight (g, dot, r.light == BeforeRow::good ? Theme::green : Theme::amber);
+            g.setColour (Theme::text);
+            g.setFont (juce::FontOptions (Theme::fontMedium, juce::Font::bold));
+            g.drawText (r.title, row.removeFromLeft (130), juce::Justification::centredLeft, true);
+            g.setColour (Theme::textDim);
+            g.setFont (juce::FontOptions (Theme::fontSmall));
+            g.drawText (r.detail, row, juce::Justification::centredLeft, true);
+        }
+    }
+
     struct Rows : public juce::Component
     {
         Panel* owner = nullptr;
@@ -490,6 +663,8 @@ private:
 
     LiveConnection& live;
     std::vector<LiveCheckItem> items;
+    std::vector<BeforeRow> before;
+    bool connectedBefore = true;
     std::vector<std::pair<int, int>> rows;
     Rows list;
     juce::Viewport viewport;

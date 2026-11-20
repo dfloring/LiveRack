@@ -12,13 +12,17 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 - New: a plugin running in its own process that keeps crashing or stops responding (three times in a minute) is now switched to bypass automatically, so the rack shows it as bypassed along with the message that says why, instead of staying switched on while passing audio through (#7).
 - Fixed: with Run all plugins in their own process on, a plugin that couldn't move to a helper disappeared when the show was reopened or LiveRack restarted after a crash. It now comes back where it was (#32).
 - New: show menu > Run all plugins in their own process (experimental), one step to isolate every plugin in the show, including ones added later, so a crashing plugin no longer takes LiveRack down. Saved in the show; off unless you turn it on (the default is unchanged until isolated plugins' latency, window and MIDI gaps are dealt with) (#25).
+- Tests (nothing in the app): the reconfigure test now also covers removing a device and re-preparing racks, the path the audio-wait fix (#26) changed (#34).
 - Fixed: the audio no longer resizes a rack's buffer while running, which could allocate memory on the audio thread and cause a click if the device sent a larger block than expected (#27).
 - Fixed: changing a rack's device, buffer size or format no longer makes the audio wait while the rack's plugins are re-prepared, which could cause clicks and dropouts mid-show (#26).
+- LiveRack Client's show menu now has Run all plugins in their own process (experimental), ticked when the server has it on, so the Client matches Native (#33).
 - Screens now take their colours and text sizes from one shared theme, so they look more consistent. A few colours that were slightly off (the amber in the parameter list and gain-reduction meters, a blue in the parameter list) now match the rest. Text sizes were evened out: the half-point sizes are gone and the largest regular text is up to one point smaller and the smallest labels half a point bigger (#19, #20).
 - Fixed: on LiveRack Client, the Plugins list could stay out of date after a quick scan (#17).
+- New: a pre-service checklist (docs/PRE-SERVICE.md), and a "Before the service" block at the top of the Server check window that ticks the items LiveRack can know: audio drivers, console link, remotes and Server check. It shows "All clear" or how many things to look at, and a grey hollow light where LiveRack can't tell. Not on the iPad page yet (#2).
 - How LiveRack is built changed (nothing in the app): automated tests run on
   every change, new versions come out as betas first, and work is tracked as
   GitHub issues.
+- New: an isolated plugin's panel shows a live picture of its window instead of a button, on Mac (on Windows it keeps the Show Plugin Window button). The real window stays out of the way, and the panel doesn't keep reopening it if it can't be shown or you close it. Keys set for LiveRack (tap tempo, User Keys) still work with the picture focused (#8).
 
 ## 0.29.0 (2026-11-14)
 

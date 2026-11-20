@@ -580,6 +580,13 @@ struct PreviewHooks
                 checkSame = c1[i].title == c2[i].title && c1[i].state == c2[i].state && c1[i].fixLabel == c2[i].fixLabel;
             std::cerr << "RSET server check " << c1.size() << " items same " << checkSame << std::endl;
 
+            const auto b1 = ServerCheck::getBeforeService (live), b2 = ServerCheck::getBeforeService (here);
+            bool beforeSame = b1.size() == b2.size();
+            for (size_t i = 0; beforeSame && i < b1.size(); ++i)
+                beforeSame = b1[i].title == b2[i].title && b1[i].light == b2[i].light;
+            std::cerr << "RSET before the service " << b1.size() << " rows same " << beforeSame << " first '" << (b1.empty() ? "" : b1[0].title)
+                      << "' last '" << (b1.empty() ? "" : b1.back().title) << "'" << std::endl;
+
             live.refreshDriverOptions();   // brings the networks too
 
             // Changes from the network
@@ -833,12 +840,22 @@ struct PreviewHooks
                     juce::Thread::sleep (20);
                 }
 
+                // configureRack (removeDriver, previewPrepare) is what #28 changed; the rack
+                // prepare is slowed to 150 ms (LIVERACK_TEST_PREPARE_MS), so holding the
+                // audio lock through it would stall the audio thread for that long
+                for (int i = 0; i < 2; ++i)
+                {
+                    const int d = m.engine.addDriver();
+                    m.engine.removeDriver (d);
+                    m.engine.previewPrepare (48000.0, 128);
+                }
+
                 juce::Timer::callAfterDelay (500, []
                 {
                     const auto worst = audio->worstMs.load();
                     const auto blocks = audio->blocks.load();
                     audio->stopThread (2000);
-                    std::cerr << "RECONFIG 20 changes, " << blocks << " blocks ran; longest block "
+                    std::cerr << "RECONFIG 20 changes, 2 driver removals and 2 re-prepares, " << blocks << " blocks ran; longest block "
                               << (int) worst << " ms, under 100 ms " << (worst < 100.0) << " (expect 1)" << std::endl;
                 });
             });

@@ -19,7 +19,14 @@ public:
     {
         float scale   = 2.0f;   // capture pixels per window point
         float quality = 0.7f;   // JPEG quality 0..1
+        // false: leave the window where it is (LiveRack's own panel is
+        // showing the picture, so the real window must not float over it)
+        bool raiseWindow = true;
     };
+
+    // True if a window can be captured without being brought to the front.
+    // Mac yes (ScreenCaptureKit); Windows copies from the screen, so no.
+    static bool canCaptureCovered();
 
     // Message thread. Returns nullptr and sets error if this computer can't.
     static std::shared_ptr<PluginViewCapture> create (juce::DocumentWindow& window, Options, juce::String& error);

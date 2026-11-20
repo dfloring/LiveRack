@@ -555,8 +555,15 @@ private:
 } // namespace
 
 std::shared_ptr<PluginViewCapture> createWindowsViewCapture (juce::DocumentWindow& window, PluginViewCapture::Options options,
-                                                             juce::String&)
+                                                             juce::String& error)
 {
+    if (! options.raiseWindow)
+    {
+        // This backend copies pixels from the screen: the window has to be on top
+        error = "The plugin's window can't be shown inside LiveRack on Windows. Use Show Plugin Window to open it on its own.";
+        return nullptr;
+    }
+
     return std::make_shared<WindowsViewCapture> (window, options);
 }
 
