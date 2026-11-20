@@ -1,8 +1,8 @@
-<p align="center"><img src="docs/banner.png" alt="LiveRack: live audio plugin host for Mac" width="100%"></p>
+<p align="center"><img src="docs/banner.png" alt="LiveRack: live audio plugin host for Mac and Windows" width="100%"></p>
 
-**LiveRack** hosts racks of VST3 and Audio Unit plugins for live mixing, in the spirit of Waves SuperRack and Fourier transform.engine. It runs on a Mac with Apple silicon, talks to your console over Dante or the Waves SoundGrid Driver, follows scene recalls and channel selection from Yamaha CL/QL/DM7 (by CUE) and Behringer X32 consoles, and can be driven from a Stream Deck through Bitfocus Companion.
+**LiveRack** hosts racks of VST3 and Audio Unit plugins for live mixing, in the spirit of Waves SuperRack and Fourier transform.engine. It runs on a Mac (Apple silicon) or a Windows PC, talks to your console over Dante or the Waves SoundGrid Driver (ASIO on Windows), follows scene recalls and channel selection from Yamaha CL/QL/DM7 (by CUE) and Behringer X32 consoles, and can be driven from a Stream Deck through Bitfocus Companion.
 
-<p align="center"><img src="docs/screenshot-main.png" alt="LiveRack main window" width="100%"></p>
+<p align="center"><img src="docs/screenshot-main.png" alt="LiveRack main window: Channels, every rack's strip" width="100%"></p>
 
 ### Highlights
 - **Racks:** mono, stereo or mono-to-stereo racks, each with its own plugin chain, meters, gain reduction and bypass
@@ -120,6 +120,8 @@ Testing on one computer: start a second copy with `LiveRack --client` (Windows: 
 
 A console-style crosspoint matrix. Rack inputs (or outputs) run down the side, driver channels across the top, 32 per page. Click a crosspoint to patch, click a lit one to unpatch. Stereo racks patch L and R separately; mono-to-stereo racks have one input and L/R outputs.
 
+<p align="center"><img src="docs/screenshot-routing.png" alt="The routing matrix" width="100%"></p>
+
 **Auto-patch:** patching an input also patches the rack's output to the same number, if that output isn't patched yet and no other rack uses it (otherwise Routing says so and leaves it). Mono-to-stereo racks take the next output too for R. A red ring means two racks share an output (they add together). Switch between **Rack inputs / Rack outputs**, drivers, and channel pages with the tabs. Channel numbers count the channels *enabled* in that driver's Settings.
 
 ## Mono-to-stereo racks
@@ -163,6 +165,8 @@ Give racks a group letter (A–H) with the badge on the strip. Every rack in a g
 ## Rack window
 
 The plugin panel (in **Rack**, or the rack window) shows the selected rack: its colour, name, console channel, latency, in/out meters, **Rack Bypass**, and a tab for each plugin. A resizable plugin window is sized to fit the panel. One that can't resize and doesn't fit isn't squeezed in: use **Pop Out**, or make the window bigger and it comes back. **Rack** (View group in the top bar, or double-click a plugin in a strip) gives the panel the whole main window, below the Hot Plugins; **Channels** or Esc goes back. The **‹ ›** arrows next to the rack's name step to the previous / next rack on the page shown (also available as User Key, MIDI and keyboard-shortcut actions, and over OSC). **Pop Out** opens a plugin in its own window. The rack window button (View group) moves it into its own window, e.g. on a second screen. Whether it's open and where are saved in the show.
+
+<p align="center"><img src="docs/screenshot-rack.png" alt="Rack: the plugin panel for one rack" width="100%"></p>
 
 ## Console Link (follow the console, like Waves ProLink)
 

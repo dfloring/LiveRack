@@ -11,6 +11,6 @@
 <rect x="56" y="104" width="128" height="32" rx="8" fill="#4a90d9"/>
 <rect x="56" y="148" width="128" height="32" rx="8" fill="#2f353c"/><rect x="120" y="172" width="56" height="4" rx="2" fill="#e8a23a"/></svg>
 <text x="330" y="175" font-family="Inter" font-weight="800" font-size="104" fill="#e6e8eb" letter-spacing="-1">LiveRack</text>
-<text x="334" y="232.0" font-family="Inter" font-weight="500" font-size="30" fill="#9aa3ad">Live audio plugin host for Mac</text>
+<text x="334" y="232.0" font-family="Inter" font-weight="500" font-size="30" fill="#9aa3ad">Live audio plugin host for Mac and Windows</text>
 <rect x="332" y="250" width="121" height="40" rx="20.0" fill="#1d2126" stroke="#2f353c"/><text x="392.5" y="276.0" text-anchor="middle" font-family="Inter" font-weight="600" font-size="17" fill="#c9d0d7">VST3 + AU</text><rect x="465" y="250" width="197" height="40" rx="20.0" fill="#1d2126" stroke="#2f353c"/><text x="563.5" y="276.0" text-anchor="middle" font-family="Inter" font-weight="600" font-size="17" fill="#c9d0d7">Dante + SoundGrid</text><rect x="674" y="250" width="207" height="40" rx="20.0" fill="#1d2126" stroke="#2f353c"/><text x="777.5" y="276.0" text-anchor="middle" font-family="Inter" font-weight="600" font-size="17" fill="#c9d0d7">Yamaha CL/QL + X32</text><rect x="893" y="250" width="121" height="40" rx="20.0" fill="#1d2126" stroke="#2f353c"/><text x="953.5" y="276.0" text-anchor="middle" font-family="Inter" font-weight="600" font-size="17" fill="#c9d0d7">Companion</text>
 </svg>
