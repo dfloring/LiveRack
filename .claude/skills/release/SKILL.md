@@ -12,8 +12,8 @@ makes it the version for services.
 ## A beta
 
 1. **Ready?** `main` is green, the work for it is merged, and `CHANGELOG.md`
-   has entries under **Unreleased**. Not Friday to Sunday unless the owner asked
-   or it fixes a service problem.
+   has entries under **Unreleased**. (The Friday-to-Sunday freeze is paused
+   by the owner since 20 Nov; it will return later.)
 2. **Number.** 0.x.0 for new features, 0.x.y for fixes only. Stays 0.x.
 3. **Branch `release/<version>`:**
    - `CMakeLists.txt`: `project(LiveRack VERSION <version>)`
@@ -36,7 +36,7 @@ makes it the version for services.
 ## Stable
 
 When the owner says the beta is good:
-1. Not Friday to Sunday unless they asked.
+1. (The weekend freeze is paused for now; see CLAUDE.md.)
 2. `gh workflow run promote.yml -f version=<version>`, then check it finished.
 3. Close the "Test <version>" issue and the milestone.
 4. Tell the owner it's the stable version and which file runs on the rig.

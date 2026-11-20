@@ -47,8 +47,9 @@ plain language: what changed for them, what to test, what you need from them.
    A version bump on `main` makes a **beta**; the owner tests it on the rig;
    **Promote to stable** makes it the version for services.
 
-**Freeze:** no promotions to stable and no updates to the rig from Friday to
-Sunday unless the owner asks (a fix for a service problem is the exception).
+**Freeze:** paused by the owner (20 Nov); no weekend restriction for now. It
+will come back later: no promotions to stable and no updates to the rig from
+Friday to Sunday unless the owner asks. Don't apply it until they say so.
 
 **Hotfix:** a problem that would hurt a service goes first: fix branch,
 test, review, patch version (0.x.y), beta, and say plainly what to install.
