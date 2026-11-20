@@ -9,6 +9,8 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 
 ## Unreleased
 
+- The release page now lists only the downloads (Mac, Windows and the Companion module) instead of about thirty files, and the release job no longer fails on an empty test log (#47).
+
 ## 0.30.0 (2026-11-20)
 
 - A plugin running in its own process that keeps crashing or stops responding (three times in a minute) is now switched to bypass, so the rack shows it as bypassed with the reason, instead of looking switched on while the audio passes through (#7).
