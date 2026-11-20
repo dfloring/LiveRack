@@ -267,6 +267,26 @@ struct ClientPreview
 
         at (13500, c, [] (ClientComponent&, View& v) { v.setView (View::View::routing); std::cerr << "CLIENT routing " << (v.routingMatrix != nullptr) << std::endl; });
         at (14500, c, [] (ClientComponent&, View& v) { v.setView (View::View::snapshots); std::cerr << "CLIENT snapshots " << (v.snapshotsPanel != nullptr) << std::endl; });
+        // MIDI Learn on the Snapshots screen: a note on this computer recalls snapshot 7 on the server
+        at (15000, c, [] (ClientComponent&, View& v)
+        {
+            if (v.snapshotsPanel == nullptr || v.midi == nullptr) { std::cerr << "CLIENT snapshot learn: no panel" << std::endl; return; }
+            v.snapshotsPanel->select (7);
+            juce::TextButton* learn = nullptr;
+            for (auto* ch : v.snapshotsPanel->getChildren())
+                if (auto* b = dynamic_cast<juce::TextButton*> (ch))
+                    if (b->getButtonText().startsWith ("MIDI Learn"))
+                        learn = b;
+            if (learn != nullptr) learn->triggerClick();
+            std::cerr << "CLIENT snapshot learn: button " << (learn != nullptr) << " learning " << v.midi->isLearning() << std::endl;
+            v.midi->handle ({ "Test pad", juce::MidiMessage::noteOn (1, 62, (juce::uint8) 100) });
+            std::cerr << "CLIENT snapshot learned: " << v.midi->getMappings().size() << " mapping(s), snapshot 7 trigger '" << v.midi->describeTriggerFor (7) << "'" << std::endl;
+            v.midi->handle ({ "Test pad", juce::MidiMessage::noteOn (1, 62, (juce::uint8) 100) });
+        });
+        at (15300, c, [] (ClientComponent&, View& v)
+        {
+            std::cerr << "CLIENT snapshot note recalled: scene " << v.currentScene() << " (expect 7)" << std::endl;
+        });
         at (15500, c, [] (ClientComponent&, View& v) { v.setView (View::View::plugins); std::cerr << "CLIENT plugins " << (v.tool != nullptr) << std::endl; });
         at (16500, c, [] (ClientComponent&, View& v)
         {

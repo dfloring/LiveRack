@@ -569,7 +569,7 @@ MainComponent::MainComponent()
         };
         live.setServices (std::move (sv));
     }
-    midi->onChanged = [this] { statusBar->repaint(); };
+    midi->onChanged = [this] { statusBar->repaint(); if (scopeEditor != nullptr) scopeEditor->refresh(); };
     keysBar.onMidiLearn = [this] (int key) { midi->learnAction (keysBar.getKey (key)); };
     keysBar.onSetShortcut = [this] (int key)
     {
@@ -2127,7 +2127,16 @@ void MainComponent::showScope()
             if (safe != nullptr && juce::isPositiveAndBelow (safe->activeConsole, (int) safe->consoles.size()))
                 return safe->consoles[(size_t) safe->activeConsole]->getLastSceneText();
             return juce::String();
-        } };
+        },
+        [safe] (int n)
+        {
+            if (safe == nullptr) return;
+            Action a;
+            a.type = Action::recallScene;
+            a.number = n;
+            safe->midi->learnAction (a);
+        },
+        nullptr };   // the show's own MIDI is already in each snapshot's trigger
 
     scopeEditor = new SnapshotsPanel (std::move (h));
     scopeWindow = std::make_unique<ToolWindow> (*this, "Snapshots", scopeEditor, "snapshotsWindow", [safe]

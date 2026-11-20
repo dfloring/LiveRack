@@ -10,6 +10,7 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 ## Unreleased
 
 - The release page now lists only the downloads (Mac, Windows and the Companion module) instead of about thirty files, and the release job no longer fails on an empty test log (#47).
+- On the Snapshots screen, a new **MIDI Learn** button: press it, hit a note on your controller, and that note recalls the picked snapshot. No User Key needed. The learned note shows next to the snapshot in the list. In LiveRack Client the note is learned on that computer (#52).
 
 ## 0.30.0 (2026-11-20)
 

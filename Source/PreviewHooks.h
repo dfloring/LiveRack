@@ -964,6 +964,24 @@ struct PreviewHooks
                     m.midi->setSnapshotLink (link);
                     m.recallScene (2);
                 }
+                // MIDI Learn on the Snapshots screen: a note recalls snapshot 10, no User Key
+                {
+                    m.scopeEditor->select (10);
+                    juce::TextButton* learn = nullptr;
+                    for (auto* c : m.scopeEditor->getChildren())
+                        if (auto* b = dynamic_cast<juce::TextButton*> (c))
+                            if (b->getButtonText().startsWith ("MIDI Learn"))
+                                learn = b;
+                    std::cerr << "SNAP learn button " << (learn != nullptr) << " enabled " << (learn != nullptr && learn->isEnabled()) << std::endl;
+                    if (learn != nullptr)
+                        learn->triggerClick();
+                    std::cerr << "SNAP learning " << m.midi->isLearning() << " '" << m.midi->getLearnText() << "'" << std::endl;
+                    m.midi->handle ({ "Test pad", juce::MidiMessage::noteOn (1, 72, (juce::uint8) 100) });
+                    m.recallScene (2);
+                    m.midi->handle ({ "Test pad", juce::MidiMessage::noteOn (1, 72, (juce::uint8) 100) });
+                    std::cerr << "SNAP note 72 -> current " << m.currentScene << " (expect 10) trigger '" << m.midi->describeTriggerFor (10)
+                              << "' user key 1 empty " << (m.keysBar.getKey (0).type == Action::none) << " (1 = none)" << std::endl;
+                }
                 if (open == "snapshotspick")
                     juce::Timer::callAfterDelay (300, [&m]
                     {
