@@ -119,7 +119,17 @@ struct ClientPreview
                 v.setView (View::View::devices);
                 std::cerr << "CLIENT devices with MIDI: cards " << (v.devicesPanel != nullptr) << std::endl;
             });
-            at (12000, c, [] (ClientComponent&, View& v) { v.setView (View::View::channels); });
+            at (12000, c, [] (ClientComponent&, View& v)
+            {
+                v.setView (View::View::channels);
+                std::cerr << "CLIENT isolate all before: " << (bool) v.state()["isolateAll"] << " (expect 0)" << std::endl;
+                v.send (makeCmd ("isolateAll", { { "on", true } })); // what the show menu item sends
+            });
+            at (13500, c, [] (ClientComponent&, View& v)
+            {
+                std::cerr << "CLIENT isolate all after: " << (bool) v.state()["isolateAll"] << " (expect 1)" << std::endl;
+                v.send (makeCmd ("isolateAll", { { "on", false } }));
+            });
             return;
         }
 
