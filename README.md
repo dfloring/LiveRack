@@ -28,7 +28,7 @@ Get the latest build from [Releases](../../releases): the Mac app (Apple silicon
 - **Mac:** unzip, then right-click `LiveRack.app` > **Open** the first time (it isn't notarised).
 - **Windows:** unzip and run `LiveRack.exe`. If Windows warns about an unknown publisher: **More info > Run anyway**. Pick your ASIO driver (Dante Virtual Soundcard, SoundGrid) in Devices > driver Settings.
 
-# User guide (v0.29)
+# User guide (v0.30)
 
 Any number of independent racks of VST3/AU plugins on one or more audio drivers at once (Dante Virtual Soundcard, a Dante interface, the Waves SoundGrid Driver). Everything lives in one **show file** (`.liverack`) with its snapshots inside it, and the open show comes back automatically on launch.
 
@@ -251,12 +251,13 @@ Feedback: `/liverack/racks`, `/selected`, `/scene`, `/bpm`, `/page` (0 = All), `
 
 ### Running a plugin in its own process (experimental)
 
-Right-click a plugin > **Run in its own process**. The plugin then runs in a hidden helper copy of LiveRack, so if it crashes or stops responding only that plugin is affected: audio passes through it unprocessed for a moment while a fresh helper starts in the background and its last settings are put back. LiveRack stays usable meanwhile. The status bar says when that happened. After three crashes in a minute the plugin is left stopped (audio still passes through).
+Right-click a plugin > **Run in its own process**. The plugin then runs in a hidden helper copy of LiveRack, so if it crashes or stops responding only that plugin is affected: audio passes through it unprocessed for a moment while a fresh helper starts in the background and its last settings are put back. LiveRack stays usable meanwhile. The status bar says when that happened. After three crashes in a minute the plugin is left stopped and its slot is switched to bypass, so the rack shows it (audio still passes through).
 
 - It is per plugin, off by default, and saved in the show. Tick it again to bring the plugin back inside LiveRack; settings carry over both ways.
 - Audio goes to the helper and back within the same block, so no latency is added. The panel shows how long the hand-off takes.
 - The plugin's own window works on the web remote like any other: the helper captures it and plays taps back into it. If the plugin restarts while a device is showing it, the device says so; tap **Try again**.
-- Limits for now: the plugin's window is a separate window owned by the helper (not inside the panel), MIDI isn't passed to the plugin, and gain reduction from the PreSonus VST3 extension isn't read (a parameter or the estimate still work).
+- MIDI reaches the plugin in its helper. On Mac the panel shows a live picture of the plugin's window you can use; on Windows the panel keeps a **Show Plugin Window** button and the window is a separate one owned by the helper.
+- Limits for now: gain reduction from the PreSonus VST3 extension isn't read (a parameter or the estimate still work).
 - To try it: hold **Option** while right-clicking an isolated plugin for **Crash this plugin (test)**.
 - To do it for the whole show in one step: the show menu > **Run all plugins in their own process (experimental)**. Every plugin moves into its own helper, plugins you add later do too, and the choice is saved in the show. Untick it and new plugins go inside LiveRack again (plugins already isolated stay as they are). It is off for every show until you turn it on; the default hasn't changed.
 
@@ -286,7 +287,7 @@ Settings live in `~/Library/Application Support/LiveRack`: `audio-drivers.xml`, 
 
 ## Next steps
 
-- Plugin isolation, next stages: the plugin's window inside the panel, MIDI, and making it the default once it has proved itself
+- Plugin isolation, next stages: the plugin's window inside the panel on Windows, and making it the default once it has proved itself
 - Headless polish for a LiveRack server with no screen
 
 ## Licence
