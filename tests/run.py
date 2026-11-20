@@ -97,6 +97,7 @@ def scenarios():
                   r"ISOALL added later: ok 1 isolated 1 \(expect 1, 1\)",
                   r"ISOALL new show: switch 0 \(expect 0\)",
                   r"ISOALL reopened: switch 1 all isolated 1 \(expect 1, 1\)",
+                  r"ISOALL mixed reopen: slots (\d+) of \1, slot 0 isolated 0, slot 1 isolated 1, switch 1 \(expect same count, 0, 1, 1\)",
                   r"ISOALL after the crash: app alive 1, plugin restarts [1-9]\d* .*audio kept flowing 1 \(expect 1\)"]),
         S("isolate-watchdog", "A plugin whose helper keeps crashing is bypassed automatically",
           server={"open": "isowatchdog"}, duration=40,
