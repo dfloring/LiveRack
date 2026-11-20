@@ -974,7 +974,7 @@ struct PreviewHooks
                                 learn = b;
                     std::cerr << "SNAP learn button " << (learn != nullptr) << " enabled " << (learn != nullptr && learn->isEnabled()) << std::endl;
                     if (learn != nullptr)
-                        learn->triggerClick();   // delivered on the message loop
+                        learn->onClick();   // the click handler itself: a posted click can be late while the app is busy starting
                     juce::Timer::callAfterDelay (200, [&m]
                     {
                         std::cerr << "SNAP learning " << m.midi->isLearning() << " '" << m.midi->getLearnText() << "'" << std::endl;
