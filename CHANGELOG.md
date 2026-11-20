@@ -21,6 +21,7 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 - How LiveRack is built changed (nothing in the app): automated tests run on
   every change, new versions come out as betas first, and work is tracked as
   GitHub issues.
+- New: an isolated plugin's panel shows a live picture of its window instead of a button, on Mac (on Windows it keeps the Show Plugin Window button). The real window stays out of the way, and the panel doesn't keep reopening it if it can't be shown or you close it. Keys set for LiveRack (tap tempo, User Keys) still work with the picture focused (#8).
 
 ## 0.29.0 (2026-11-14)
 

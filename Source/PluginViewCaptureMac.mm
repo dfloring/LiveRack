@@ -137,12 +137,17 @@ public:
         }
 
         // Keep the window visible and drawing while it's on the iPad
-        savedLevel = window.level;
-        if (window.level < NSFloatingWindowLevel)
-            [window setLevel: NSFloatingWindowLevel];
         if (window.isMiniaturized)
             [window deminiaturize: nil];
-        [window orderFront: nil];
+
+        // ScreenCaptureKit also sees a window that something else covers
+        if (options.raiseWindow)
+        {
+            savedLevel = window.level;
+            if (window.level < NSFloatingWindowLevel)
+                [window setLevel: NSFloatingWindowLevel];
+            [window orderFront: nil];
+        }
 
         activity = [[[NSProcessInfo processInfo] beginActivityWithOptions: NSActivityUserInitiated | NSActivityLatencyCritical
                                                                    reason: @"Showing a plugin window on the web remote"] retain];
@@ -771,6 +776,7 @@ private:
 } // namespace
 
 bool PluginViewCapture::isSupported() { return true; }
+bool PluginViewCapture::canCaptureCovered() { return true; }
 
 std::shared_ptr<PluginViewCapture> PluginViewCapture::create (juce::DocumentWindow& window, Options options, juce::String& error)
 {

@@ -425,6 +425,14 @@ MainComponent::MainComponent()
             safe->consoleNote = text;
             safe->repaint();
         };
+        IsolatedPlugin::isAppShortcut = [safe] (const juce::KeyPress& key)
+        {
+            if (safe == nullptr) return false;
+            if (safe->keysBar.keyForShortcut (key) >= 0) return true;
+            for (auto& sc : safe->extraShortcuts)
+                if (sc.key == key) return true;
+            return false;
+        };
     }
 
     bpmDisplay = std::make_unique<BpmDisplay> (engine);
@@ -645,6 +653,7 @@ MainComponent::~MainComponent()
     PreviewHooks::testSignal.reset();   // the test build's stand-in audio feeds this engine
    #endif
     IsolatedPlugin::onEvent = nullptr;
+    IsolatedPlugin::isAppShortcut = nullptr;
     stopTimer();
     removeKeyListener (this);
     engine.getKnownPlugins().removeChangeListener (this);
