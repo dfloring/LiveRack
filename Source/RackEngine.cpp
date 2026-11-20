@@ -1439,7 +1439,7 @@ int RackEngine::attachSlotId (juce::AudioProcessorGraph::Node& node, int preferr
     return id;
 }
 
-bool RackEngine::addPlugin (int index, const juce::PluginDescription& desc, juce::String& error, int slotId, bool isolated)
+bool RackEngine::addPlugin (int index, const juce::PluginDescription& desc, juce::String& error, int slotId, bool isolated, bool applyIsolateAll)
 {
     auto* r = getRack (index);
 
@@ -1449,7 +1449,7 @@ bool RackEngine::addPlugin (int index, const juce::PluginDescription& desc, juce
         return false;
     }
 
-    auto instance = createInstance (formatManager, desc, isolated || isolateAll, r->sampleRate, r->blockSize, error);
+    auto instance = createInstance (formatManager, desc, isolated || (applyIsolateAll && isolateAll), r->sampleRate, r->blockSize, error);
 
     if (instance == nullptr)
     {
@@ -1947,7 +1947,7 @@ bool RackEngine::loadRig (const juce::XmlElement& xml, juce::String& error)
             }
 
             juce::String err;
-            if (! addPlugin (rackIndex, desc, err, slotXml->getIntAttribute ("id", 0), slotXml->getBoolAttribute ("isolated", false)))
+            if (! addPlugin (rackIndex, desc, err, slotXml->getIntAttribute ("id", 0), slotXml->getBoolAttribute ("isolated", false), false))
             {
                 failures.add (desc.name + ": " + err);
                 continue;

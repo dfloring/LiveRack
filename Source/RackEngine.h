@@ -154,7 +154,7 @@ public:
 
     //==============================================================================
     // Plugins inside a rack (message thread only)
-    bool addPlugin (int rack, const juce::PluginDescription&, juce::String& error, int slotId = 0, bool isolated = false);
+    bool addPlugin (int rack, const juce::PluginDescription&, juce::String& error, int slotId = 0, bool isolated = false, bool applyIsolateAll = true);
     void removePlugin (int rack, int slot);
     void moveSlot (int rack, int from, int to);             // swap neighbours
     void moveSlotTo (int rack, int from, int toIndex);      // drag-and-drop reorder
