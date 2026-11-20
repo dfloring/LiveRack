@@ -3,6 +3,12 @@
 Lasting choices and why, newest first. Add one when you decide something a
 future change might otherwise undo. Format: what, why, what it costs.
 
+## 2026-11-20: Weekend freeze paused
+The Friday-to-Sunday freeze on promotions and rig updates is not applied for
+now. **Why:** the owner isn't worried about it at the moment and expects to
+want it later. **Cost:** a bad update could land right before a service, so the
+owner's own testing on the rig is the safeguard until it returns.
+
 ## 2026-11-18: Colours and text sizes come from Theme.h
 Screens take colours from `Theme::` and text sizes from `Theme::fontCaption`
 to `fontHeading` (11, 12, 13, 14, 15, 17); display sizes (21, 24, 30) and one
