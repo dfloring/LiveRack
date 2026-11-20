@@ -1211,6 +1211,25 @@ struct PreviewHooks
                 auto [total2, iso2] = countIsolated();
                 std::cerr << "ISOALL reopened: switch " << e.isIsolateAll() << " all isolated " << (iso2 == total2 && total2 > 0) << " (expect 1, 1)" << std::endl;
 
+                // A plugin that couldn't move to a helper is saved as not isolated while the switch
+                // is on; reopening must keep it where it was, not force it into a helper (#32).
+                {
+                    juce::String err2;
+                    e.setSlotIsolated (0, 0, false, err2);
+                    auto f2 = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("Isolate All Mixed Test.liverack");
+                    f2.deleteFile();
+                    e.setShowFile (f2);
+                    m.saveShow (false);
+                    const int slotsBefore = e.getNumSlots (0);
+                    m.startNewShow();
+                    m.openShowFile (f2);
+                    std::cerr << "ISOALL mixed reopen: slots " << e.getNumSlots (0) << " of " << slotsBefore
+                              << ", slot 0 isolated " << e.isSlotIsolated (0, 0) << ", slot 1 isolated " << e.isSlotIsolated (0, 1)
+                              << ", switch " << e.isIsolateAll() << " (expect same count, 0, 1, 1)" << std::endl;
+                    m.startNewShow();
+                    m.openShowFile (f);
+                }
+
                 juce::Timer::callAfterDelay (1500, [&m]
                 {
                     auto& e = m.engine;

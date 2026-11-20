@@ -9,8 +9,9 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 
 ## Unreleased
 
-- Tests (nothing in the app): the reconfigure test now also covers removing a device and re-preparing racks, the path the audio-wait fix (#26) changed (#34).
+- Fixed: with Run all plugins in their own process on, a plugin that couldn't move to a helper disappeared when the show was reopened or LiveRack restarted after a crash. It now comes back where it was (#32).
 - New: show menu > Run all plugins in their own process (experimental), one step to isolate every plugin in the show, including ones added later, so a crashing plugin no longer takes LiveRack down. Saved in the show; off unless you turn it on (the default is unchanged until isolated plugins' latency, window and MIDI gaps are dealt with) (#25).
+- Tests (nothing in the app): the reconfigure test now also covers removing a device and re-preparing racks, the path the audio-wait fix (#26) changed (#34).
 - Fixed: the audio no longer resizes a rack's buffer while running, which could allocate memory on the audio thread and cause a click if the device sent a larger block than expected (#27).
 - Fixed: changing a rack's device, buffer size or format no longer makes the audio wait while the rack's plugins are re-prepared, which could cause clicks and dropouts mid-show (#26).
 - Screens now take their colours and text sizes from one shared theme, so they look more consistent. A few colours that were slightly off (the amber in the parameter list and gain-reduction meters, a blue in the parameter list) now match the rest. Text sizes were evened out: the half-point sizes are gone and the largest regular text is up to one point smaller and the smallest labels half a point bigger (#19, #20).
