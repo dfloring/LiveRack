@@ -2141,6 +2141,9 @@ void ClientComponent::ClientView::showShowMenu()
         m.addSeparator();
         m.addItem (4, "New Show");
         m.addSeparator();
+        // Same switch as Native's show menu; the server moves the plugins
+        m.addItem (6, "Run all plugins in their own process (experimental)", true, (bool) safe->state()["isolateAll"]);
+        m.addSeparator();
         m.addItem (-1, "Shows are kept on the server, in " + data["showsFolder"].toString(), false);
 
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&safe->loadButton), [safe, data] (int r)
@@ -2148,6 +2151,7 @@ void ClientComponent::ClientView::showShowMenu()
             if (safe == nullptr || r == 0) return;
             if (r == 1) safe->saveButton.triggerClick();
             if (r == 2) safe->saveShowAs();
+            if (r == 6) safe->send (makeCmd ("isolateAll", { { "on", ! (bool) safe->state()["isolateAll"] } }));
             if (r == 4)
                 safe->openOrNew ([safe] (bool save) { if (safe != nullptr) safe->send (makeCmd ("showNew", { { "save", save } })); }, "starting a new show");
             if (r >= 1000 && r < 2000)

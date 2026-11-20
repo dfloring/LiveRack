@@ -175,6 +175,7 @@ def scenarios():
                   r"CLIENT new snapshots recall rack 0: \[0, 1, 1\]",
                   r"CLIENT rack window 1 dock in it 1 picture 1",
                   r"CLIENT back to one window: dock here 1 rack window 0",
+                  r"CLIENT isolate all before: 0 \(expect 0\)", r"CLIENT isolate all after: 1 \(expect 1\)",
                   r"SERVER remotes '.+' key0 type 3 key0 rack 2"]),
         S("client-click", "Client: pick a server on the connect screen (the 0.28.0 crash)",
           server={"open": "none"}, client={"test": "clickserver", "args": ["--client"]}, duration=11,
