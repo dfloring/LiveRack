@@ -278,7 +278,12 @@ struct ClientPreview
                     if (b->getButtonText().startsWith ("MIDI Learn"))
                         learn = b;
             if (learn != nullptr) learn->triggerClick();
-            std::cerr << "CLIENT snapshot learn: button " << (learn != nullptr) << " learning " << v.midi->isLearning() << std::endl;
+            std::cerr << "CLIENT snapshot learn: button " << (learn != nullptr) << std::endl;
+        });
+        at (15150, c, [] (ClientComponent&, View& v)
+        {
+            if (v.midi == nullptr) return;
+            std::cerr << "CLIENT snapshot learning " << v.midi->isLearning() << std::endl;
             v.midi->handle ({ "Test pad", juce::MidiMessage::noteOn (1, 62, (juce::uint8) 100) });
             std::cerr << "CLIENT snapshot learned: " << v.midi->getMappings().size() << " mapping(s), snapshot 7 trigger '" << v.midi->describeTriggerFor (7) << "'" << std::endl;
             v.midi->handle ({ "Test pad", juce::MidiMessage::noteOn (1, 62, (juce::uint8) 100) });
