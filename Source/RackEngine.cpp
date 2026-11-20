@@ -176,7 +176,14 @@ struct RackEngine::Rack
         delayWrite = 0;
 
         if (prepare)
+        {
+           #if LIVERACK_PREVIEW_HOOKS
+            // Tests: pretend the plugins are slow to prepare, so a lock held meanwhile shows up
+            if (const int ms = juce::SystemStats::getEnvironmentVariable ("LIVERACK_TEST_PREPARE_MS", "0").getIntValue(); ms > 0)
+                juce::Thread::sleep (ms);
+           #endif
             graph.prepareToPlay (sr, bs);
+        }
     }
 
     void addTap (int channels)

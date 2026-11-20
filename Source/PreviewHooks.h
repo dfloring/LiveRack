@@ -833,12 +833,22 @@ struct PreviewHooks
                     juce::Thread::sleep (20);
                 }
 
+                // configureRack (removeDriver, previewPrepare) is what #28 changed; the rack
+                // prepare is slowed to 150 ms (LIVERACK_TEST_PREPARE_MS), so holding the
+                // audio lock through it would stall the audio thread for that long
+                for (int i = 0; i < 2; ++i)
+                {
+                    const int d = m.engine.addDriver();
+                    m.engine.removeDriver (d);
+                    m.engine.previewPrepare (48000.0, 128);
+                }
+
                 juce::Timer::callAfterDelay (500, []
                 {
                     const auto worst = audio->worstMs.load();
                     const auto blocks = audio->blocks.load();
                     audio->stopThread (2000);
-                    std::cerr << "RECONFIG 20 changes, " << blocks << " blocks ran; longest block "
+                    std::cerr << "RECONFIG 20 changes, 2 driver removals and 2 re-prepares, " << blocks << " blocks ran; longest block "
                               << (int) worst << " ms, under 100 ms " << (worst < 100.0) << " (expect 1)" << std::endl;
                 });
             });
