@@ -9,6 +9,7 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 
 ## Unreleased
 
+- New: a plugin running in its own process that keeps crashing or stops responding (three times in a minute) is now switched to bypass automatically, so the rack shows it as bypassed along with the message that says why, instead of staying switched on while passing audio through (#7).
 - Fixed: with Run all plugins in their own process on, a plugin that couldn't move to a helper disappeared when the show was reopened or LiveRack restarted after a crash. It now comes back where it was (#32).
 - New: show menu > Run all plugins in their own process (experimental), one step to isolate every plugin in the show, including ones added later, so a crashing plugin no longer takes LiveRack down. Saved in the show; off unless you turn it on (the default is unchanged until isolated plugins' latency, window and MIDI gaps are dealt with) (#25).
 - Tests (nothing in the app): the reconfigure test now also covers removing a device and re-preparing racks, the path the audio-wait fix (#26) changed (#34).

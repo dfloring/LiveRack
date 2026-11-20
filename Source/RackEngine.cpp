@@ -1360,6 +1360,20 @@ void RackEngine::crashIsolatedSlot (int rack, int slot)
         p->crashHelper();
 }
 
+// A helper that keeps failing is given up on: show its slot as bypassed, so
+// the rack says what is happening (the audio already passes through)
+static void bypassSlotWhenStopped (RackEngine& engine, juce::AudioPluginInstance& plugin)
+{
+    if (auto* isolated = dynamic_cast<IsolatedPlugin*> (&plugin))
+        isolated->onStopped = [&engine, &plugin]
+        {
+            for (int r = 0; r < engine.getNumRacks(); ++r)
+                for (int s = 0; s < engine.getNumSlots (r); ++s)
+                    if (engine.getPlugin (r, s) == &plugin)
+                        engine.setSlotBypassed (r, s, true);
+        };
+}
+
 bool RackEngine::replacePlugin (int index, int slot, const juce::PluginDescription& desc, juce::String& error, int isolate)
 {
     auto* r = getRack (index);
@@ -1377,6 +1391,8 @@ bool RackEngine::replacePlugin (int index, int slot, const juce::PluginDescripti
         if (error.isEmpty()) error = "Couldn't load " + desc.name;
         return false;
     }
+
+    bypassSlotWhenStopped (*this, *instance);
 
     juce::MemoryBlock state;
     old->getStateInformation (state);
@@ -1472,6 +1488,7 @@ bool RackEngine::addPlugin (int index, const juce::PluginDescription& desc, juce
 
     const bool split = r->config.isMonoToStereo() && width == 1 && isMonoToStereoVersion (desc.name);
     requestLayout (*instance, width, split ? 2 : width);
+    bypassSlotWhenStopped (*this, *instance);
 
     auto node = r->graph.addNode (std::move (instance));
 
