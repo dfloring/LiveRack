@@ -27,6 +27,17 @@ namespace ServerCheck
     // LiveRack's own settings (message thread)
     std::vector<Item> getAppItems (RackEngine&, WebRemote&);
 
+    // The "Before the service" block at the top of the window: what LiveRack can
+    // tell about the rig, in the order of docs/PRE-SERVICE.md. Built from the
+    // same state on every screen. Message thread.
+    struct BeforeRow
+    {
+        enum Light { good, lookAt, unknown };   // unknown: can't tell, never shown green
+        Light light = unknown;
+        juce::String title, detail;
+    };
+    std::vector<BeforeRow> getBeforeService (LiveConnection&);   // empty: not connected
+
     // A window listing them all, with the fix buttons (for this computer or a server)
     void showWindow (LiveConnection&);
 }

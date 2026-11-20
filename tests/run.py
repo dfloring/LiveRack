@@ -120,6 +120,7 @@ def scenarios():
         S("remote-setup", "Consoles, OSC, web remote and Server settings over the connection layer",
           server={"open": "remotesetup"}, duration=12,
           expect=[r"RSET consoles 2 same 1", r"RSET osc same 1 web same 1", r"RSET server same 1", r"RSET server check \d+ items same 1",
+                  r"RSET before the service 4 rows same 1 first 'Audio drivers' last 'Server check'",
                   r"RSET here now: consoles 1 \(expect 1\), follow 0 \(expect 0\), slot 'Renamed slot', osc port 9123 \(expect 9123\)",
                   r"RSET the copy sees: consoles 1, osc 'OSC on port 9123"]),
         S("remote-plugins", "Plugin list, scanning, pages and Hot Plugins over the connection layer",
