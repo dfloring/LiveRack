@@ -147,9 +147,9 @@ int ConsoleLinksGrid::numRows() const
     {
         const auto cfg = engine.getRackConfig (r);
         if (cfg.console == console || engine.getNumConsoles() < 2)
-            rows = juce::jmax (rows, cfg.consoleChannel, cfg.consoleChannel2);
+            rows = juce::jmax (rows, cfg.consoleChannel, cfg.stereo ? cfg.consoleChannel2 : 0);
     }
-    return rows;
+    return juce::jmin (rows, 512);   // a wild value from a remote must not make a huge grid
 }
 
 juce::String ConsoleLinksGrid::rowLabel (int n) const
@@ -201,15 +201,23 @@ void ConsoleLinksGrid::refresh()
 {
     console = juce::jlimit (0, juce::jmax (0, engine.getNumConsoles() - 1), console);
 
-    consoleTabs.clear();
-    if (engine.getNumConsoles() > 1)
-        for (int i = 0; i < engine.getNumConsoles(); ++i)
+    // The tab buttons are only rebuilt when the number of consoles changes, never from a button's own click
+    const int wanted = engine.getNumConsoles() > 1 ? engine.getNumConsoles() : 0;
+    if (consoleTabs.size() != wanted)
+    {
+        consoleTabs.clear();
+        for (int i = 0; i < wanted; ++i)
         {
-            auto* b = consoleTabs.add (new juce::TextButton (engine.getConsole (i).displayName));
-            b->setToggleState (i == console, juce::dontSendNotification);
+            auto* b = consoleTabs.add (new juce::TextButton);
             b->onClick = [this, i] { console = i; refresh(); };
             addAndMakeVisible (b);
         }
+    }
+    for (int i = 0; i < wanted; ++i)
+    {
+        consoleTabs[i]->setButtonText (engine.getConsole (i).displayName);
+        consoleTabs[i]->setToggleState (i == console, juce::dontSendNotification);
+    }
 
     layout = engine.getNumConsoles() > 0 ? ConsoleLink::layoutFor (engine.getConsole (console).settings.type)
                                          : ConsoleLink::Layout();

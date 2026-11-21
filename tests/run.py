@@ -131,6 +131,7 @@ def scenarios():
                   r"LINKS a third click replaces R: L 10 R 12 \(expect 10, 12\)",
                   r"LINKS the console selects channel 12 \(the right side\): selected rack is the stereo one 1 \(expect 1\)",
                   r"LINKS click on L unlinks it: L 0 R 12 \(expect 0, 12\)",
+                  r"LINKS rack turned mono: the console on its old right channel 12 selects it 0 \(expect 0\)",
                   r"LINKS first mix row links as 73: 73 \(expect 73\), label 'MIX 1'",
                   r"LINKS remote grid rows 104 \(expect 104\)",
                   r"LINKS over the network: rack linked to 7 on the server 7 \(expect 7\)",

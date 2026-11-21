@@ -447,6 +447,13 @@ struct PreviewHooks
         grid.toggleLink (st, 10);
         c = e.getRackConfig (st);
         say ("click on L unlinks it: L " + juce::String (c.consoleChannel) + " R " + juce::String (c.consoleChannel2) + " (expect 0, 12)");
+        // A stereo rack turned mono must let go of its right channel
+        c = e.getRackConfig (st);
+        c.stereo = false;
+        e.setRackConfig (st, c);
+        m.selectedRack = a;
+        m.selectRackForChannel (0, 12);
+        say ("rack turned mono: the console on its old right channel 12 selects it " + juce::String (m.selectedRack == st ? 1 : 0) + " (expect 0)");
         grid.toggleLink (a, 73);
         say ("first mix row links as 73: " + juce::String (e.getRackConfig (a).consoleChannel) + " (expect 73), label '" + grid.rowLabel (73) + "'");
 

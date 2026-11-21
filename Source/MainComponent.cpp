@@ -562,7 +562,7 @@ MainComponent::MainComponent()
             for (int r = 0; r < engine.getNumRacks(); ++r)
             {
                 const auto c = engine.getRackConfig (r);
-                if ((c.consoleChannel == channel || c.consoleChannel2 == channel) && (consoles.size() < 2 || c.console == console))
+                if ((c.consoleChannel == channel || (c.stereo && c.consoleChannel2 == channel)) && (consoles.size() < 2 || c.console == console))
                     return c.name;
             }
             return {};
@@ -2865,7 +2865,7 @@ void MainComponent::selectRackForChannel (int console, int channel)
     for (int i = 0; i < engine.getNumRacks(); ++i)
     {
         const auto c = engine.getRackConfig (i);
-        if ((c.consoleChannel == channel || c.consoleChannel2 == channel) && (consoles.size() < 2 || c.console == console))
+        if ((c.consoleChannel == channel || (c.stereo && c.consoleChannel2 == channel)) && (consoles.size() < 2 || c.console == console))
         {
             select (i, -1);
             return;
@@ -4085,6 +4085,8 @@ bool MainComponent::handleWebEditCommand (const juce::String& cmd, const juce::v
             cfg.consoleChannel = juce::jmax (0, (int) c["console"]);
         if (c.hasProperty ("console2"))
             cfg.consoleChannel2 = juce::jmax (0, (int) c["console2"]);
+        if (! cfg.stereo)
+            cfg.consoleChannel2 = 0;     // only a stereo rack has a second channel
         if (c.hasProperty ("consoleIndex"))
             cfg.console = juce::jmax (0, (int) c["consoleIndex"]);
         if (c.hasProperty ("safe"))
