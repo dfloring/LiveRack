@@ -3,9 +3,9 @@
 Controls [LiveRack](https://github.com/dfloring/LiveRack), a live audio plugin host, over OSC.
 
 **In LiveRack:** Devices > Controllers > OSC remote must be on (port 9010 by default).
-**In this connection:** enter LiveRack's IP address (127.0.0.1 if Companion runs on the same Mac) and the port.
+**In this connection:** enter the IP address of the computer running LiveRack **Native or Server** (127.0.0.1 if Companion runs on that same computer) and the port. LiveRack Client has no OSC remote, so it can't be used here.
 
-The connection shows OK once LiveRack answers. Variables and presets follow LiveRack's racks, keys and pages, and update when you rename racks or change colours.
+The connection shows OK once LiveRack answers. It shows "No reply from LiveRack" if nothing ever comes back (check the address and that the OSC remote is on). Variables and presets follow LiveRack's racks, keys and pages, and update when you rename racks or change colours.
 
 ### Actions
 - Rack: bypass (toggle / on / off), bypass the selected rack, select

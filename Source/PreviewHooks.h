@@ -1637,6 +1637,28 @@ struct PreviewHooks
                 e.setMultiCore (true);
             });
 
+        // /liverack/ping must be answered (the Companion module reads that as "alive")
+        if (open == "oscping")
+            juce::Timer::callAfterDelay (1500, [&m]
+            {
+                static juce::DatagramSocket sock (false);
+                sock.bindToPort (0);
+                juce::OSCSender s;
+                s.connectToSocket (sock, "127.0.0.1", m.osc.getPort());
+                s.send ("/liverack/ping");
+                juce::Timer::callAfterDelay (1000, []
+                {
+                    char buf[4096];
+                    int pongs = 0, others = 0;
+                    while (sock.waitUntilReady (true, 100) > 0 && pongs + others < 2000)
+                    {
+                        const int len = sock.read (buf, sizeof (buf), false);
+                        if (len <= 0) break;
+                        if (juce::String::fromUTF8 (buf) == "/liverack/pong") ++pongs; else ++others;
+                    }
+                    std::cerr << "OSCPING pongs " << pongs << " (expect 1)" << std::endl;
+                });
+            });
         if (open == "selftest")
             juce::Timer::callAfterDelay (600, [&m] { selfTest (m); });
         if (open == "selftest2")

@@ -232,7 +232,7 @@ The `companion-module-liverack-host` folder holds a module for Bitfocus Companio
 
 ## OSC remote (for Companion)
 
-On by default on UDP port **9010** (change it in Devices). Whoever sends a message gets feedback sent back to the address and port it came from; send `/liverack/ping` (or anything) at least once a minute to keep it coming. Numbers are 1-based.
+On by default on UDP port **9010** (change it in Devices). Whoever sends a message gets feedback sent back to the address and port it came from; send `/liverack/ping` (or anything) at least once a minute to keep it coming; it answers `/liverack/pong 1`. Numbers are 1-based.
 
 Commands:
 - `/liverack/rack/<n>/bypass [0|1]` (no argument = toggle), `/liverack/rack/<n>/select`

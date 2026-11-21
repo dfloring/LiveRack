@@ -37,7 +37,7 @@ export default class LiveRackInstance extends InstanceBase {
 				id: 'info',
 				width: 12,
 				label: 'LiveRack',
-				value: 'Turn on the OSC remote in LiveRack (Devices > Controllers > OSC remote). Use 127.0.0.1 if Companion runs on the same Mac.',
+				value: 'Turn on the OSC remote in LiveRack (Devices > Controllers > OSC remote). Enter the address of the computer running LiveRack Native or Server (127.0.0.1 if Companion runs on that same computer). LiveRack Client has no OSC remote, so it can not be used here.',
 			},
 			{ type: 'textinput', id: 'host', label: 'LiveRack IP address', width: 8, default: '127.0.0.1', minLength: 1 },
 			{ type: 'number', id: 'port', label: 'OSC port', width: 4, default: 9010, min: 1, max: 65535 },
@@ -57,7 +57,10 @@ export default class LiveRackInstance extends InstanceBase {
 			bpm: 120,
 			selected: 0,
 		}
-		this.lastMessage = 0
+		this.lastMessage = 0 // any reply at all
+		this.lastPong = 0 // newer LiveRack answers every ping with /liverack/pong
+		this.pings = 0
+		this.status = ''
 		this.shape = '' // rack count + names + colours + pages: presets are rebuilt when it changes
 	}
 
@@ -76,11 +79,12 @@ export default class LiveRackInstance extends InstanceBase {
 			return
 		}
 
-		this.updateStatus(InstanceStatus.Connecting)
+		this.pings = 0
+		this.setStatus(InstanceStatus.Connecting)
 		this.socket = dgram.createSocket('udp4')
 		this.socket.on('error', (err) => {
 			this.log('error', `OSC socket: ${err.message}`)
-			this.updateStatus(InstanceStatus.ConnectionFailure, err.message)
+			this.setStatus(InstanceStatus.ConnectionFailure, err.message)
 		})
 		this.socket.on('message', (msg) => this.onPacket(msg))
 		this.socket.bind(0, () => {
@@ -90,8 +94,13 @@ export default class LiveRackInstance extends InstanceBase {
 		// Keep feedback coming, and notice when LiveRack goes away
 		this.pingTimer = setInterval(() => {
 			this.send('/liverack/ping')
-			const quiet = Date.now() - this.lastMessage
-			if (this.lastMessage === 0 || quiet > 12000) this.updateStatus(InstanceStatus.ConnectionFailure, 'No reply from LiveRack')
+			this.pings++
+			const now = Date.now()
+			// Older LiveRack never answers a ping and only sends changes, so quiet is
+			// normal once we have heard from it. It is a failure only when nothing has
+			// ever arrived, or when pongs were arriving and stopped.
+			const silent = this.lastMessage === 0 ? this.pings >= 3 : this.lastPong !== 0 && now - this.lastPong > 12000
+			if (silent) this.setStatus(InstanceStatus.ConnectionFailure, 'No reply from LiveRack')
 		}, 4000)
 	}
 
@@ -119,13 +128,21 @@ export default class LiveRackInstance extends InstanceBase {
 		}
 	}
 
+	setStatus(status, message) {
+		if (this.status === status) return
+		this.status = status
+		this.updateStatus(status, message)
+	}
+
 	onPacket(buf) {
-		const wasQuiet = this.lastMessage === 0 || Date.now() - this.lastMessage > 12000
 		this.lastMessage = Date.now()
-		if (wasQuiet) this.updateStatus(InstanceStatus.Ok)
+		this.setStatus(InstanceStatus.Ok)
 
 		const changed = new Set()
-		for (const m of decodePacket(buf)) this.handle(m.address, m.args, changed)
+		for (const m of decodePacket(buf)) {
+			if (m.address === '/liverack/pong') this.lastPong = this.lastMessage
+			else this.handle(m.address, m.args, changed)
+		}
 
 		if (changed.size > 0) {
 			this.updateVariableValues()
