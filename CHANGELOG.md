@@ -9,6 +9,8 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 
 ## Unreleased
 
+## 0.31.0 (2026-11-21)
+
 - The Routing screen now has tabs: **Patch** (the routing matrix, as before) and **Console links**. Console links is a grid with the console's channels down the side (inputs, mixes and matrixes, scrolling) and your racks across the top: click a cell to link that rack to that console channel, so selecting the channel on the console selects the rack. No typing. A stereo rack takes two channels (first click is L, second is R); one channel links to one rack. Works the same on LiveRack Client. The old Console channel box in the rack dialog still works. Console channel names and the Latency tab come later (#53).
 - Look (for you to judge in a beta): darker backgrounds everywhere, more vivid rack colours, and 16 rack colours to pick from instead of 8 (Orange, Lime, Sky, Indigo, Magenta, Rose, Mint, Silver are new). A show keeps the same colour per rack, and "Automatic" still cycles through the first eight. The iPad page uses the same greys (#54).
 - LiveRack Client: if the plugin list from the server arrived while the "add plugin" picker was open (a scan finishing on the server), the picker could be reading a list that was just thrown away, which can crash the Client. The new list now waits until the picker closes (#62).
