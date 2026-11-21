@@ -6,9 +6,9 @@
 
 namespace
 {
-    const juce::Colour stripBack   { 0xff1a1d21 };
+    const juce::Colour stripBack   = Theme::strip;
     const juce::Colour slotBack    = Theme::raised;
-    const juce::Colour meterBack   { 0xff0b0d0f };
+    const juce::Colour meterBack   = Theme::meterBack;
     const juce::Colour bypassOn    = Theme::amber;
     const juce::Colour safeOn      = Theme::green;
     const juce::Colour buttonOff   = Theme::raised;
@@ -32,10 +32,10 @@ namespace
     public:
         SwatchGrid (int current, std::function<void (int)> cb) : CustomComponent (false), selected (current), onPick (std::move (cb)) {}
 
-        void getIdealSize (int& w, int& h) override { w = 4 * 44 + 12; h = 2 * 44 + 12 + 34; }
+        void getIdealSize (int& w, int& h) override { w = 4 * 44 + 12; h = 4 * 44 + 12 + 34; }
 
         juce::Rectangle<int> cell (int i) const { return { 6 + (i % 4) * 44, 6 + (i / 4) * 44, 40, 40 }; }
-        juce::Rectangle<int> autoCell() const   { return { 6, 6 + 2 * 44 + 2, 4 * 44 - 4, 30 }; }
+        juce::Rectangle<int> autoCell() const   { return { 6, 6 + 4 * 44 + 2, 4 * 44 - 4, 30 }; }
 
         void paint (juce::Graphics& g) override
         {
@@ -82,14 +82,18 @@ namespace
 
 juce::Colour RackStripsView::colourForIndex (int index)
 {
-    static const juce::uint32 palette[numColours] = { 0xff4a90d9, 0xffe0a63a, 0xff52b788, 0xffb07cd8,
-                                                      0xff3bb3c3, 0xffe06c6c, 0xffd4c34a, 0xffe58fb8 };
+    // The first eight keep their hue (saved shows store the index); 8 to 15 are added after them
+    static const juce::uint32 palette[numColours] = { 0xff2f8cff, 0xffffb020, 0xff2ecc71, 0xffa66bff,
+                                                      0xff19c8d6, 0xffff5a52, 0xffffe03a, 0xffff6fb5,
+                                                      0xffff7a1a, 0xffa6e22e, 0xff6cc8ff, 0xff7080ff,
+                                                      0xffe040e0, 0xffff8a9a, 0xff5ef0b8, 0xffcfd6de };
     return juce::Colour (palette[(size_t) juce::jmax (0, index) % numColours]);
 }
 
 juce::String RackStripsView::colourName (int index)
 {
-    static const char* names[numColours] = { "Blue", "Amber", "Green", "Purple", "Teal", "Red", "Yellow", "Pink" };
+    static const char* names[numColours] = { "Blue", "Amber", "Green", "Purple", "Teal", "Red", "Yellow", "Pink",
+                                             "Orange", "Lime", "Sky", "Indigo", "Magenta", "Rose", "Mint", "Silver" };
     return names[(size_t) juce::jmax (0, index) % numColours];
 }
 

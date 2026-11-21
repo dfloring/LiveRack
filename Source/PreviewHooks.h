@@ -1,4 +1,5 @@
 #pragma once
+#include <set>
 #include "IsolatedPlugin.h"
 #include "ServerMode.h"
 #include "SocketUtil.h"
@@ -800,6 +801,35 @@ struct PreviewHooks
             const auto* afterSmall = m.engine.previewRackBuffer (0);
             std::cerr << "BIGBLOCK buffer kept after 8192-sample block " << (before == afterBig)
                       << ", after a small one " << (before == afterSmall) << " (expect 1, 1)" << std::endl;
+        }
+        if (open == "palette")
+        {
+            // 16 rack colours: distinct, readable under the ink, the old eight unchanged in order, Automatic stays on the first eight
+            auto lum = [] (juce::Colour c)
+            {
+                auto lin = [] (float v) { return v <= 0.03928f ? v / 12.92f : std::pow ((v + 0.055f) / 1.055f, 2.4f); };
+                return 0.2126f * lin (c.getFloatRed()) + 0.7152f * lin (c.getFloatGreen()) + 0.0722f * lin (c.getFloatBlue());
+            };
+            const float inkLum = lum (Theme::inkOnLit);
+            float worst = 100.0f;
+            std::set<juce::uint32> seen;
+            bool namesOk = true;
+            for (int i = 0; i < RackStripsView::numColours; ++i)
+            {
+                const auto c = RackStripsView::colourForIndex (i);
+                seen.insert (c.getARGB());
+                worst = juce::jmin (worst, (lum (c) + 0.05f) / (inkLum + 0.05f));
+                namesOk = namesOk && RackStripsView::colourName (i).isNotEmpty();
+            }
+            RackConfig cfg;
+            std::cerr << "PALETTE count " << RackStripsView::numColours << " distinct " << (int) seen.size()
+                      << " names " << namesOk << " worst contrast vs ink " << (worst >= 4.5f ? "ok" : "LOW")
+                      << " blue " << RackStripsView::colourForIndex (0).toDisplayString (false)
+                      << " silver " << RackStripsView::colourForIndex (15).toDisplayString (false)
+                      << " auto rack 9 -> " << cfg.effectiveColour (9) << " rack 3 -> " << cfg.effectiveColour (3)
+                      << " chosen 12 -> " << ([&] { RackConfig c2; c2.colourIndex = 12; return c2.effectiveColour (2); })()
+                      << " strip " << Theme::strip.toDisplayString (false) << " meter " << Theme::meterBack.toDisplayString (false)
+                      << " (expect 16, 16, 1, ok, 2F8CFF, CFD6DE, 1, 3, 12, 101316, 07080A)" << std::endl;
         }
         if (open == "reconfig")
         {

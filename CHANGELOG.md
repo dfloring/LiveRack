@@ -9,6 +9,7 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 
 ## Unreleased
 
+- Look (for you to judge in a beta): darker backgrounds everywhere, more vivid rack colours, and 16 rack colours to pick from instead of 8 (Orange, Lime, Sky, Indigo, Magenta, Rose, Mint, Silver are new). A show keeps the same colour per rack, and "Automatic" still cycles through the first eight. The iPad page uses the same greys (#54).
 - The Companion module no longer drops to "No reply from LiveRack" after about 12 seconds: LiveRack now answers the module's ping, and the module stays connected to an older LiveRack that stays quiet. The module help says to use the Native or Server computer's address, not Client (#60).
 - How LiveRack is built changed (nothing in the app): every night main is built from scratch and the automated tests run; if it fails, a "Nightly check failed" issue is opened (#3).
 - The release page now lists only the downloads (Mac, Windows and the Companion module) instead of about thirty files, and the release job no longer fails on an empty test log (#47).
