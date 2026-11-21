@@ -927,9 +927,10 @@ struct PreviewHooks
             struct Audio : juce::Thread
             {
                 RackEngine& e;
+                RackEngine::Driver& driver0; // not e.previewProcess: that walks the driver list, which this test changes
                 std::atomic<double> worstMs { 0.0 };
                 std::atomic<int> blocks { 0 };
-                explicit Audio (RackEngine& en) : juce::Thread ("reconfig audio"), e (en) {}
+                explicit Audio (RackEngine& en) : juce::Thread ("reconfig audio"), e (en), driver0 (en.previewFirstDriver()) {}
                 void run() override
                 {
                     juce::AudioBuffer<float> in (16, 128), out (16, 128);
@@ -937,7 +938,7 @@ struct PreviewHooks
                     while (! threadShouldExit())
                     {
                         const auto t = juce::Time::getMillisecondCounterHiRes();
-                        e.previewProcess (in, out);
+                        e.previewProcessFirstDriver (driver0, in, out);
                         const auto ms = juce::Time::getMillisecondCounterHiRes() - t;
                         if (ms > worstMs.load()) worstMs = ms;
                         ++blocks;
