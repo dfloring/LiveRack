@@ -9,6 +9,7 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 
 ## Unreleased
 
+- LiveRack Client: if the plugin list from the server arrived while the "add plugin" picker was open (a scan finishing on the server), the picker could be reading a list that was just thrown away, which can crash the Client. The new list now waits until the picker closes (#62).
 - The Companion module no longer drops to "No reply from LiveRack" after about 12 seconds: LiveRack now answers the module's ping, and the module stays connected to an older LiveRack that stays quiet. The module help says to use the Native or Server computer's address, not Client (#60).
 - How LiveRack is built changed (nothing in the app): every night main is built from scratch and the automated tests run; if it fails, a "Nightly check failed" issue is opened (#3).
 - The release page now lists only the downloads (Mac, Windows and the Companion module) instead of about thirty files, and the release job no longer fails on an empty test log (#47).
