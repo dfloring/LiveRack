@@ -265,6 +265,31 @@ struct ClientPreview
             std::cerr << "CLIENT devices " << (v.devicesPanel != nullptr) << std::endl;
         });
 
+        // The plugin list arriving while the picker is open (a scan finishing on the server)
+        // must not rebuild the list under the picker; and a plugin the server doesn't know is refused
+        static int slotsBeforeUnknown = -1;
+        at (12500, c, [] (ClientComponent&, View& v)
+        {
+            const auto before = v.library.getFamilies().size();
+            v.showAddPluginMenu (0);
+            v.applyLibrary ({});
+            std::cerr << "CLIENT list while picker open: picker " << (v.pickerOverlay != nullptr) << " families " << v.library.getFamilies().size()
+                      << " (expect " << before << ")" << std::endl;
+            v.pickerOverlay.reset();
+            v.applyLibrary ({});
+            std::cerr << "CLIENT list after picker closed: families " << v.library.getFamilies().size() << " (expect 0)" << std::endl;
+            v.loadLibrary();   // back to the server's list
+            slotsBeforeUnknown = v.live.getNumSlots (0);
+            v.send (makeCmd ("addPlugin", { { "rack", 0 }, { "key", "no such plugin" } }));
+            v.send (makeCmd ("addPlugin", { { "rack", 0 }, { "id", "id:no such plugin" } }));
+        });
+        at (13000, c, [] (ClientComponent&, View& v)
+        {
+            std::cerr << "CLIENT unknown plugin: slots " << v.live.getNumSlots (0) << " (expect " << slotsBeforeUnknown << ") families "
+                      << v.library.getFamilies().size() << " (expect 4)" << std::endl;
+        });
+
+
         at (13500, c, [] (ClientComponent&, View& v) { v.setView (View::View::routing); std::cerr << "CLIENT routing " << (v.routingScreen != nullptr) << std::endl; });
         // Console links tab over the connection: a click links rack 1 to channel 9 on the server
         at (13800, c, [] (ClientComponent&, View& v)

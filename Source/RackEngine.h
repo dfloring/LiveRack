@@ -27,7 +27,7 @@ struct RackConfig
     int numChannels() const { return numOutputs(); }
     bool isMonoToStereo() const { return monoToStereo && ! stereo; }
     juce::String formatName() const { return stereo ? "ST" : monoToStereo ? "M>S" : "MONO"; }
-    int effectiveColour (int rackIndex) const { return colourIndex >= 0 ? colourIndex : rackIndex; }
+    int effectiveColour (int rackIndex) const { return colourIndex >= 0 ? colourIndex : rackIndex % 8; }   // automatic: first 8 palette entries
     void patchContiguous (int firstIn, int firstOut)
     {
         input[0] = firstIn;  input[1] = firstIn + 1;
