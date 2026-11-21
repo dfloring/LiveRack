@@ -364,6 +364,7 @@ private:
     void setTwoWindows (bool);
     bool isTwoWindows() const { return rackWindow != nullptr; }
     void loadLibrary();
+    void applyLibrary (const juce::Array<juce::PluginDescription>& types);
 
     // Shows and snapshots
     void showShowMenu();
@@ -386,6 +387,9 @@ private:
     ClientComponent& owner;
     PluginLibrary library { RackEngine::getSettingsDir().getChildFile ("client-plugin-library.xml") };
     bool libraryLoaded = false, scanWasRunning = false;
+    // A list that arrived while the plugin picker was open; applied when it closes
+    juce::Array<juce::PluginDescription> pendingTypes;
+    bool hasPendingTypes = false;
 
     int selectedRack = -1, selectedSlot = -1;
     int serverSelectedRack = -2, serverSelectedSlot = -2;   // last seen, to follow the server's selection
@@ -1050,10 +1054,25 @@ void ClientComponent::ClientView::loadLibrary()
                     if (d.loadFromXml (*xml))
                         types.add (d);
                 }
-        safe->library.rebuild (types);
-        safe->strips.forgetMeters();
-        safe->strips.refresh();
+        safe->applyLibrary (types);
     });
+}
+
+// The open picker points into the library's families, so rebuilding under it
+// leaves it pointing at freed memory. Wait until it closes.
+void ClientComponent::ClientView::applyLibrary (const juce::Array<juce::PluginDescription>& types)
+{
+    if (pickerOverlay != nullptr)
+    {
+        pendingTypes = types;
+        hasPendingTypes = true;
+        return;
+    }
+
+    hasPendingTypes = false;
+    library.rebuild (types);
+    strips.forgetMeters();
+    strips.refresh();
 }
 
 void ClientComponent::ClientView::timerCallback()
@@ -1918,6 +1937,8 @@ void ClientComponent::ClientView::showAddPluginMenu (int rack)
         {
             if (safe == nullptr) return;
             safe->pickerOverlay.reset();
+            if (safe->hasPendingTypes)
+                safe->applyLibrary (safe->pendingTypes);
             safe->refreshAll();
         });
     };
