@@ -15,7 +15,8 @@
 //   /liverack/key/<n>/press             /liverack/hot/<n>/open
 //   /liverack/scene/recall <n>          /liverack/scene/next   /liverack/scene/prev
 //   /liverack/tap                       /liverack/bpm <bpm>
-//   /liverack/subscribe                 /liverack/ping   (keep feedback coming)
+//   /liverack/subscribe                 /liverack/ping   (keep feedback coming; answered
+//                                                    with /liverack/pong 1)
 class OscRemote : private juce::Thread,
                   private juce::Timer
 {

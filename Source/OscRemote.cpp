@@ -201,6 +201,10 @@ void OscRemote::timerCallback()
             for (auto& [address, value] : lastSent)
                 sendTo (*it, address, value);
 
+        // Tell the sender we are here. Older modules ignore the unknown address.
+        if (in.address == "/liverack/ping")
+            sendTo (*it, "/liverack/pong", 1);
+
         if (onMessage != nullptr && in.address != "/liverack/ping" && in.address != "/liverack/subscribe")
             onMessage (in.address, in.args);
     }
