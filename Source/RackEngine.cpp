@@ -1829,6 +1829,7 @@ std::unique_ptr<juce::XmlElement> RackEngine::createSnapshot() const
         writeChannel (*rackXml, "output", c.output[0]);
         writeChannel (*rackXml, "outputR", c.output[1]);
         rackXml->setAttribute ("consoleChannel", c.consoleChannel);
+        rackXml->setAttribute ("consoleChannel2", c.consoleChannel2);
         rackXml->setAttribute ("console", c.console);
         rackXml->setAttribute ("recallSafe", c.recallSafe);
         rackXml->setAttribute ("colour", c.colourIndex);
@@ -1930,6 +1931,7 @@ static RackConfig configFromXml (const juce::XmlElement& rackXml)
     config.output[0]   = readChannel (rackXml, "output", 0);
     config.output[1]   = readChannel (rackXml, "outputR", config.output[0] + 1);
     config.consoleChannel = juce::jmax (0, rackXml.getIntAttribute ("consoleChannel", 0));
+    config.consoleChannel2 = juce::jmax (0, rackXml.getIntAttribute ("consoleChannel2", 0));
     config.console     = juce::jmax (0, rackXml.getIntAttribute ("console", 0));
     config.recallSafe  = rackXml.getBoolAttribute ("recallSafe", false);
     config.colourIndex = rackXml.getIntAttribute ("colour", -1);

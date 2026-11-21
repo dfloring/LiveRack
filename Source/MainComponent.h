@@ -14,7 +14,7 @@
 #include "Shortcuts.h"
 #include "WebRemote.h"
 
-class RoutingMatrix;
+class RoutingScreen;
 class SnapshotsPanel;
 class DevicesPanel;
 
@@ -251,7 +251,7 @@ private:
     bool dockWasCovered = false;
     void toggleTool (std::unique_ptr<ToolWindow>&, std::function<void()> open);
     ShortcutsEditor* shortcutsEditor = nullptr;
-    RoutingMatrix* routingMatrix = nullptr;
+    RoutingScreen* routingScreen = nullptr;
     SnapshotsPanel* scopeEditor = nullptr;   // the Snapshots screen
     DevicesPanel* devicesPanel = nullptr;
 

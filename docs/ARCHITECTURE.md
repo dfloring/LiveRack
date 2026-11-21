@@ -33,7 +33,7 @@ A short map for anyone (or any agent) changing the code. JUCE 8, C++17.
 - `RemoteConnection`: the same over `/live` (a WebSocket, JSON state pushed by the
   server, commands sent back, `get` requests answered by id). Used by LiveRack Client.
 - Screens built on it: `RackStripsView`, `PluginDock`, `SnapshotsPanel`,
-  `RoutingMatrix`, `DevicesPanel`, `DriverSettingsPanel`, `ConsoleLinkPanel`,
+  `RoutingScreen` (tabs: `RoutingMatrix`, `ConsoleLinksGrid`), `DevicesPanel`, `DriverSettingsPanel`, `ConsoleLinkPanel`,
   `PluginsPanel`, `ControlBars` (Hot Plugins, pages, User Keys), `Actions`, `MidiControl`.
 
 ## The two front ends

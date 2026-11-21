@@ -58,6 +58,24 @@ public:
 
     static juce::String x32FollowName (int mode);
 
+    // The channels a console has, as the Console links grid lists them:
+    // inputs, then mixes (buses), then matrixes. A link stores the position in
+    // that list (inputs first, so input numbers are the console's own).
+    // Counts are for the biggest model (CL5, X32); DM7 is a guess. Only inputs
+    // are reported by the console today, so only they follow.
+    struct Layout { int inputs = 0, mixes = 0, matrixes = 0; int total() const { return inputs + mixes + matrixes; } };
+    static Layout layoutFor (Type t)
+    {
+        switch (t)
+        {
+            case Type::yamahaRcp:    return { 72, 24, 8 };
+            case Type::yamahaDm7:    return { 72, 24, 8 };
+            case Type::behringerX32: return { 32, 16, 6 };
+            case Type::off:          break;
+        }
+        return {};
+    }
+
     // X32: listen for the next recall-type message and use its address
     void startLearning();
     bool isLearning() const { return learning; }

@@ -266,6 +266,7 @@ RackConfig RemoteConnection::getRackConfig (int rack)
         cfg.output[ch] = (int) at (r["out"], ch);
     }
     cfg.consoleChannel = (int) r["console"];
+    cfg.consoleChannel2 = (int) r["console2"];
     cfg.console = (int) r["consoleIndex"];
     cfg.recallSafe = (bool) r["safe"];
     cfg.colourIndex = r.hasProperty ("colourIndex") ? (int) r["colourIndex"] : -1;
@@ -366,6 +367,15 @@ void RemoteConnection::setRackLatencyGroup (int rack, int group)
 {
     auto c = command ("latencyGroup", rack);
     c.getDynamicObject()->setProperty ("group", group);
+    sendCommand (c);
+}
+
+void RemoteConnection::setRackConsoleLinks (int rack, int console, int channel, int channel2)
+{
+    auto c = command ("rackConfig", rack);
+    c.getDynamicObject()->setProperty ("console", channel);
+    c.getDynamicObject()->setProperty ("console2", channel2);
+    c.getDynamicObject()->setProperty ("consoleIndex", console);
     sendCommand (c);
 }
 

@@ -16,6 +16,7 @@ struct RackConfig
     int input[2]  { 0, 1 };      // L (or mono), R
     int output[2] { 0, 1 };
     int consoleChannel = 0;      // console input channel this rack belongs to (1-based, 0 = none)
+    int consoleChannel2 = 0;     // a stereo rack's second (right) console channel, 0 = none
     int console = 0;             // which linked console that channel is on
     bool recallSafe = false;     // scene recalls leave this rack alone
     int colourIndex = -1;        // palette entry, -1 = automatic (by position)

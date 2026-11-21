@@ -6,7 +6,7 @@
 #include "AppSettings.h"
 #include "PluginPicker.h"
 #include "ParameterInspector.h"
-#include "RoutingMatrix.h"
+#include "RoutingScreen.h"
 #include "SnapshotsPanel.h"
 #include "DevicesPanel.h"
 #include "GainReduction.h"
@@ -562,7 +562,7 @@ MainComponent::MainComponent()
             for (int r = 0; r < engine.getNumRacks(); ++r)
             {
                 const auto c = engine.getRackConfig (r);
-                if (c.consoleChannel == channel && (consoles.size() < 2 || c.console == console))
+                if ((c.consoleChannel == channel || (c.stereo && c.consoleChannel2 == channel)) && (consoles.size() < 2 || c.console == console))
                     return c.name;
             }
             return {};
@@ -1217,8 +1217,8 @@ void MainComponent::select (int rack, int slot)
     refreshAll();
     strips.scrollToRack (selectedRack);
 
-    if (routingMatrix != nullptr)
-        routingMatrix->setSelectedRack (rack);
+    if (routingScreen != nullptr)
+        routingScreen->setSelectedRack (rack);
 }
 
 // Next / previous rack, in the order of the page shown (All: every rack)
@@ -1261,7 +1261,7 @@ void MainComponent::refreshAll()
     if (shortcutsEditor != nullptr) shortcutsEditor->refresh();
     keysBar.repaint();
 
-    if (routingMatrix != nullptr) routingMatrix->refresh();
+    if (routingScreen != nullptr) routingScreen->refresh();
     if (scopeEditor != nullptr)   scopeEditor->refresh();
 
     // While the plugin picker or a setup screen covers the panel, the docked
@@ -2063,8 +2063,8 @@ void MainComponent::showRouting (int rack)
     if (routingWindow == nullptr)
     {
         juce::Component::SafePointer<MainComponent> safe (this);
-        routingMatrix = new RoutingMatrix (live);
-        routingMatrix->onSelectRack = [safe] (int r)
+        routingScreen = new RoutingScreen (live);
+        routingScreen->onSelectRack = [safe] (int r)
         {
             if (safe != nullptr && r != safe->selectedRack)
             {
@@ -2074,12 +2074,12 @@ void MainComponent::showRouting (int rack)
             }
         };
 
-        routingWindow = std::make_unique<ToolWindow> (*this, "Routing", routingMatrix, "routingWindow", [safe]
+        routingWindow = std::make_unique<ToolWindow> (*this, "Routing", routingScreen, "routingWindow", [safe]
         {
             juce::MessageManager::callAsync ([safe]
             {
                 if (safe == nullptr) return;
-                safe->routingMatrix = nullptr;
+                safe->routingScreen = nullptr;
                 safe->routingWindow.reset();
             });
         });
@@ -2087,7 +2087,7 @@ void MainComponent::showRouting (int rack)
 
     routingWindow->toFront (true);
     if (rack >= 0)
-        routingMatrix->setSelectedRack (rack);
+        routingScreen->setSelectedRack (rack);
 }
 
 void MainComponent::showScope()
@@ -2865,7 +2865,7 @@ void MainComponent::selectRackForChannel (int console, int channel)
     for (int i = 0; i < engine.getNumRacks(); ++i)
     {
         const auto c = engine.getRackConfig (i);
-        if (c.consoleChannel == channel && (consoles.size() < 2 || c.console == console))
+        if ((c.consoleChannel == channel || (c.stereo && c.consoleChannel2 == channel)) && (consoles.size() < 2 || c.console == console))
         {
             select (i, -1);
             return;
@@ -3197,6 +3197,7 @@ juce::String MainComponent::buildWebState (const juce::String& query)
         ro->setProperty ("in", juce::Array<juce::var> { cfg.input[0], cfg.input[1] });
         ro->setProperty ("out", juce::Array<juce::var> { cfg.output[0], cfg.output[1] });
         ro->setProperty ("console", cfg.consoleChannel);
+        ro->setProperty ("console2", cfg.consoleChannel2);
         ro->setProperty ("consoleIndex", cfg.console);   // which console, with more than one
 
         const int point = engine.getStereoPoint (i);
@@ -4082,6 +4083,10 @@ bool MainComponent::handleWebEditCommand (const juce::String& cmd, const juce::v
         }
         if (c.hasProperty ("console"))
             cfg.consoleChannel = juce::jmax (0, (int) c["console"]);
+        if (c.hasProperty ("console2"))
+            cfg.consoleChannel2 = juce::jmax (0, (int) c["console2"]);
+        if (! cfg.stereo)
+            cfg.consoleChannel2 = 0;     // only a stereo rack has a second channel
         if (c.hasProperty ("consoleIndex"))
             cfg.console = juce::jmax (0, (int) c["consoleIndex"]);
         if (c.hasProperty ("safe"))
