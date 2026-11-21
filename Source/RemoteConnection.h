@@ -87,6 +87,7 @@ public:
     void setRackBypassed (int rack, bool) override;
     void setRackRecallSafe (int rack, bool) override;
     void setRackLatencyGroup (int rack, int group) override;
+    void setRackConsoleLinks (int rack, int console, int channel, int channel2) override;
     void setRackColour (int rack, int colourIndex) override;
     void setRackName (int rack, const juce::String&) override;
     void setSlotBypassed (int rack, int slot, bool) override;

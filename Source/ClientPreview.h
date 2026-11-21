@@ -265,7 +265,18 @@ struct ClientPreview
             std::cerr << "CLIENT devices " << (v.devicesPanel != nullptr) << std::endl;
         });
 
-        at (13500, c, [] (ClientComponent&, View& v) { v.setView (View::View::routing); std::cerr << "CLIENT routing " << (v.routingMatrix != nullptr) << std::endl; });
+        at (13500, c, [] (ClientComponent&, View& v) { v.setView (View::View::routing); std::cerr << "CLIENT routing " << (v.routingScreen != nullptr) << std::endl; });
+        // Console links tab over the connection: a click links rack 1 to channel 9 on the server
+        at (13800, c, [] (ClientComponent&, View& v)
+        {
+            if (v.routingScreen == nullptr) return;
+            v.routingScreen->showTab (1);
+            v.routingScreen->getConsoleLinks().toggleLink (1, 9);
+        });
+        at (14300, c, [] (ClientComponent&, View& v)
+        {
+            std::cerr << "CLIENT console links: rack 1 linked to " << v.live.getRackConfig (1).consoleChannel << " (expect 9)" << std::endl;
+        });
         at (14500, c, [] (ClientComponent&, View& v) { v.setView (View::View::snapshots); std::cerr << "CLIENT snapshots " << (v.snapshotsPanel != nullptr) << std::endl; });
         // MIDI Learn on the Snapshots screen: a note on this computer recalls snapshot 7 on the server
         at (15000, c, [] (ClientComponent&, View& v)

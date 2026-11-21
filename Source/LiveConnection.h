@@ -169,6 +169,8 @@ public:
     virtual void setRackRecallSafe (int rack, bool) = 0;
     virtual void setRackLatencyGroup (int rack, int group) = 0;
     virtual void setRackColour (int rack, int colourIndex) = 0;
+    // Which console channel(s) select this rack (1-based, 0 = none; the second is a stereo rack's right side)
+    virtual void setRackConsoleLinks (int rack, int console, int channel, int channel2) = 0;
     virtual void setRackName (int rack, const juce::String&) = 0;
     virtual void setRackRouting (int rack, int driver, const int inputs[2], const int outputs[2]) = 0;   // channels 0-based, -1 = unpatched
     virtual void setSlotBypassed (int rack, int slot, bool) = 0;
@@ -477,6 +479,14 @@ public:
     void setRackRecallSafe (int r, bool b) override            { engine.setRackRecallSafe (r, b); }
     void setRackLatencyGroup (int r, int g) override           { engine.setRackLatencyGroup (r, g); }
     void setRackColour (int r, int c) override                 { engine.setRackColour (r, c); }
+    void setRackConsoleLinks (int r, int console, int ch, int ch2) override
+    {
+        auto cfg = engine.getRackConfig (r);
+        cfg.console = juce::jmax (0, console);
+        cfg.consoleChannel = juce::jmax (0, ch);
+        cfg.consoleChannel2 = juce::jmax (0, ch2);
+        engine.setRackConfig (r, cfg);
+    }
     void setRackName (int r, const juce::String& n) override   { engine.setRackName (r, n); }
     void setSlotBypassed (int r, int s, bool b) override       { engine.setSlotBypassed (r, s, b); }
 

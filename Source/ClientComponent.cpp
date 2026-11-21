@@ -12,7 +12,7 @@
 #include "DevicesPanel.h"
 #include "DriverSettingsPanel.h"
 #include "ConsoleLinkPanel.h"
-#include "RoutingMatrix.h"
+#include "RoutingScreen.h"
 #include "SnapshotsPanel.h"
 #include "PluginsPanel.h"
 #include "MidiControl.h"
@@ -426,7 +426,7 @@ private:
 
     std::unique_ptr<juce::Component> tool;   // Devices, Routing, Plugins or Snapshots
     DevicesPanel* devicesPanel = nullptr;
-    RoutingMatrix* routingMatrix = nullptr;
+    RoutingScreen* routingScreen = nullptr;
     SnapshotsPanel* snapshotsPanel = nullptr;
 
     class PickerOverlay;
@@ -1314,8 +1314,8 @@ void ClientComponent::ClientView::select (int rack, int slot)
 
     refreshAll();
     strips.scrollToRack (selectedRack);
-    if (routingMatrix != nullptr)
-        routingMatrix->setSelectedRack (rack);
+    if (routingScreen != nullptr)
+        routingScreen->setSelectedRack (rack);
 }
 
 void ClientComponent::ClientView::stepRack (int delta)
@@ -1353,7 +1353,7 @@ void ClientComponent::ClientView::refreshAll()
     hotBar.repaint();
     pageTabs.repaint();
     keysBar->repaint();
-    if (routingMatrix != nullptr)  routingMatrix->refresh();
+    if (routingScreen != nullptr)  routingScreen->refresh();
     if (snapshotsPanel != nullptr) snapshotsPanel->refresh();
 
     if (pickerOverlay == nullptr)
@@ -1381,7 +1381,7 @@ void ClientComponent::ClientView::setView (View v)
     {
         tool.reset();
         devicesPanel = nullptr;
-        routingMatrix = nullptr;
+        routingScreen = nullptr;
         snapshotsPanel = nullptr;
         juce::Component::SafePointer<ClientView> safe (this);
 
@@ -1412,8 +1412,8 @@ void ClientComponent::ClientView::setView (View v)
         }
         else if (v == View::routing)
         {
-            routingMatrix = new RoutingMatrix (live);
-            routingMatrix->onSelectRack = [safe] (int r)
+            routingScreen = new RoutingScreen (live);
+            routingScreen->onSelectRack = [safe] (int r)
             {
                 if (safe != nullptr && r != safe->selectedRack)
                 {
@@ -1422,8 +1422,8 @@ void ClientComponent::ClientView::setView (View v)
                     safe->refreshAll();
                 }
             };
-            routingMatrix->setSelectedRack (selectedRack);
-            tool.reset (routingMatrix);
+            routingScreen->setSelectedRack (selectedRack);
+            tool.reset (routingScreen);
         }
         else if (v == View::plugins)
         {

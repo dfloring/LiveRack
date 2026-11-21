@@ -9,6 +9,7 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 
 ## Unreleased
 
+- The Routing screen now has tabs: **Patch** (the routing matrix, as before) and **Console links**. Console links is a grid with the console's channels down the side (inputs, mixes and matrixes, scrolling) and your racks across the top: click a cell to link that rack to that console channel, so selecting the channel on the console selects the rack. No typing. A stereo rack takes two channels (first click is L, second is R); one channel links to one rack. Works the same on LiveRack Client. The old Console channel box in the rack dialog still works. Console channel names and the Latency tab come later (#53).
 - The Companion module no longer drops to "No reply from LiveRack" after about 12 seconds: LiveRack now answers the module's ping, and the module stays connected to an older LiveRack that stays quiet. The module help says to use the Native or Server computer's address, not Client (#60).
 - How LiveRack is built changed (nothing in the app): every night main is built from scratch and the automated tests run; if it fails, a "Nightly check failed" issue is opened (#3).
 - The release page now lists only the downloads (Mac, Windows and the Companion module) instead of about thirty files, and the release job no longer fails on an empty test log (#47).

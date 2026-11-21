@@ -56,6 +56,8 @@ target_sources(LiveRack PRIVATE
     Source/OscRemote.cpp
     Source/MidiControl.cpp
     Source/RoutingMatrix.cpp
+    Source/ConsoleLinksGrid.cpp
+    Source/RoutingScreen.cpp
     Source/SnapshotsPanel.cpp
     Source/ServerCheck.cpp
     Source/DevicesPanel.cpp

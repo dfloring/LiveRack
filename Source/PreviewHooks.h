@@ -9,6 +9,7 @@
 #include "PluginsPanel.h"
 #include "ConsoleLinkPanel.h"
 #include "RoutingMatrix.h"
+#include "RoutingScreen.h"
 #include "SnapshotsPanel.h"
 // Only compiled into Linux preview builds (LIVERACK_PREVIEW_HOOKS=1), used to
 // set up a sample session, feed a test signal through it, and open dialogs
@@ -123,7 +124,7 @@ struct PreviewHooks
                 const auto a = live.getRackConfig (r), b = e.getRackConfig (r);
                 same = same && a.name == b.name && a.stereo == b.stereo && a.monoToStereo == b.monoToStereo && a.driver == b.driver
                        && a.input[0] == b.input[0] && a.input[1] == b.input[1] && a.output[0] == b.output[0] && a.output[1] == b.output[1]
-                       && a.consoleChannel == b.consoleChannel && a.recallSafe == b.recallSafe && a.colourIndex == b.colourIndex
+                       && a.consoleChannel == b.consoleChannel && a.consoleChannel2 == b.consoleChannel2 && a.recallSafe == b.recallSafe && a.colourIndex == b.colourIndex
                        && a.latencyGroup == b.latencyGroup && live.isRackBypassed (r) == e.isRackBypassed (r)
                        && live.getNumSlots (r) == e.getNumSlots (r) && live.getStereoPoint (r) == e.getStereoPoint (r)
                        && std::abs (live.getRackTotalLatencyMs (r) - e.getRackTotalLatencyMs (r)) < 0.01;
@@ -392,6 +393,86 @@ struct PreviewHooks
             std::cerr << "RROUTE the copy sees rack 1 in " << c.input[0] << " out " << c.output[0] << "," << c.output[1] << "; rack 2 in " << d.input[0] << std::endl;
         });
     }
+
+    // The Routing screen's Console links tab: linking racks to console channels,
+    // here and over the network, and the console following either channel of a stereo rack
+    static inline std::unique_ptr<RemoteConnection> linksLive;
+    static inline std::unique_ptr<ConsoleLinksGrid> linksRemote;
+
+    static void consoleLinksTest (MainComponent& m)
+    {
+        auto& e = m.engine;
+        auto say = [] (const juce::String& t) { std::cerr << "LINKS " << t << std::endl; };
+
+        ConsoleLink::Settings cs;
+        cs.type = ConsoleLink::Type::yamahaRcp;
+        cs.address = "127.0.0.1";
+        m.consoles[0]->setSettings (cs);
+
+        int st = -1, a = -1, b = -1;
+        for (int r = 0; r < e.getNumRacks(); ++r)
+        {
+            if (e.getRackConfig (r).stereo) { if (st < 0) st = r; }
+            else if (a < 0) a = r;
+            else if (b < 0) b = r;
+        }
+
+        m.showRouting (a);
+        auto& screen = *m.routingScreen;
+        say ("tabs: Patch shown " + juce::String (screen.matrix.isVisible() ? 1 : 0) + " (expect 1), links shown " + juce::String (screen.links.isVisible() ? 1 : 0) + " (expect 0)");
+        screen.linksTab.triggerClick();
+        say ("after the Console links tab: Patch shown " + juce::String (screen.matrix.isVisible() ? 1 : 0) + " (expect 0), links shown "
+             + juce::String (screen.links.isVisible() ? 1 : 0) + " (expect 1), rows " + juce::String (screen.links.numRows()) + " (expect 104)");
+        auto& grid = screen.links;
+
+        grid.toggleLink (a, 5);
+        say ("mono rack linked to 5: " + juce::String (e.getRackConfig (a).consoleChannel) + " (expect 5)");
+        grid.toggleLink (a, 6);
+        say ("mono rack clicked on 6: moves to " + juce::String (e.getRackConfig (a).consoleChannel) + " (expect 6)");
+        grid.toggleLink (b, 6);
+        say ("another rack takes 6: it has " + juce::String (e.getRackConfig (b).consoleChannel) + ", the first has " + juce::String (e.getRackConfig (a).consoleChannel) + " (expect 6, 0)");
+        grid.toggleLink (b, 6);
+        say ("click on its own cell unlinks: " + juce::String (e.getRackConfig (b).consoleChannel) + " (expect 0)");
+
+        grid.toggleLink (st, 10);
+        grid.toggleLink (st, 11);
+        auto c = e.getRackConfig (st);
+        say ("stereo rack, two clicks: L " + juce::String (c.consoleChannel) + " R " + juce::String (c.consoleChannel2) + " (expect 10, 11)");
+        grid.toggleLink (st, 12);
+        c = e.getRackConfig (st);
+        say ("a third click replaces R: L " + juce::String (c.consoleChannel) + " R " + juce::String (c.consoleChannel2) + " (expect 10, 12)");
+        m.selectedRack = a;
+        m.selectRackForChannel (0, 12);
+        say ("the console selects channel 12 (the right side): selected rack is the stereo one " + juce::String (m.selectedRack == st ? 1 : 0) + " (expect 1)");
+        grid.toggleLink (st, 10);
+        c = e.getRackConfig (st);
+        say ("click on L unlinks it: L " + juce::String (c.consoleChannel) + " R " + juce::String (c.consoleChannel2) + " (expect 0, 12)");
+        grid.toggleLink (a, 73);
+        say ("first mix row links as 73: " + juce::String (e.getRackConfig (a).consoleChannel) + " (expect 73), label '" + grid.rowLabel (73) + "'");
+
+        // The same grid on a connection to the server
+        linksLive = std::make_unique<RemoteConnection> ("127.0.0.1", m.webRemote.getPort());
+        juce::Timer::callAfterDelay (2500, [b]
+        {
+            linksRemote = std::make_unique<ConsoleLinksGrid> (*linksLive);
+            say2 ("remote grid rows " + juce::String (linksRemote->numRows()) + " (expect 104)");
+            linksRemote->toggleLink (b, 7);
+        });
+        juce::Timer::callAfterDelay (4000, [&m, a, b]
+        {
+            const auto cb = m.engine.getRackConfig (b);
+            say2 ("over the network: rack linked to 7 on the server " + juce::String (cb.consoleChannel) + " (expect 7)");
+            linksRemote->toggleLink (a, 7);
+        });
+        juce::Timer::callAfterDelay (5500, [&m, a, b]
+        {
+            const auto ca = m.engine.getRackConfig (a), cb = m.engine.getRackConfig (b);
+            say2 ("over the network: 7 moved to the other rack " + juce::String (ca.consoleChannel) + ", the first has " + juce::String (cb.consoleChannel) + " (expect 7, 0)");
+            const auto copy = linksLive->getRackConfig (a);
+            say2 ("the copy sees " + juce::String (copy.consoleChannel) + " (expect 7)");
+        });
+    }
+    static void say2 (const juce::String& t) { std::cerr << "LINKS " << t << std::endl; }
 
     // Devices (the driver cards) and a driver's settings, over the network
     struct RemoteDevicesWindow : public juce::DocumentWindow, private juce::ChangeListener
@@ -727,7 +808,7 @@ struct PreviewHooks
         if (open == "console")  m.showConsoleSettings (0);
         if (open == "devices")  m.showDevices();
         if (open == "routing")  { m.select (2, 0); m.showRouting (2); }
-        if (open == "routingout") { m.showRouting (6); m.routingMatrix->outputs = true; m.routingMatrix->refresh(); }
+        if (open == "routingout") { m.showRouting (6); m.routingScreen->matrix.outputs = true; m.routingScreen->matrix.refresh(); }
         if (open == "scope")    m.showScope();
         if (open == "fullview") { m.select (0, 1); m.setFullView (true); m.stepRack (1); m.stepRack (1); m.stepRack (-1);
                                   std::cerr << "STEP selected " << m.selectedRack << " (expect 1)" << std::endl;
@@ -761,6 +842,7 @@ struct PreviewHooks
         }
         if (open == "overview") overviewTest (m);
         if (open == "remoterouting") openRemoteRouting (m);
+        if (open == "consolelinks") consoleLinksTest (m);
         if (open == "remotedevices") openRemoteDevices (m);
         if (open == "remotesetup") remoteSetupTest (m);
         if (open == "remoteplugins") remotePluginsTest (m);
@@ -1959,11 +2041,11 @@ struct PreviewHooks
         m.showRouting (nr);
         auto cfg = e.getRackConfig (nr);
         cfg.input[0] = 8;
-        m.routingMatrix->autoPatchOutputs (nr, cfg, 0, 8);
-        say ("auto-patch to taken out 9: output " + juce::String (cfg.output[0] + 1) + " (expect 0 = left unpatched), note: " + m.routingMatrix->note);
+        m.routingScreen->matrix.autoPatchOutputs (nr, cfg, 0, 8);
+        say ("auto-patch to taken out 9: output " + juce::String (cfg.output[0] + 1) + " (expect 0 = left unpatched), note: " + m.routingScreen->matrix.note);
         cfg.input[0] = 14; cfg.output[0] = -1;
-        m.routingMatrix->note.clear();
-        m.routingMatrix->autoPatchOutputs (nr, cfg, 0, 14);
+        m.routingScreen->matrix.note.clear();
+        m.routingScreen->matrix.autoPatchOutputs (nr, cfg, 0, 14);
         say ("auto-patch to free out 15: output " + juce::String (cfg.output[0] + 1) + " (expect 15)");
 
         // --- Shortcuts
