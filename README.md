@@ -28,7 +28,7 @@ Get the latest build from [Releases](../../releases): the Mac app (Apple silicon
 - **Mac:** unzip, then right-click `LiveRack.app` > **Open** the first time (it isn't notarised).
 - **Windows:** unzip and run `LiveRack.exe`. If Windows warns about an unknown publisher: **More info > Run anyway**. Pick your ASIO driver (Dante Virtual Soundcard, SoundGrid) in Devices > driver Settings.
 
-# User guide (v0.30)
+# User guide (v0.31)
 
 Any number of independent racks of VST3/AU plugins on one or more audio drivers at once (Dante Virtual Soundcard, a Dante interface, the Waves SoundGrid Driver). Everything lives in one **show file** (`.liverack`) with its snapshots inside it, and the open show comes back automatically on launch.
 
@@ -118,7 +118,9 @@ Testing on one computer: start a second copy with `LiveRack --client` (Windows: 
 
 ## Routing
 
-A console-style crosspoint matrix. Rack inputs (or outputs) run down the side, driver channels across the top, 32 per page. Click a crosspoint to patch, click a lit one to unpatch. Stereo racks patch L and R separately; mono-to-stereo racks have one input and L/R outputs.
+The Routing screen has two tabs. **Patch** is a console-style crosspoint matrix. Rack inputs (or outputs) run down the side, driver channels across the top, 32 per page. Click a crosspoint to patch, click a lit one to unpatch. Stereo racks patch L and R separately; mono-to-stereo racks have one input and L/R outputs.
+
+**Console links** is a grid of the console's channels (inputs, mixes and matrixes) down the side and your racks across the top. Click a cell to link a rack to a console channel, so selecting that channel on the console selects the rack. A stereo rack takes two channels: click one for L, then one for R. For now each console channel links to one rack.
 
 <p align="center"><img src="docs/screenshot-routing.png" alt="The routing matrix" width="100%"></p>
 
@@ -157,6 +159,7 @@ Give racks a group letter (A–H) with the badge on the strip. Every rack in a g
 ### Snapshots from MIDI and OSC
 
 - **Program changes** (Snapshots screen, bottom left): turn on **Program changes recall snapshots**, pick the MIDI device (or any) and channel (or any), and which snapshot program 1 recalls (1 by default; 0 for a device that counts from 0, or any offset). A program change learned for something else still does that instead.
+- **MIDI Learn a note onto a snapshot:** pick a snapshot in the list, press **MIDI Learn**, and hit a note on your controller. That note recalls that snapshot, no User Key needed. In LiveRack Client the note is learned on that computer.
 - **Send a program change on recall:** pick a MIDI output and channel, and every recall sends the matching program change (lighting, playback or another rack can follow). One that came in by MIDI isn't sent straight back.
 - **OSC:** `/liverack/scene/recall` takes a number or a **name** (`/liverack/scene/recall "Worship Set"`, any case), so a Companion button keeps working after renumbering. Feedback adds `/liverack/scene/name` (the current one's), `/liverack/scenes` (how many) and `/liverack/scene/<n>/name` for each.
 - **Recall Safe** racks are never touched by recalls.
