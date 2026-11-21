@@ -420,7 +420,7 @@ struct PreviewHooks
         m.showRouting (a);
         auto& screen = *m.routingScreen;
         say ("tabs: Patch shown " + juce::String (screen.matrix.isVisible() ? 1 : 0) + " (expect 1), links shown " + juce::String (screen.links.isVisible() ? 1 : 0) + " (expect 0)");
-        screen.linksTab.triggerClick();
+        screen.linksTab.onClick();   // the tab's own handler; triggerClick() is asynchronous
         say ("after the Console links tab: Patch shown " + juce::String (screen.matrix.isVisible() ? 1 : 0) + " (expect 0), links shown "
              + juce::String (screen.links.isVisible() ? 1 : 0) + " (expect 1), rows " + juce::String (screen.links.numRows()) + " (expect 104)");
         auto& grid = screen.links;
