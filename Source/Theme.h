@@ -7,12 +7,14 @@ namespace Theme
 {
     // Calm greys; colour only where it means something: accent = selected /
     // on, amber = bypass, red = clip, green = healthy
-    const juce::Colour background { 0xff101215 };
-    const juce::Colour panel      { 0xff181b1f };
-    const juce::Colour raised     { 0xff23272c };
-    const juce::Colour well       { 0xff121417 };   // sunken group behind toolbar buttons
-    const juce::Colour border     { 0xff2a2f35 };
-    const juce::Colour backdrop   { 0xff0d0f11 };   // behind the screens, darker than background
+    const juce::Colour background { 0xff0a0c0e };
+    const juce::Colour panel      { 0xff111417 };
+    const juce::Colour raised     { 0xff1b1f24 };
+    const juce::Colour well       { 0xff0c0e10 };   // sunken group behind toolbar buttons
+    const juce::Colour border     { 0xff262b31 };
+    const juce::Colour backdrop   { 0xff050607 };   // behind the screens, darker than background
+    const juce::Colour strip      { 0xff101316 };   // body of a rack strip
+    const juce::Colour meterBack  { 0xff07080a };   // behind the level meters
     const juce::Colour inkOnLit   { 0xff101214 };   // text and icons on a lit (coloured) button
     const juce::Colour text       { 0xffe8eaed };
     const juce::Colour textDim    { 0xff9aa3ad };

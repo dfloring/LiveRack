@@ -53,7 +53,8 @@ public:
 
     void resized() override;
 
-    static constexpr int numColours = 8;
+    static constexpr int numColours = 16;
+    static constexpr int numAutoColours = 8;   // "Automatic" cycles through the first eight only
     static juce::Colour colourForIndex (int index);
     static juce::String colourName (int index);
     static juce::Colour colourFor (const RackEngine&, int rack);

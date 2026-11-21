@@ -92,6 +92,9 @@ def scenarios():
         S("bigblock", "A block larger than the rack buffer does not resize the buffer in the audio callback",
           server={"open": "bigblock"}, duration=8,
           expect=[r"BIGBLOCK buffer kept after 8192-sample block 1, after a small one 1 \(expect 1, 1\)"]),
+        S("palette", "16 rack colours: distinct and readable, the old eight keep their place, Automatic stays on the first eight",
+          server={"open": "palette"}, duration=6,
+          expect=[r"PALETTE count 16 distinct 16 names 1 worst contrast vs ink ok blue 2F8CFF silver CFD6DE auto rack 9 -> 1 rack 3 -> 3 chosen 12 -> 12 strip 101316 meter 07080A"]),
         S("isolate-all", "One switch isolates every plugin; a crashing plugin passes audio through instead of taking the app down",
           server={"open": "isolateall"}, duration=16,
           expect=[r"ISOALL before: isolated 0 of \d+ \(expect 0\), switch 0",
@@ -159,7 +162,7 @@ def scenarios():
           helpers=[(7.0, [sys.executable, os.path.join(HERE, "ipad_page.py")])],
           expect=[r"WEB live socket open: True strips: 7", r"WEB bypass via live: True button: BYPASSED",
                   r"WEB view over live: DemoCompressor params 3 plugin window shown: gui show",
-                  r"WEB edit: add-plugin buttons 7 drivers in state 1", r"WEB errors: \[\]"]),
+                  r"WEB edit: add-plugin buttons 7 drivers in state 1", r"WEB theme matches Theme.h: True", r"WEB errors: \[\]"]),
 
         # ---- LiveRack Client against a server process
         S("client-basic", "Client: connect, plugin picture and input, edits, every screen, pop-out, server lost and back",
