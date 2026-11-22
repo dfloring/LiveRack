@@ -9,6 +9,8 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 
 ## Unreleased
 
+- Console links: each rack's name now sits over its own column. In 0.31.0 every name was one column too far to the left, so the first hung over empty space and the last column had none (#70).
+
 ## 0.31.0 (2026-11-21)
 
 - The Routing screen now has tabs: **Patch** (the routing matrix, as before) and **Console links**. Console links is a grid with the console's channels down the side (inputs, mixes and matrixes, scrolling) and your racks across the top: click a cell to link that rack to that console channel, so selecting the channel on the console selects the rack. No typing. A stereo rack takes two channels (first click is L, second is R); one channel links to one rack. Works the same on LiveRack Client. The old Console channel box in the rack dialog still works. Console channel names and the Latency tab come later (#53).

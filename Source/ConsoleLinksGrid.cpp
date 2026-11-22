@@ -5,6 +5,25 @@
 namespace
 {
     constexpr int labelW = 150, colW = 32, rowH = 34, headerH = 110;
+
+    // A rack's name runs up its column: drawn sideways, turned a quarter
+    // about the bottom-left of the column. The box is measured *before* the
+    // turn, so its "height" ends up as the column's width, to the right of
+    // the pivot. (It used to start a column to the left, so every name sat
+    // over the wrong column.)
+    juce::Rectangle<int> headerLabelBox (int x) { return { x + 6, headerH + 2, headerH - 12, colW - 4 }; }
+    juce::AffineTransform headerLabelTurn (int x) { return juce::AffineTransform::rotation (-juce::MathConstants<float>::halfPi, (float) x, (float) headerH); }
+}
+
+juce::Rectangle<int> ConsoleLinksGrid::headerColumn (int column)
+{
+    return { labelW + column * colW, 0, colW, headerH };
+}
+
+juce::Rectangle<float> ConsoleLinksGrid::headerLabelOnScreen (int column)
+{
+    const int x = labelW + column * colW;
+    return headerLabelBox (x).toFloat().transformedBy (headerLabelTurn (x));
 }
 
 //==============================================================================
@@ -47,9 +66,8 @@ public:
             g.setColour (isLinked ? Theme::text : Theme::textDim);
             g.setFont (juce::FontOptions (Theme::fontSmall, juce::Font::bold));
             const juce::Graphics::ScopedSaveState state (g);
-            g.addTransform (juce::AffineTransform::rotation (-juce::MathConstants<float>::halfPi, (float) x, (float) headerH));
-            g.drawText (cfg.name + (cfg.stereo ? "  ST" : ""), x + 6, headerH - colW + 2, headerH - 12, colW - 4,
-                        juce::Justification::centredLeft, true);
+            g.addTransform (headerLabelTurn (x));
+            g.drawText (cfg.name + (cfg.stereo ? "  ST" : ""), headerLabelBox (x), juce::Justification::centredLeft, true);
         }
     }
 
