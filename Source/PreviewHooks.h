@@ -426,6 +426,14 @@ struct PreviewHooks
              + juce::String (screen.links.isVisible() ? 1 : 0) + " (expect 1), rows " + juce::String (screen.links.numRows()) + " (expect 104)");
         auto& grid = screen.links;
 
+        // Each rack's name must sit over its own column (it was drawn one column to the left)
+        {
+            int inside = 0;
+            for (int c = 0; c < 4; ++c)
+                if (ConsoleLinksGrid::headerColumn (c).toFloat().contains (ConsoleLinksGrid::headerLabelOnScreen (c))) ++inside;
+            say ("rack names sit over their own columns: " + juce::String (inside) + " of 4 (expect 4)");
+        }
+
         grid.toggleLink (a, 5);
         say ("mono rack linked to 5: " + juce::String (e.getRackConfig (a).consoleChannel) + " (expect 5)");
         grid.toggleLink (a, 6);

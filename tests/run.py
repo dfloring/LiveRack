@@ -127,6 +127,7 @@ def scenarios():
           server={"open": "consolelinks"}, duration=10,
           expect=[r"LINKS tabs: Patch shown 1 \(expect 1\), links shown 0 \(expect 0\)",
                   r"LINKS after the Console links tab: Patch shown 0 \(expect 0\), links shown 1 \(expect 1\), rows 104 \(expect 104\)",
+                  r"LINKS rack names sit over their own columns: 4 of 4 \(expect 4\)",
                   r"LINKS mono rack linked to 5: 5 \(expect 5\)", r"LINKS mono rack clicked on 6: moves to 6 \(expect 6\)",
                   r"LINKS another rack takes 6: it has 6, the first has 0 \(expect 6, 0\)",
                   r"LINKS click on its own cell unlinks: 0 \(expect 0\)",
