@@ -111,7 +111,7 @@ namespace
     }
 }
 
-void Isolation::requestLayout (juce::AudioPluginInstance& plugin, int ins, int outs)
+void Isolation::requestLayout (juce::AudioPluginInstance& plugin, int ins, int outs, bool sidechain)
 {
     if (auto* isolated = dynamic_cast<IsolatedPlugin*> (&plugin))
     {
@@ -119,13 +119,13 @@ void Isolation::requestLayout (juce::AudioPluginInstance& plugin, int ins, int o
         return;
     }
 
-    auto tryLayout = [&plugin] (const juce::AudioChannelSet& in, const juce::AudioChannelSet& out)
+    auto tryLayout = [&plugin] (const juce::AudioChannelSet& in, const juce::AudioChannelSet& out, const juce::AudioChannelSet& sc)
     {
         auto layout = plugin.getBusesLayout();
         if (! layout.inputBuses.isEmpty())  layout.inputBuses.getReference (0)  = in;
         if (! layout.outputBuses.isEmpty()) layout.outputBuses.getReference (0) = out;
         for (int i = 1; i < layout.inputBuses.size(); ++i)
-            layout.inputBuses.getReference (i) = juce::AudioChannelSet::disabled(); // no sidechains
+            layout.inputBuses.getReference (i) = i == 1 ? sc : juce::AudioChannelSet::disabled(); // only the first extra input is a side chain
 
         if (! plugin.checkBusesLayoutSupported (layout))
             return false;
@@ -133,10 +133,25 @@ void Isolation::requestLayout (juce::AudioPluginInstance& plugin, int ins, int o
         return plugin.setBusesLayout (layout);
     };
 
-    if (tryLayout (setFor (ins), setFor (outs)))                return;
-    if (ins != outs && tryLayout (setFor (ins), setFor (ins)))  return; // can't split here: stays as it was
-    if (tryLayout (setFor (ins), setFor (ins)))                 return;
-    tryLayout (juce::AudioChannelSet::stereo(), juce::AudioChannelSet::stereo());
+    // The side chain gets what the plugin asks for (its default), else mono, else stereo; if it
+    // refuses all of them the plugin runs without one
+    juce::Array<juce::AudioChannelSet> scs;
+    if (sidechain && plugin.getBusCount (true) > 1)
+    {
+        scs.add (plugin.getBus (true, 1)->getDefaultLayout());
+        scs.add (juce::AudioChannelSet::mono());
+        scs.add (juce::AudioChannelSet::stereo());
+    }
+    scs.add (juce::AudioChannelSet::disabled());
+
+    for (auto& sc : scs)
+    {
+        if (tryLayout (setFor (ins), setFor (outs), sc))                 return;
+        if (ins != outs && tryLayout (setFor (ins), setFor (ins), sc))   return; // can't split here: stays as it was
+        if (tryLayout (setFor (ins), setFor (ins), sc))                  return;
+    }
+
+    tryLayout (juce::AudioChannelSet::stereo(), juce::AudioChannelSet::stereo(), juce::AudioChannelSet::disabled());
 }
 
 //==============================================================================

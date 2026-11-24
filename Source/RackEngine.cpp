@@ -150,16 +150,48 @@ struct RackEngine::Rack
     double sampleRate = 48000.0;
     int blockSize = 64;
 
+    // Side chains: each plugin with a side chain input gets extra channels after the rack's own
+    // inputs. scInputs holds, per extra channel, the driver input it is copied from (-1 = silence).
+    // Rebuilt in configure(), while the rack is off the audio list.
+    std::vector<int> scInputs;
+
+    static int sidechainChannels (Node& n)
+    {
+        auto* p = n.getProcessor();
+        return p->getBusCount (true) > 1 && p->getBus (true, 1)->isEnabled() ? p->getBus (true, 1)->getNumberOfChannels() : 0;
+    }
+
+    static bool wantsSidechain (const Node& n) { return (int) n.properties.getWithDefault ("scInput", -1) >= 0; }
+
+    bool usesSidechain() const
+    {
+        for (auto& s : slots)
+            if (wantsSidechain (*s))
+                return true;
+        return false;
+    }
+
     void configure (double sr, int bs, bool prepare)
     {
         sampleRate = sr;
         blockSize = bs;
         const int ch = config.numOutputs();
 
+        scInputs.clear();
+        for (auto& s : slots)
+            if (const int n = sidechainChannels (*s))
+            {
+                // A rack runs on one driver, so only an input of that driver can be used
+                const bool here = (int) s->properties.getWithDefault ("scDriver", 0) == config.driver;
+                scInputs.insert (scInputs.end(), (size_t) n, here ? (int) s->properties["scInput"] : -1);
+            }
+
+        const int graphIn = config.numInputs() + (int) scInputs.size();
+
         if (inNode != nullptr)  graph.removeNode (inNode->nodeID);
         if (outNode != nullptr) graph.removeNode (outNode->nodeID);
 
-        graph.setPlayConfigDetails (config.numInputs(), config.numOutputs(), sr, bs);
+        graph.setPlayConfigDetails (graphIn, config.numOutputs(), sr, bs);
         inNode  = graph.addNode (std::make_unique<IOProcessor> (IOProcessor::audioInputNode));
         outNode = graph.addNode (std::make_unique<IOProcessor> (IOProcessor::audioOutputNode));
 
@@ -171,7 +203,7 @@ struct RackEngine::Rack
 
         rebuildConnections();
 
-        buffer.setSize (ch, juce::jmax (bs, 512)); // the only allocation; the audio callback never resizes it
+        buffer.setSize (juce::jmax (ch, graphIn), juce::jmax (bs, 512)); // the only allocation; the audio callback never resizes it
         delay.clear();
         delayWrite = 0;
 
@@ -240,6 +272,15 @@ struct RackEngine::Rack
         }
 
         connect (*prev, *outNode);
+
+        // Side chain inputs come straight from the rack's input node
+        int next = config.numInputs();
+        for (auto& s : slots)
+        {
+            const int n = sidechainChannels (*s), first = s->getProcessor()->getMainBusNumInputChannels();
+            for (int j = 0; j < n; ++j)
+                graph.addConnection ({ { inNode->nodeID, next++ }, { s->nodeID, first + j } });
+        }
     }
 
     // Audio thread
@@ -529,10 +570,16 @@ struct RackEngine::Driver : public juce::AudioIODeviceCallback,
         const int numSamples = juce::jmin (blockNumSamples, r.buffer.getNumSamples());
         const int ch = r.config.numOutputs();
         const int ins = r.config.numInputs();
-        juce::AudioBuffer<float> block (r.buffer.getArrayOfWritePointers(), ch, numSamples); // a view, no allocation
+        const int sc = (int) r.scInputs.size();
+        juce::AudioBuffer<float> block (r.buffer.getArrayOfWritePointers(), juce::jmax (ch, ins + sc), numSamples); // a view, no allocation
 
-        for (int c = ins; c < ch; ++c)
+        for (int c = ins; c < block.getNumChannels(); ++c)
             block.clear (c, 0, numSamples);
+
+        // Side chains: a plain copy of one of this driver's inputs
+        for (int k = 0; k < sc; ++k)
+            if (const int src = r.scInputs[(size_t) k]; juce::isPositiveAndBelow (src, blockNumInputs) && blockInputs[src] != nullptr)
+                block.copyFrom (ins + k, 0, blockInputs[src], numSamples);
 
         for (int c = 0; c < ins; ++c)
         {
@@ -647,9 +694,9 @@ struct RackEngine::Driver : public juce::AudioIODeviceCallback,
 };
 
 //==============================================================================
-static void requestLayout (juce::AudioPluginInstance& plugin, int ins, int outs)
+static void requestLayout (juce::AudioPluginInstance& plugin, int ins, int outs, bool sidechain = false)
 {
-    Isolation::requestLayout (plugin, ins, outs);
+    Isolation::requestLayout (plugin, ins, outs, sidechain);
 }
 
 // A plugin inside LiveRack, or (isolated) in a helper process of its own
@@ -1273,7 +1320,7 @@ void RackEngine::relayoutRack (Rack& r)
         const bool point = (bool) node->properties["stereoPoint"] || isMonoToStereoVersion (desc.name);
         const int outs = (r.config.isMonoToStereo() && width == 1 && point) ? 2 : width;
 
-        requestLayout (*p, width, outs);
+        requestLayout (*p, width, outs, Rack::wantsSidechain (*node));
         width = juce::jmax (1, p->getMainBusNumOutputChannels());
     }
 
@@ -1317,6 +1364,43 @@ void RackEngine::setStereoPoint (int index, int slot)
         r->slots[(size_t) i]->properties.set ("stereoPoint", i == slot);
 
     relayoutRack (*r);
+    sendChangeMessage();
+}
+
+RackEngine::SlotSidechain RackEngine::getSlotSidechain (int rack, int slot) const
+{
+    SlotSidechain sc;
+    auto* r = getRack (rack);
+
+    if (r == nullptr || ! juce::isPositiveAndBelow (slot, (int) r->slots.size()))
+        return sc;
+
+    auto& node = *r->slots[(size_t) slot];
+    sc.available = node.getProcessor()->getBusCount (true) > 1;
+    sc.driver = (int) node.properties.getWithDefault ("scDriver", 0);
+    sc.input = (int) node.properties.getWithDefault ("scInput", -1);
+    sc.channels = Rack::sidechainChannels (node);
+    sc.resolved = sc.channels > 0 && sc.driver == r->config.driver;
+    return sc;
+}
+
+void RackEngine::setSlotSidechain (int rack, int slot, int driver, int input)
+{
+    auto* r = getRack (rack);
+
+    if (r == nullptr || ! juce::isPositiveAndBelow (slot, (int) r->slots.size()))
+        return;
+
+    auto& props = r->slots[(size_t) slot]->properties;
+    input = juce::jmax (-1, input);
+
+    if ((int) props.getWithDefault ("scInput", -1) == input && (input < 0 || (int) props.getWithDefault ("scDriver", 0) == driver))
+        return;
+
+    props.set ("scDriver", driver);
+    props.set ("scInput", input);
+    relayoutRack (*r); // the plugin's side chain bus is switched on or off with the source
+    showEdited = true;
     sendChangeMessage();
 }
 
@@ -1520,11 +1604,12 @@ void RackEngine::removePlugin (int index, int slot)
 
     unpinHot (getSlotId (index, slot));
 
+    const bool hadSidechain = r->usesSidechain(); // the rack's input width changes with it
     auto id = r->slots[(size_t) slot]->nodeID;
     r->slots.erase (r->slots.begin() + slot);
     r->graph.removeNode (id);
 
-    if (r->config.isMonoToStereo())
+    if (r->config.isMonoToStereo() || hadSidechain)
     {
         relayoutRack (*r);
     }
@@ -1549,8 +1634,8 @@ void RackEngine::moveSlot (int index, int from, int to)
         return;
 
     std::swap (r->slots[(size_t) from], r->slots[(size_t) to]);
-    if (r->config.isMonoToStereo()) relayoutRack (*r);
-    else                            r->rebuildConnections();
+    if (r->config.isMonoToStereo() || r->usesSidechain()) relayoutRack (*r);
+    else                                                  r->rebuildConnections();
     sendChangeMessage();
 }
 
@@ -1568,8 +1653,8 @@ void RackEngine::moveSlotTo (int index, int from, int toIndex)
     auto node = r->slots[(size_t) from];
     r->slots.erase (r->slots.begin() + from);
     r->slots.insert (r->slots.begin() + toIndex, node);
-    if (r->config.isMonoToStereo()) relayoutRack (*r);
-    else                            r->rebuildConnections();
+    if (r->config.isMonoToStereo() || r->usesSidechain()) relayoutRack (*r);
+    else                                                  r->rebuildConnections();
     sendChangeMessage();
 }
 
@@ -1851,6 +1936,11 @@ std::unique_ptr<juce::XmlElement> RackEngine::createSnapshot() const
                 slotXml->setAttribute ("stereoPoint", true);
             if (isSlotIsolated (rackIndex, i))
                 slotXml->setAttribute ("isolated", true);
+            if (Rack::wantsSidechain (*s))
+            {
+                slotXml->setAttribute ("sidechainDriver", (int) s->properties.getWithDefault ("scDriver", 0));
+                slotXml->setAttribute ("sidechainInput", (int) s->properties["scInput"]);
+            }
             slotXml->addChildElement (getSlotDescription (rackIndex, i).createXml().release());
 
             juce::MemoryBlock state;
@@ -1993,6 +2083,9 @@ bool RackEngine::loadRig (const juce::XmlElement& xml, juce::String& error)
 
             if (slotXml->getBoolAttribute ("stereoPoint", false))
                 setStereoPoint (rackIndex, slot);
+
+            if (slotXml->hasAttribute ("sidechainInput"))
+                setSlotSidechain (rackIndex, slot, slotXml->getIntAttribute ("sidechainDriver", 0), slotXml->getIntAttribute ("sidechainInput", -1));
         }
     };
 

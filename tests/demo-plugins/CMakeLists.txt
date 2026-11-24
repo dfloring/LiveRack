@@ -30,3 +30,16 @@ juce_add_plugin(DemoCompressor
 target_sources(DemoCompressor PRIVATE comp/DemoCompressor.cpp)
 target_compile_definitions(DemoCompressor PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
 target_link_libraries(DemoCompressor PRIVATE juce::juce_audio_utils PUBLIC juce::juce_recommended_config_flags)
+
+# A plugin with an optional side chain input (output = main + side chain)
+juce_add_plugin(SidechainProbe
+    FORMATS VST3
+    PRODUCT_NAME "SidechainProbe"
+    COMPANY_NAME "LiveRackTest"
+    PLUGIN_MANUFACTURER_CODE Lrtt
+    PLUGIN_CODE Scpr)
+target_sources(SidechainProbe PRIVATE sidechain/SidechainProbe.cpp)
+target_compile_definitions(SidechainProbe PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
+target_link_libraries(SidechainProbe PRIVATE juce::juce_audio_utils PUBLIC juce::juce_recommended_config_flags)
+# The test command builds DemoCompressor_VST3; this brings the probe along without changing it
+add_dependencies(DemoCompressor_VST3 SidechainProbe_VST3)

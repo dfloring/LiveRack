@@ -883,6 +883,7 @@ struct PreviewHooks
             feeder = std::make_unique<Feeder> (m);
             juce::Timer::callAfterDelay (3000, [&m] { m.showDevices(); });
         }
+        if (open == "sidechain") sidechainTest (m);
         if (open == "bigblock")
         {
             // A block larger than the rack buffer must not resize (allocate in) it
@@ -2099,6 +2100,127 @@ struct PreviewHooks
              + ", Cmd+Q reserved: " + juce::String ((int) Shortcuts::isReserved (juce::KeyPress ('q', juce::ModifierKeys::commandModifier, 0))));
         say ("MIDI devices added: " + juce::String ((int) m.midi->getDevices().size()) + " (expect 0 to start)");
     }
+
+    // A plugin's side chain input is fed from a driver input channel (SidechainProbe outputs
+    // its main input plus its side chain, so what reached the bus shows in the output)
+    static void sidechainTest (MainComponent& m)
+    {
+        auto& e = m.engine;
+        testSignal.reset(); // its tones would mix into ours
+        m.closeAllEditors();
+        e.clearAll();
+
+        auto find = [&e] (const juce::String& name)
+        {
+            for (auto& d : e.getKnownPlugins().getTypes())
+                if (d.name == name) return d;
+            return juce::PluginDescription {};
+        };
+        const auto probe = find ("SidechainProbe"), comp = find ("DemoCompressor");
+        juce::String err;
+
+        RackConfig a;   // mono, input 1 -> output 1
+        a.name = "Snare Top"; a.input[0] = 0; a.output[0] = 0;
+        const int rackA = e.addRack (a);
+        e.addPlugin (rackA, probe, err);
+
+        RackConfig b;   // stereo, inputs 5-6
+        b.name = "Overheads"; b.stereo = true; b.patchContiguous (4, 4);
+        const int rackB = e.addRack (b);
+        e.addPlugin (rackB, probe, err);
+
+        RackConfig d;   // mono: a plugin that reports latency, then the probe
+        d.name = "Delayed"; d.input[0] = 6; d.output[0] = 6;
+        const int rackD = e.addRack (d);
+        e.addPlugin (rackD, comp, err);
+        e.addPlugin (rackD, probe, err);
+
+        e.previewPrepare (48000.0, 480);
+
+        juce::AudioBuffer<float> in (16, 480), out (16, 480);
+        auto feed = [&] (std::initializer_list<std::pair<int, float>> levels)
+        {
+            in.clear();
+            for (auto [c, v] : levels)
+                for (int i = 0; i < 480; ++i) in.setSample (c, i, v);
+            for (int k = 0; k < 4; ++k) e.previewProcess (in, out);
+        };
+        auto level = [&out] (int c) { return juce::String (out.getSample (c, 400), 3); };
+        auto sc = [&e] (int rack) { return e.getSlotSidechain (rack, 0); };
+
+        // Inputs 1, 2, 3 carry 0.1, 0.3, 0.5
+        feed ({ { 0, 0.1f }, { 1, 0.3f }, { 2, 0.5f } });
+        sidechainSay ("no source: out " + level (0) + " (expect 0.100), available " + juce::String ((int) sc (rackA).available)
+              + " channels " + juce::String (sc (rackA).channels) + " (expect 1, 0)");
+
+        e.setSlotSidechain (rackA, 0, 0, 1);
+        feed ({ { 0, 0.1f }, { 1, 0.3f }, { 2, 0.5f } });
+        sidechainSay ("source input 2: out " + level (0) + " (expect 0.400), resolved " + juce::String ((int) sc (rackA).resolved)
+              + " channels " + juce::String (sc (rackA).channels) + " (expect 1, 2: the plugin's stereo bus)");
+
+        e.setSlotSidechain (rackA, 0, 0, 2);
+        feed ({ { 0, 0.1f }, { 1, 0.3f }, { 2, 0.5f } });
+        sidechainSay ("source input 3: out " + level (0) + " (expect 0.600)");
+
+        // Not part of the main input: the rack's own input is still what comes through
+        feed ({ { 0, 0.2f }, { 1, 0.3f }, { 2, 0.0f } });
+        sidechainSay ("source silent, main 0.2: out " + level (0) + " (expect 0.200)");
+
+        e.setSlotSidechain (rackA, 0, 1, 1);
+        feed ({ { 0, 0.1f }, { 1, 0.3f }, { 2, 0.5f } });
+        sidechainSay ("source on another driver: out " + level (0) + " (expect 0.100), resolved " + juce::String ((int) sc (rackA).resolved)
+              + " (expect 0)");
+
+        e.setSlotSidechain (rackA, 0, 0, -1);
+        feed ({ { 0, 0.1f }, { 1, 0.3f }, { 2, 0.5f } });
+        sidechainSay ("cleared: out " + level (0) + " (expect 0.100), channels " + juce::String (sc (rackA).channels) + " (expect 0)");
+
+        // A stereo rack: each side keeps its own input, the one source goes to both sides of the bus
+        e.setSlotSidechain (rackB, 0, 0, 2);
+        feed ({ { 4, 0.1f }, { 5, 0.2f }, { 2, 0.5f } });
+        sidechainSay ("stereo rack: L " + level (4) + " R " + level (5) + " (expect 0.600, 0.700)");
+
+        // The source is saved in the show; a show without it loads as off
+        e.setSlotSidechain (rackA, 0, 0, 1);
+        auto show = e.createShow();
+        e.newShow();
+        juce::String loadError;
+        e.loadShow (*show, loadError);
+        int ra = -1;
+        for (int r = 0; r < e.getNumRacks(); ++r)
+            if (e.getRackConfig (r).name == "Snare Top") ra = r;
+        sidechainSay ("show reloaded: input " + juce::String (sc (ra).input + 1) + " driver " + juce::String (sc (ra).driver)
+              + " channels " + juce::String (sc (ra).channels) + " (expect 2, 0, 2) '" + loadError + "'");
+
+        for (auto* rackXml : show->getChildWithTagNameIterator ("RACK"))
+            for (auto* slotXml : rackXml->getChildWithTagNameIterator ("SLOT"))
+            {
+                slotXml->removeAttribute ("sidechainInput");
+                slotXml->removeAttribute ("sidechainDriver");
+            }
+        e.newShow();
+        e.loadShow (*show, loadError);
+        for (int r = 0; r < e.getNumRacks(); ++r)
+            if (e.getRackConfig (r).name == "Snare Top") ra = r;
+        sidechainSay ("old show without it: input " + juce::String (sc (ra).input) + " channels " + juce::String (sc (ra).channels) + " (expect -1, 0)");
+
+        // Latency: the compressor reports 3 ms, so the reference is delayed by as much
+        // (the compressor itself doesn't delay anything in this test plugin)
+        const int rd = 2; // "Delayed": the probe is its second plugin
+        e.setSlotSidechain (rd, 1, 0, 7);
+        e.previewPrepare (48000.0, 480);
+        in.clear();
+        in.setSample (6, 10, 0.01f);
+        in.setSample (7, 10, 0.01f);
+        e.previewProcess (in, out);
+        int first = -1, last = -1;
+        for (int i = 0; i < 480; ++i)
+            if (std::abs (out.getSample (6, i)) > 0.005f) { if (first < 0) first = i; last = i; }
+        sidechainSay ("latency: rack reports " + juce::String (e.getRackLatencySamples (rd)) + " samples, main at " + juce::String (first)
+              + ", reference at " + juce::String (last) + " (expect 144, 10, 154)");
+    }
+
+    static void sidechainSay (const juce::String& text) { std::cerr << "SIDECHAIN " << text << std::endl; }
 
     static void buildSampleSession (MainComponent& m, const juce::File& dir)
     {

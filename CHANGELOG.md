@@ -10,6 +10,7 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 ## Unreleased
 
 - Console links: each rack's name now sits over its own column. In 0.31.0 every name was one column too far to the left, so the first hung over empty space and the last column had none (#70).
+- Behind the scenes (nothing to see yet): the engine can now feed a plugin's side chain input from one input channel of the rack's audio device, for plugins like Waves InPhase Live. A new test plugin proves it. Plugins in their own process, the Client and the screen to pick the source come next (#55).
 
 ## 0.31.0 (2026-11-21)
 
