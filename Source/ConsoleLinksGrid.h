@@ -18,6 +18,10 @@ public:
     // What a click on a cell does (also used by the tests)
     void toggleLink (int rack, int channel);
 
+    // Where a rack's name is drawn, and the column it belongs to (for the tests)
+    static juce::Rectangle<float> headerLabelOnScreen (int column);
+    static juce::Rectangle<int> headerColumn (int column);
+
     void paint (juce::Graphics&) override;
     void resized() override;
 

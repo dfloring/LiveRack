@@ -10,6 +10,11 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 ## Unreleased
 
 - How LiveRack is tested changed (nothing in the app): the `reconfig` test sometimes crashed the test server because the test's fake audio thread walked the driver list while the test added and removed drivers. In the real app each driver's audio runs on its own device thread and never walks that list, so I found no matching crash there (#67).
+
+- The Companion module is now version 0.1.1. The one in 0.31.0 still said 0.1.0, so Companion refused to import it over the old one (#73). The release steps now bump it whenever the module changes.
+
+- Console links: each rack's name now sits over its own column. In 0.31.0 every name was one column too far to the left, so the first hung over empty space and the last column had none (#70).
+
 ## 0.31.0 (2026-11-21)
 
 - The Routing screen now has tabs: **Patch** (the routing matrix, as before) and **Console links**. Console links is a grid with the console's channels down the side (inputs, mixes and matrixes, scrolling) and your racks across the top: click a cell to link that rack to that console channel, so selecting the channel on the console selects the rack. No typing. A stereo rack takes two channels (first click is L, second is R); one channel links to one rack. Works the same on LiveRack Client. The old Console channel box in the rack dialog still works. Console channel names and the Latency tab come later (#53).
