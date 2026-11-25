@@ -183,7 +183,7 @@ struct RackEngine::Rack
             {
                 // A rack runs on one driver, so only an input of that driver can be used
                 const bool here = (int) s->properties.getWithDefault ("scDriver", 0) == config.driver;
-                scInputs.insert (scInputs.end(), (size_t) n, here ? (int) s->properties["scInput"] : -1);
+                scInputs.insert (scInputs.end(), (size_t) n, here ? (int) s->properties.getWithDefault ("scInput", -1) : -1);
             }
 
         const int graphIn = config.numInputs() + (int) scInputs.size();
@@ -571,7 +571,7 @@ struct RackEngine::Driver : public juce::AudioIODeviceCallback,
         const int ch = r.config.numOutputs();
         const int ins = r.config.numInputs();
         const int sc = (int) r.scInputs.size();
-        juce::AudioBuffer<float> block (r.buffer.getArrayOfWritePointers(), juce::jmax (ch, ins + sc), numSamples); // a view, no allocation
+        juce::AudioBuffer<float> block (r.buffer.getArrayOfWritePointers(), juce::jmax (ch, ins + sc), numSamples); // a view; JUCE only allocates past 32 channels (about 15 stereo side chain plugins in one rack)
 
         for (int c = ins; c < block.getNumChannels(); ++c)
             block.clear (c, 0, numSamples);
