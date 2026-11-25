@@ -25,7 +25,7 @@ namespace Isolation
     constexpr const char* workerUID = "liverackpluginhost";
 
     // Ask a plugin for ins -> outs channels (1 or 2), falling back sensibly
-    void requestLayout (juce::AudioPluginInstance&, int ins, int outs);
+    void requestLayout (juce::AudioPluginInstance&, int ins, int outs, bool sidechain = false);
 
     // Helper process side. Returns an object to keep alive if this process was
     // started as a plugin helper, or nullptr for the normal app.

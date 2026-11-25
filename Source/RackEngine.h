@@ -175,6 +175,20 @@ public:
     // isolate: -1 = as it is now, 0 = inside LiveRack, 1 = in its own helper process
     bool replacePlugin (int rack, int slot, const juce::PluginDescription&, juce::String& error, int isolate = -1);
 
+    // Side chain: a plugin's second input bus, fed straight from one input of the audio driver
+    // (0-based, like RackConfig::input). A rack runs on one driver, so the source only reaches
+    // the plugin when it is on the rack's own driver (resolved). input -1 = off. Not part of
+    // snapshots. A bus with two channels gets the same input on both.
+    struct SlotSidechain
+    {
+        bool available = false;    // the plugin has a side chain input
+        int driver = 0, input = -1;
+        int channels = 0;          // what the plugin took (0 = bus off)
+        bool resolved = false;     // the source is on this rack's driver and the plugin took the bus
+    };
+    SlotSidechain getSlotSidechain (int rack, int slot) const;
+    void setSlotSidechain (int rack, int slot, int driver, int input);
+
     // Isolation (experimental): the plugin runs in a helper process, so a
     // crash only takes out that plugin. See IsolatedPlugin.h.
     bool isSlotIsolated (int rack, int slot) const;

@@ -286,7 +286,7 @@ struct ClientPreview
         at (13000, c, [] (ClientComponent&, View& v)
         {
             std::cerr << "CLIENT unknown plugin: slots " << v.live.getNumSlots (0) << " (expect " << slotsBeforeUnknown << ") families "
-                      << v.library.getFamilies().size() << " (expect 4)" << std::endl;
+                      << v.library.getFamilies().size() << " (expect 5)" << std::endl;
         });
 
 
