@@ -1019,6 +1019,16 @@ void RackEngine::previewProcess (juce::AudioBuffer<float>& in, juce::AudioBuffer
             out.addFrom (c, 0, temp, c, 0, out.getNumSamples());
     }
 }
+
+// A test's audio thread that runs while drivers are added and removed must not walk `drivers`
+// (the vector changes under it); it holds driver 0, which is never removed
+void RackEngine::previewProcessFirstDriver (Driver& d, juce::AudioBuffer<float>& in, juce::AudioBuffer<float>& out)
+{
+    juce::AudioIODeviceCallbackContext context {};
+    d.audioDeviceIOCallbackWithContext (in.getArrayOfReadPointers(), in.getNumChannels(),
+                                        out.getArrayOfWritePointers(), out.getNumChannels(),
+                                        in.getNumSamples(), context);
+}
 #endif
 
 //==============================================================================

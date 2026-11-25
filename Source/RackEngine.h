@@ -334,5 +334,7 @@ private:
     void previewPrepare (double sr, int bs);
     const float* previewRackBuffer (int rack) const;
     void previewProcess (juce::AudioBuffer<float>& in, juce::AudioBuffer<float>& out);
+    void previewProcessFirstDriver (Driver& d, juce::AudioBuffer<float>& in, juce::AudioBuffer<float>& out);
+    Driver& previewFirstDriver() { return *drivers.front(); }
    #endif
 };
