@@ -9,6 +9,8 @@ once it has proven itself (Actions > Promote to stable). Services run stable.
 
 ## Unreleased
 
+- The Companion module is now version 0.1.1. The one in 0.31.0 still said 0.1.0, so Companion refused to import it over the old one (#73). The release steps now bump it whenever the module changes.
+
 - Console links: each rack's name now sits over its own column. In 0.31.0 every name was one column too far to the left, so the first hung over empty space and the last column had none (#70).
 
 ## 0.31.0 (2026-11-21)

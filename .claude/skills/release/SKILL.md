@@ -17,6 +17,9 @@ makes it the version for services.
 2. **Number.** 0.x.0 for new features, 0.x.y for fixes only. Stays 0.x.
 3. **Branch `release/<version>`:**
    - `CMakeLists.txt`: `project(LiveRack VERSION <version>)`
+   - **Companion module:** if anything in `companion-module-liverack-host/` changed since the last
+     release, bump `version` in its `package.json` (0.1.x). Companion refuses to import a module
+     whose version it already has, so an unchanged number means the owner can't update it.
    - `CHANGELOG.md`: rename `## Unreleased` to `## <version> (<date>)`, add a
      fresh empty `## Unreleased` above it. Tidy the entries into plain words
      for the owner (what they'll notice, not how it was done).

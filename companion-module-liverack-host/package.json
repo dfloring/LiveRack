@@ -1,6 +1,6 @@
 {
   "name": "companion-module-liverack-host",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Bitfocus Companion module for LiveRack, a live audio plugin host",
   "type": "module",
   "main": "src/main.js",
